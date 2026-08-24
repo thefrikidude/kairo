@@ -26,8 +26,25 @@ fn run() -> Result<()> {
         [command, action] if command == "daemon" && action == "start" => start_daemon(),
         [command, action] if command == "daemon" && action == "status" => daemon_status(),
         [command, action] if command == "daemon" && action == "stop" => stop_daemon(),
+        [command, action, name, flag, workspace]
+            if command == "agent" && action == "create" && flag == "--workspace" =>
+        {
+            create_agent(name.to_owned(), PathBuf::from(workspace))
+        }
+        [command, action] if command == "agent" && action == "list" => list_agents(),
+        [command, action, name, separator, command_parts @ ..]
+            if command == "agent"
+                && action == "start"
+                && separator == "--"
+                && !command_parts.is_empty() =>
+        {
+            start_agent(name.to_owned(), command_parts.to_vec())
+        }
+        [command, action, name] if command == "agent" && action == "stop" => {
+            stop_agent(name.to_owned())
+        }
         _ => Err(KairoError::InvalidArguments(
-            "use `kairo daemon start`, `kairo daemon status`, or `kairo daemon stop`".to_owned(),
+            "use `kairo daemon start|status|stop`, `kairo agent create <name> --workspace <path>`, `kairo agent start <name> -- <command> [args...]`, `kairo agent stop <name>`, or `kairo agent list`".to_owned(),
         )),
     }
 }
@@ -79,6 +96,73 @@ fn stop_daemon() -> Result<()> {
         Response::Error { message } => Err(KairoError::Protocol(message)),
         unexpected => {
             Err(KairoError::Protocol(format!("unexpected response to shutdown: {unexpected:?}")))
+        }
+    }
+}
+
+fn create_agent(name: String, workspace: PathBuf) -> Result<()> {
+    match send_request(Request::CreateAgent { name, workspace })? {
+        Response::AgentCreated { agent } => {
+            println!("Created agent `{}` ({})", agent.name, agent.id);
+            Ok(())
+        }
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => Err(KairoError::Protocol(format!(
+            "unexpected response to create agent: {unexpected:?}"
+        ))),
+    }
+}
+
+fn list_agents() -> Result<()> {
+    match send_request(Request::ListAgents)? {
+        Response::Agents { agents } if agents.is_empty() => {
+            println!("No agents registered.");
+            Ok(())
+        }
+        Response::Agents { agents } => {
+            for agent in agents {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    agent.name,
+                    agent.status,
+                    agent.adapter,
+                    agent.workspace.display()
+                );
+            }
+            Ok(())
+        }
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => {
+            Err(KairoError::Protocol(format!("unexpected response to list agents: {unexpected:?}")))
+        }
+    }
+}
+
+fn start_agent(name: String, command: Vec<String>) -> Result<()> {
+    match send_request(Request::StartAgent { name, command })? {
+        Response::AgentStarted { agent } => {
+            let pid = agent.pid.ok_or_else(|| {
+                KairoError::Protocol("daemon started an agent without a process ID".to_owned())
+            })?;
+            println!("Started agent `{}` (PID {pid})", agent.name);
+            Ok(())
+        }
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => {
+            Err(KairoError::Protocol(format!("unexpected response to start agent: {unexpected:?}")))
+        }
+    }
+}
+
+fn stop_agent(name: String) -> Result<()> {
+    match send_request(Request::StopAgent { name })? {
+        Response::AgentStopped { agent } => {
+            println!("Stopped agent `{}`", agent.name);
+            Ok(())
+        }
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => {
+            Err(KairoError::Protocol(format!("unexpected response to stop agent: {unexpected:?}")))
         }
     }
 }

@@ -12,7 +12,9 @@ This first milestone establishes the process boundary:
 - `kairo` is a short-lived terminal client that sends commands to the daemon.
 - `kairo-core` holds the shared protocol, runtime-path logic, and errors.
 
-There is deliberately no PTY management, database, agent model, or TUI yet.
+The daemon can also hold an in-memory registry of shell agents and supervise one command per
+agent. The registry is deliberately not persistent yet: restarting the daemon clears its agents.
+There is still no PTY management, database, terminal output capture, or TUI.
 
 ## Prerequisites
 
@@ -26,6 +28,10 @@ Build both binaries once, then use the CLI:
 cargo build --workspace
 target/debug/kairo daemon start
 target/debug/kairo daemon status
+target/debug/kairo agent create coder --workspace "$(pwd)"
+target/debug/kairo agent start coder -- sh -c 'sleep 30'
+target/debug/kairo agent list
+target/debug/kairo agent stop coder
 target/debug/kairo daemon stop
 ```
 
