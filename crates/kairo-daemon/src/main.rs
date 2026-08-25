@@ -141,6 +141,12 @@ fn attach_client(
                 }
             }
             AttachFrame::Detach => break,
+            AttachFrame::Resize { rows, cols } => {
+                if let Err(error) = agents.lock().map_err(lock_error)?.resize(&name, rows, cols) {
+                    break_with_error(&mut stream, error)?;
+                    break;
+                }
+            }
             AttachFrame::Output(_) => break,
         }
     }

@@ -158,7 +158,7 @@ impl AgentManager {
         thread::spawn(move || capture_output(reader, reader_output, reader_storage, agent_id));
         self.outputs_by_name.insert(name.to_owned(), output);
         self.sessions_by_name
-            .insert(name.to_owned(), PtySession { child, _master: pair.master, writer });
+            .insert(name.to_owned(), PtySession { child, master: pair.master, writer });
         Ok(snapshot)
     }
 
@@ -272,6 +272,19 @@ impl AgentManager {
         Ok(())
     }
 
+    pub fn resize(&mut self, name: &str, rows: u16, cols: u16) -> Result<()> {
+        if rows == 0 || cols == 0 {
+            return Ok(());
+        }
+        let session = self.sessions_by_name.get_mut(name).ok_or_else(|| {
+            KairoError::InvalidArguments(format!("agent `{name}` is not running"))
+        })?;
+        session
+            .master
+            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .map_err(runtime_error)
+    }
+
     pub fn attach(&mut self, name: &str) -> Result<Attachment> {
         self.refresh()?;
         if !self.sessions_by_name.contains_key(name) {
@@ -326,7 +339,7 @@ impl Default for AgentManager {
 
 struct PtySession {
     child: Box<dyn Child + Send + Sync>,
-    _master: Box<dyn MasterPty + Send>,
+    master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
 }
 

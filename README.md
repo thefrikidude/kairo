@@ -18,8 +18,8 @@ can close) without stopping the detached daemon or its agents. If the daemon its
 Kairo restores saved agents and logs on the next start; agents that were active become
 `interrupted` because their final result is unknown.
 
-There is still no PTY reattachment after a daemon crash, database inspection command, full
-terminal emulation inside the TUI, or support for agent adapters beyond shell and Codex.
+There is still no PTY reattachment after a daemon crash, database inspection command, or support
+for agent adapters beyond shell and Codex.
 
 ## Prerequisites
 
@@ -65,10 +65,12 @@ a time, but other agents and normal Kairo commands continue to work.
 
 ## TUI overview
 
-`kairo tui` opens Kairo's first terminal dashboard. It shows one tab per registered agent and the
-selected agent's retained log, refreshing from the daemon every 300 milliseconds. Use `Left`/
-`Right` (or `h`/`l`) to switch tabs, `r` to refresh immediately, and `q` to exit. This dashboard
-is intentionally a viewer for now; native interactive Codex panes come in a later milestone.
+`kairo tui` opens Kairo's terminal dashboard. It shows one tab per registered agent and the
+selected agent's retained log, refreshing from the daemon every 300 milliseconds. In dashboard
+mode, use `Left`/`Right` (or `h`/`l`) to switch tabs, `r` to refresh immediately, and `q` to exit.
+Press `Enter` on a running agent to open its live terminal in that tab. Kairo renders the native
+terminal screen, forwards your keys to the agent, and resizes the PTY when the Kairo window size
+changes. Press `Ctrl-]` to return to Kairo controls while leaving the agent running.
 
 ## Codex agents
 

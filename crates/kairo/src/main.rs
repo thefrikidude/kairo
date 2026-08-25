@@ -266,29 +266,7 @@ fn interrupt_agent(name: String) -> Result<()> {
 }
 
 fn attach_agent(name: String) -> Result<()> {
-    let paths = RuntimePaths::discover()?;
-    let mut stream =
-        UnixStream::connect(paths.socket_path()).map_err(|error| match error.kind() {
-            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
-                KairoError::DaemonUnavailable
-            }
-            _ => KairoError::Io(error),
-        })?;
-    let request = serde_json::to_string(&Request::AttachAgent { name: name.clone() })
-        .map_err(|error| KairoError::Protocol(format!("could not encode request: {error}")))?;
-    writeln!(stream, "{request}")?;
-    stream.flush()?;
-
-    match read_response_line(&mut stream)? {
-        Response::AgentAttached { .. } => {}
-        Response::Error { message } => return Err(KairoError::Protocol(message)),
-        unexpected => {
-            return Err(KairoError::Protocol(format!(
-                "unexpected response to attach agent: {unexpected:?}"
-            )));
-        }
-    }
-
+    let mut stream = connect_attachment(&name)?;
     println!("Attached to `{name}`. Codex owns input; press Ctrl-] to detach.");
     let output_stream = stream.try_clone()?;
     let stdout = Arc::new(Mutex::new(std::io::stdout()));
@@ -303,11 +281,37 @@ fn attach_agent(name: String) -> Result<()> {
     input_result
 }
 
+pub(crate) fn connect_attachment(name: &str) -> Result<UnixStream> {
+    let paths = RuntimePaths::discover()?;
+    let mut stream =
+        UnixStream::connect(paths.socket_path()).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
+                KairoError::DaemonUnavailable
+            }
+            _ => KairoError::Io(error),
+        })?;
+    let request = serde_json::to_string(&Request::AttachAgent { name: name.to_owned() })
+        .map_err(|error| KairoError::Protocol(format!("could not encode request: {error}")))?;
+    writeln!(stream, "{request}")?;
+    stream.flush()?;
+
+    match read_response_line(&mut stream)? {
+        Response::AgentAttached { .. } => Ok(stream),
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => Err(KairoError::Protocol(format!(
+            "unexpected response to attach agent: {unexpected:?}"
+        ))),
+    }
+}
+
 fn forward_attachment_input(stream: &mut UnixStream) -> Result<()> {
     loop {
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                 KeyCode::Char(']') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Ok(());
+                }
+                KeyCode::Char('5') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Ok(());
                 }
                 _ => {
@@ -324,7 +328,7 @@ fn forward_attachment_input(stream: &mut UnixStream) -> Result<()> {
     }
 }
 
-fn key_to_bytes(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
+pub(crate) fn key_to_bytes(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
     let bytes = match code {
         KeyCode::Char(character) if modifiers.contains(KeyModifiers::CONTROL) => {
             let character = character.to_ascii_lowercase();
