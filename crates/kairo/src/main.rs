@@ -46,8 +46,19 @@ fn run() -> Result<()> {
         [command, action, name] if command == "agent" && action == "logs" => {
             show_agent_logs(name.to_owned())
         }
+        [command, action, name, separator, input_parts @ ..]
+            if command == "agent"
+                && action == "send"
+                && separator == "--"
+                && !input_parts.is_empty() =>
+        {
+            send_agent_input(name.to_owned(), input_parts.join(" "))
+        }
+        [command, action, name] if command == "agent" && action == "interrupt" => {
+            interrupt_agent(name.to_owned())
+        }
         _ => Err(KairoError::InvalidArguments(
-            "use `kairo daemon start|status|stop`, `kairo agent create <name> --workspace <path>`, `kairo agent start <name> -- <command> [args...]`, `kairo agent stop <name>`, `kairo agent logs <name>`, or `kairo agent list`".to_owned(),
+            "use `kairo daemon start|status|stop`, `kairo agent create <name> --workspace <path>`, `kairo agent start <name> -- <command> [args...]`, `kairo agent stop|logs|interrupt <name>`, `kairo agent send <name> -- <text>`, or `kairo agent list`".to_owned(),
         )),
     }
 }
@@ -180,6 +191,32 @@ fn show_agent_logs(name: String) -> Result<()> {
         unexpected => {
             Err(KairoError::Protocol(format!("unexpected response to agent logs: {unexpected:?}")))
         }
+    }
+}
+
+fn send_agent_input(name: String, input: String) -> Result<()> {
+    match send_request(Request::SendAgentInput { name, input })? {
+        Response::AgentInputSent { name } => {
+            println!("Sent input to agent `{name}`");
+            Ok(())
+        }
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => Err(KairoError::Protocol(format!(
+            "unexpected response to send agent input: {unexpected:?}"
+        ))),
+    }
+}
+
+fn interrupt_agent(name: String) -> Result<()> {
+    match send_request(Request::InterruptAgent { name })? {
+        Response::AgentInterrupted { name } => {
+            println!("Interrupted agent `{name}`");
+            Ok(())
+        }
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => Err(KairoError::Protocol(format!(
+            "unexpected response to interrupt agent: {unexpected:?}"
+        ))),
     }
 }
 

@@ -14,6 +14,8 @@ pub enum Request {
     StartAgent { name: String, command: Vec<String> },
     StopAgent { name: String },
     GetAgentLogs { name: String },
+    SendAgentInput { name: String, input: String },
+    InterruptAgent { name: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,6 +28,8 @@ pub enum Response {
     AgentStopped { agent: Agent },
     Agents { agents: Vec<Agent> },
     AgentLogs { name: String, output: String },
+    AgentInputSent { name: String },
+    AgentInterrupted { name: String },
     Error { message: String },
 }
 

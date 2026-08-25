@@ -99,6 +99,14 @@ fn dispatch(request: Request, agents: &mut AgentManager) -> (Response, bool) {
             Ok(output) => (Response::AgentLogs { name, output }, false),
             Err(error) => (Response::Error { message: error.to_string() }, false),
         },
+        Request::SendAgentInput { name, input } => match agents.send_input(&name, &input) {
+            Ok(()) => (Response::AgentInputSent { name }, false),
+            Err(error) => (Response::Error { message: error.to_string() }, false),
+        },
+        Request::InterruptAgent { name } => match agents.interrupt(&name) {
+            Ok(()) => (Response::AgentInterrupted { name }, false),
+            Err(error) => (Response::Error { message: error.to_string() }, false),
+        },
     }
 }
 

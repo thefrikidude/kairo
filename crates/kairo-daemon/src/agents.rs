@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::Read,
+    io::{Read, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
     thread,
@@ -81,6 +81,7 @@ impl AgentManager {
             .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
             .map_err(runtime_error)?;
         let reader = pair.master.try_clone_reader().map_err(runtime_error)?;
+        let writer = pair.master.take_writer().map_err(runtime_error)?;
         let transcript = Arc::new(Mutex::new(Transcript::default()));
         let reader_transcript = Arc::clone(&transcript);
         thread::spawn(move || capture_output(reader, reader_transcript));
@@ -101,7 +102,8 @@ impl AgentManager {
         agent.updated_at_ms = now_millis();
         let snapshot = agent.clone();
         self.transcripts_by_name.insert(name.to_owned(), transcript);
-        self.sessions_by_name.insert(name.to_owned(), PtySession { child, _master: pair.master });
+        self.sessions_by_name
+            .insert(name.to_owned(), PtySession { child, _master: pair.master, writer });
         Ok(snapshot)
     }
 
@@ -158,6 +160,27 @@ impl AgentManager {
             .map(|transcript| transcript.text())
     }
 
+    pub fn send_input(&mut self, name: &str, input: &str) -> Result<()> {
+        self.refresh()?;
+        let session = self.sessions_by_name.get_mut(name).ok_or_else(|| {
+            KairoError::InvalidArguments(format!("agent `{name}` is not running"))
+        })?;
+        session.writer.write_all(input.as_bytes())?;
+        session.writer.write_all(b"\r")?;
+        session.writer.flush()?;
+        Ok(())
+    }
+
+    pub fn interrupt(&mut self, name: &str) -> Result<()> {
+        self.refresh()?;
+        let session = self.sessions_by_name.get_mut(name).ok_or_else(|| {
+            KairoError::InvalidArguments(format!("agent `{name}` is not running"))
+        })?;
+        session.writer.write_all(&[3])?;
+        session.writer.flush()?;
+        Ok(())
+    }
+
     fn agent_index(&self, name: &str) -> Result<usize> {
         self.indexes_by_name
             .get(name)
@@ -174,6 +197,7 @@ impl AgentManager {
 struct PtySession {
     child: Box<dyn Child + Send + Sync>,
     _master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
 }
 
 fn capture_output(mut reader: Box<dyn Read + Send>, transcript: Arc<Mutex<Transcript>>) {
@@ -309,5 +333,57 @@ mod tests {
         }
 
         panic!("PTY output was not captured before the deadline");
+    }
+
+    #[test]
+    fn sends_input_to_an_interactive_shell() {
+        let mut manager = AgentManager::default();
+        manager.create("coder".to_owned(), std::env::temp_dir()).expect("agent is created");
+        manager.start("coder", vec!["/bin/sh".to_owned()]).expect("shell starts");
+
+        manager.send_input("coder", "printf 'hello from input\\n'").expect("input is sent");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while std::time::Instant::now() < deadline {
+            if manager.logs("coder").expect("logs are readable").contains("hello from input") {
+                manager.stop("coder").expect("shell stops");
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        manager.stop("coder").expect("shell stops after failed assertion");
+        panic!("PTY input did not produce output before the deadline");
+    }
+
+    #[test]
+    fn rejects_input_for_a_non_running_agent() {
+        let mut manager = AgentManager::default();
+        manager.create("coder".to_owned(), std::env::temp_dir()).expect("agent is created");
+
+        assert!(manager.send_input("coder", "echo hello").is_err());
+        assert!(manager.interrupt("coder").is_err());
+    }
+
+    #[test]
+    fn interrupt_marks_a_foreground_process_failed() {
+        let mut manager = AgentManager::default();
+        manager.create("coder".to_owned(), std::env::temp_dir()).expect("agent is created");
+        manager
+            .start("coder", vec!["/bin/sh".to_owned(), "-c".to_owned(), "exec sleep 30".to_owned()])
+            .expect("process starts");
+
+        manager.interrupt("coder").expect("interrupt is sent");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while std::time::Instant::now() < deadline {
+            manager.refresh().expect("process state refreshes");
+            if manager.list()[0].status == AgentStatus::Failed {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        panic!("foreground process did not exit after Ctrl-C");
     }
 }
