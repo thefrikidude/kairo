@@ -10,10 +10,10 @@ use std::{
 use kairo_core::{Agent, AgentStatus, KairoError, Result};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
-use crate::transcript::Transcript;
+use crate::{storage::Storage, transcript::Transcript};
 
-#[derive(Default)]
 pub struct AgentManager {
+    storage: Storage,
     agents: Vec<Agent>,
     indexes_by_name: HashMap<String, usize>,
     sessions_by_name: HashMap<String, PtySession>,
@@ -22,6 +22,36 @@ pub struct AgentManager {
 }
 
 impl AgentManager {
+    pub fn load(storage: Storage) -> Result<Self> {
+        let mut manager = Self {
+            storage,
+            agents: Vec::new(),
+            indexes_by_name: HashMap::new(),
+            sessions_by_name: HashMap::new(),
+            transcripts_by_name: HashMap::new(),
+            next_id: 0,
+        };
+
+        for mut agent in manager.storage.load_agents()? {
+            if is_active(&agent.status) {
+                agent.status = AgentStatus::Interrupted;
+                agent.pid = None;
+                agent.updated_at_ms = now_millis();
+                manager.storage.save_agent(&agent)?;
+            }
+            let mut transcript = Transcript::default();
+            transcript.append(&manager.storage.events(&agent.id)?);
+            manager.indexes_by_name.insert(agent.name.clone(), manager.agents.len());
+            manager
+                .transcripts_by_name
+                .insert(agent.name.clone(), Arc::new(Mutex::new(transcript)));
+            manager.next_id += 1;
+            manager.agents.push(agent);
+        }
+
+        Ok(manager)
+    }
+
     pub fn create(&mut self, name: String, workspace: PathBuf) -> Result<Agent> {
         let name = name.trim().to_owned();
         if name.is_empty() {
@@ -56,6 +86,7 @@ impl AgentManager {
         self.transcripts_by_name
             .insert(agent.name.clone(), Arc::new(Mutex::new(Transcript::default())));
         self.agents.push(agent.clone());
+        self.storage.save_agent(&agent)?;
         Ok(agent)
     }
 
@@ -82,10 +113,6 @@ impl AgentManager {
             .map_err(runtime_error)?;
         let reader = pair.master.try_clone_reader().map_err(runtime_error)?;
         let writer = pair.master.take_writer().map_err(runtime_error)?;
-        let transcript = Arc::new(Mutex::new(Transcript::default()));
-        let reader_transcript = Arc::clone(&transcript);
-        thread::spawn(move || capture_output(reader, reader_transcript));
-
         let mut pty_command = CommandBuilder::new(program);
         pty_command.args(arguments);
         pty_command.cwd(workspace);
@@ -95,12 +122,19 @@ impl AgentManager {
             KairoError::Runtime("PTY child started without a process ID".to_owned())
         })?;
 
+        let transcript = Arc::new(Mutex::new(Transcript::default()));
         let agent = &mut self.agents[index];
         agent.command = Some(command);
         agent.pid = Some(pid);
         agent.status = AgentStatus::Working;
         agent.updated_at_ms = now_millis();
         let snapshot = agent.clone();
+        self.storage.clear_events(&snapshot.id)?;
+        self.storage.save_agent(&snapshot)?;
+        let reader_transcript = Arc::clone(&transcript);
+        let reader_storage = self.storage.clone();
+        let agent_id = snapshot.id.clone();
+        thread::spawn(move || capture_output(reader, reader_transcript, reader_storage, agent_id));
         self.transcripts_by_name.insert(name.to_owned(), transcript);
         self.sessions_by_name
             .insert(name.to_owned(), PtySession { child, _master: pair.master, writer });
@@ -119,7 +153,9 @@ impl AgentManager {
         agent.pid = None;
         agent.status = AgentStatus::Stopped;
         agent.updated_at_ms = now_millis();
-        Ok(agent.clone())
+        let snapshot = agent.clone();
+        self.storage.save_agent(&snapshot)?;
+        Ok(snapshot)
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
@@ -144,6 +180,8 @@ impl AgentManager {
             agent.pid = None;
             agent.status = if succeeded { AgentStatus::Completed } else { AgentStatus::Failed };
             agent.updated_at_ms = now_millis();
+            let snapshot = agent.clone();
+            self.storage.save_agent(&snapshot)?;
         }
         Ok(())
     }
@@ -162,6 +200,21 @@ impl AgentManager {
 
     pub fn send_input(&mut self, name: &str, input: &str) -> Result<()> {
         self.refresh()?;
+        if !self.sessions_by_name.contains_key(name) {
+            return Err(KairoError::InvalidArguments(format!("agent `{name}` is not running")));
+        }
+        let agent_id = self.agents[self.agent_index(name)?].id.clone();
+        let mut recorded_input = input.as_bytes().to_vec();
+        recorded_input.extend_from_slice(b"\r\n");
+        self.storage.append_event(&agent_id, &recorded_input)?;
+        if let Some(transcript) = self.transcripts_by_name.get(name) {
+            transcript
+                .lock()
+                .map_err(|_| {
+                    KairoError::Runtime(format!("agent `{name}` transcript lock is poisoned"))
+                })?
+                .append(&recorded_input);
+        }
         let session = self.sessions_by_name.get_mut(name).ok_or_else(|| {
             KairoError::InvalidArguments(format!("agent `{name}` is not running"))
         })?;
@@ -194,13 +247,26 @@ impl AgentManager {
     }
 }
 
+#[cfg(test)]
+impl Default for AgentManager {
+    fn default() -> Self {
+        Self::load(Storage::in_memory().expect("in-memory storage opens"))
+            .expect("agent manager loads from in-memory storage")
+    }
+}
+
 struct PtySession {
     child: Box<dyn Child + Send + Sync>,
     _master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
 }
 
-fn capture_output(mut reader: Box<dyn Read + Send>, transcript: Arc<Mutex<Transcript>>) {
+fn capture_output(
+    mut reader: Box<dyn Read + Send>,
+    transcript: Arc<Mutex<Transcript>>,
+    storage: Storage,
+    agent_id: String,
+) {
     let mut buffer = [0_u8; 4096];
     loop {
         match reader.read(&mut buffer) {
@@ -208,12 +274,26 @@ fn capture_output(mut reader: Box<dyn Read + Send>, transcript: Arc<Mutex<Transc
             Ok(count) => {
                 if let Ok(mut transcript) = transcript.lock() {
                     transcript.append(&buffer[..count]);
+                    if storage.append_event(&agent_id, &buffer[..count]).is_err() {
+                        break;
+                    }
                 } else {
                     break;
                 }
             }
         }
     }
+}
+
+fn is_active(status: &AgentStatus) -> bool {
+    matches!(
+        status,
+        AgentStatus::Starting
+            | AgentStatus::Working
+            | AgentStatus::Waiting
+            | AgentStatus::Idle
+            | AgentStatus::Blocked
+    )
 }
 
 fn runtime_error(error: impl std::fmt::Display) -> KairoError {
@@ -235,7 +315,9 @@ mod tests {
 
     use kairo_core::AgentStatus;
 
-    use super::AgentManager;
+    use crate::{storage::Storage, transcript::TRANSCRIPT_CAPACITY};
+
+    use super::{AgentManager, now_millis};
 
     #[test]
     fn creates_a_stopped_shell_agent() {
@@ -385,5 +467,69 @@ mod tests {
         }
 
         panic!("foreground process did not exit after Ctrl-C");
+    }
+
+    #[test]
+    fn reload_marks_an_active_agent_interrupted_and_retains_history() {
+        let storage = Storage::in_memory().expect("storage opens");
+        let mut manager = AgentManager::load(storage.clone()).expect("manager loads");
+        let created =
+            manager.create("coder".to_owned(), std::env::temp_dir()).expect("agent is created");
+        let mut active = created.clone();
+        active.status = AgentStatus::Working;
+        active.pid = Some(42);
+        active.updated_at_ms = now_millis();
+        storage.save_agent(&active).expect("active agent saves");
+        storage.append_event(&created.id, b"build the project\r\n").expect("prompt saves");
+        storage.append_event(&created.id, b"finished\r\n").expect("output saves");
+
+        let restored = AgentManager::load(storage).expect("manager restores");
+        assert_eq!(restored.list()[0].status, AgentStatus::Interrupted);
+        assert_eq!(restored.list()[0].pid, None);
+        assert_eq!(
+            restored.logs("coder").expect("logs restore"),
+            "build the project\r\nfinished\r\n"
+        );
+    }
+
+    #[test]
+    fn starting_an_agent_replaces_its_old_persisted_history() {
+        let storage = Storage::in_memory().expect("storage opens");
+        let mut manager = AgentManager::load(storage.clone()).expect("manager loads");
+        let agent =
+            manager.create("coder".to_owned(), std::env::temp_dir()).expect("agent is created");
+        storage.append_event(&agent.id, b"old output\r\n").expect("history saves");
+
+        manager
+            .start("coder", vec!["/bin/sh".to_owned(), "-c".to_owned(), "printf new".to_owned()])
+            .expect("agent starts");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while std::time::Instant::now() < deadline {
+            if manager.logs("coder").expect("logs are readable").contains("new") {
+                assert!(!manager.logs("coder").expect("logs are readable").contains("old output"));
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        panic!("new session output was not captured before the deadline");
+    }
+
+    #[test]
+    fn persisted_history_remains_bounded() {
+        let storage = Storage::in_memory().expect("storage opens");
+        let mut manager = AgentManager::load(storage.clone()).expect("manager loads");
+        let agent =
+            manager.create("coder".to_owned(), std::env::temp_dir()).expect("agent is created");
+        let old = vec![b'a'; TRANSCRIPT_CAPACITY / 2 + 1];
+        let newest = vec![b'b'; TRANSCRIPT_CAPACITY / 2 + 1];
+        storage.append_event(&agent.id, &old).expect("old output saves");
+        storage.append_event(&agent.id, &newest).expect("new output saves");
+
+        let restored = AgentManager::load(storage).expect("manager restores");
+        let logs = restored.logs("coder").expect("logs restore");
+        assert!(logs.len() <= TRANSCRIPT_CAPACITY);
+        assert!(logs.chars().all(|character| character == 'b'));
     }
 }

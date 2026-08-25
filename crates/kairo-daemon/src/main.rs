@@ -1,4 +1,5 @@
 mod agents;
+mod storage;
 mod transcript;
 
 use std::{
@@ -11,6 +12,7 @@ use std::{
 use kairo_core::{KairoError, Request, Response, Result, RuntimePaths};
 
 use agents::AgentManager;
+use storage::Storage;
 
 fn main() -> ExitCode {
     match run() {
@@ -40,7 +42,8 @@ fn run() -> Result<()> {
 
     let listener = UnixListener::bind(&socket_path)?;
     let _socket_guard = SocketGuard { path: socket_path };
-    let mut agents = AgentManager::default();
+    let storage = Storage::open(&paths.database_path())?;
+    let mut agents = AgentManager::load(storage)?;
 
     for connection in listener.incoming() {
         let stream = connection?;

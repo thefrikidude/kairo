@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 kairo-core = { path = "../kairo-core" }
 portable-pty = "0.9"
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde_json.workspace = true

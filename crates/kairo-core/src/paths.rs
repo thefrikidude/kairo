@@ -34,6 +34,10 @@ impl RuntimePaths {
     pub fn socket_path(&self) -> PathBuf {
         self.root.join("runtime.sock")
     }
+
+    pub fn database_path(&self) -> PathBuf {
+        self.root.join("kairo.sqlite3")
+    }
 }
 
 fn home_dir() -> Result<PathBuf> {

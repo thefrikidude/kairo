@@ -2,6 +2,7 @@ use std::{
     env,
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
+    os::unix::process::CommandExt,
     path::PathBuf,
     process::{Command, ExitCode, Stdio},
     thread,
@@ -70,12 +71,17 @@ fn start_daemon() -> Result<()> {
     }
 
     let daemon = daemon_binary_path()?;
-    Command::new(daemon)
-        .arg("serve")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+    let mut command = Command::new(daemon);
+    command.arg("serve").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    command.spawn()?;
 
     for _ in 0..30 {
         thread::sleep(Duration::from_millis(50));

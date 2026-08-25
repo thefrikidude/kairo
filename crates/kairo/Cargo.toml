@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 kairo-core = { path = "../kairo-core" }
 serde_json.workspace = true
+libc.workspace = true

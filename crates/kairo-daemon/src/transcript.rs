@@ -29,8 +29,11 @@ impl Transcript {
     }
 
     pub fn text(&self) -> String {
-        let bytes = self.bytes.iter().copied().collect::<Vec<_>>();
-        String::from_utf8_lossy(&bytes).into_owned()
+        String::from_utf8_lossy(&self.bytes()).into_owned()
+    }
+
+    pub fn bytes(&self) -> Vec<u8> {
+        self.bytes.iter().copied().collect()
     }
 }
 
