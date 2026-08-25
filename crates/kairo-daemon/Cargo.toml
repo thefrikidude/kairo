@@ -6,4 +6,5 @@ license.workspace = true
 
 [dependencies]
 kairo-core = { path = "../kairo-core" }
+portable-pty = "0.9"
 serde_json.workspace = true

@@ -4,6 +4,7 @@ use std::{fmt, io};
 pub enum KairoError {
     Io(io::Error),
     Protocol(String),
+    Runtime(String),
     InvalidArguments(String),
     DaemonUnavailable,
     DaemonAlreadyRunning,
@@ -15,6 +16,7 @@ impl fmt::Display for KairoError {
         match self {
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::Protocol(message) => write!(formatter, "protocol error: {message}"),
+            Self::Runtime(message) => write!(formatter, "runtime error: {message}"),
             Self::InvalidArguments(message) => write!(formatter, "invalid arguments: {message}"),
             Self::DaemonUnavailable => write!(formatter, "Kairo daemon is not running"),
             Self::DaemonAlreadyRunning => write!(formatter, "Kairo daemon is already running"),

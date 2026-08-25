@@ -1,4 +1,5 @@
 mod agents;
+mod transcript;
 
 use std::{
     fs,
@@ -92,6 +93,10 @@ fn dispatch(request: Request, agents: &mut AgentManager) -> (Response, bool) {
         },
         Request::StopAgent { name } => match agents.stop(&name) {
             Ok(agent) => (Response::AgentStopped { agent }, false),
+            Err(error) => (Response::Error { message: error.to_string() }, false),
+        },
+        Request::GetAgentLogs { name } => match agents.logs(&name) {
+            Ok(output) => (Response::AgentLogs { name, output }, false),
             Err(error) => (Response::Error { message: error.to_string() }, false),
         },
     }

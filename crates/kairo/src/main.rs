@@ -43,8 +43,11 @@ fn run() -> Result<()> {
         [command, action, name] if command == "agent" && action == "stop" => {
             stop_agent(name.to_owned())
         }
+        [command, action, name] if command == "agent" && action == "logs" => {
+            show_agent_logs(name.to_owned())
+        }
         _ => Err(KairoError::InvalidArguments(
-            "use `kairo daemon start|status|stop`, `kairo agent create <name> --workspace <path>`, `kairo agent start <name> -- <command> [args...]`, `kairo agent stop <name>`, or `kairo agent list`".to_owned(),
+            "use `kairo daemon start|status|stop`, `kairo agent create <name> --workspace <path>`, `kairo agent start <name> -- <command> [args...]`, `kairo agent stop <name>`, `kairo agent logs <name>`, or `kairo agent list`".to_owned(),
         )),
     }
 }
@@ -163,6 +166,19 @@ fn stop_agent(name: String) -> Result<()> {
         Response::Error { message } => Err(KairoError::Protocol(message)),
         unexpected => {
             Err(KairoError::Protocol(format!("unexpected response to stop agent: {unexpected:?}")))
+        }
+    }
+}
+
+fn show_agent_logs(name: String) -> Result<()> {
+    match send_request(Request::GetAgentLogs { name })? {
+        Response::AgentLogs { output, .. } => {
+            print!("{output}");
+            Ok(())
+        }
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => {
+            Err(KairoError::Protocol(format!("unexpected response to agent logs: {unexpected:?}")))
         }
     }
 }

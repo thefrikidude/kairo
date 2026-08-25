@@ -1,17 +1,23 @@
 use std::{
     collections::HashMap,
+    io::Read,
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    sync::{Arc, Mutex},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use kairo_core::{Agent, AgentStatus, KairoError, Result};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+
+use crate::transcript::Transcript;
 
 #[derive(Default)]
 pub struct AgentManager {
     agents: Vec<Agent>,
     indexes_by_name: HashMap<String, usize>,
-    children_by_name: HashMap<String, Child>,
+    sessions_by_name: HashMap<String, PtySession>,
+    transcripts_by_name: HashMap<String, Arc<Mutex<Transcript>>>,
     next_id: u64,
 }
 
@@ -47,6 +53,8 @@ impl AgentManager {
         };
 
         self.indexes_by_name.insert(name, self.agents.len());
+        self.transcripts_by_name
+            .insert(agent.name.clone(), Arc::new(Mutex::new(Transcript::default())));
         self.agents.push(agent.clone());
         Ok(agent)
     }
@@ -60,7 +68,7 @@ impl AgentManager {
         if command.is_empty() {
             return Err(KairoError::InvalidArguments("agent command cannot be empty".to_owned()));
         }
-        if self.children_by_name.contains_key(name) {
+        if self.sessions_by_name.contains_key(name) {
             return Err(KairoError::InvalidArguments(format!("agent `{name}` is already running")));
         }
 
@@ -68,14 +76,23 @@ impl AgentManager {
         let workspace = self.agents[index].workspace.clone();
         let program = &command[0];
         let arguments = &command[1..];
-        let child = Command::new(program)
-            .args(arguments)
-            .current_dir(workspace)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        let pid = child.id();
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .map_err(runtime_error)?;
+        let reader = pair.master.try_clone_reader().map_err(runtime_error)?;
+        let transcript = Arc::new(Mutex::new(Transcript::default()));
+        let reader_transcript = Arc::clone(&transcript);
+        thread::spawn(move || capture_output(reader, reader_transcript));
+
+        let mut pty_command = CommandBuilder::new(program);
+        pty_command.args(arguments);
+        pty_command.cwd(workspace);
+        let child = pair.slave.spawn_command(pty_command).map_err(runtime_error)?;
+        drop(pair.slave);
+        let pid = child.process_id().ok_or_else(|| {
+            KairoError::Runtime("PTY child started without a process ID".to_owned())
+        })?;
 
         let agent = &mut self.agents[index];
         agent.command = Some(command);
@@ -83,17 +100,18 @@ impl AgentManager {
         agent.status = AgentStatus::Working;
         agent.updated_at_ms = now_millis();
         let snapshot = agent.clone();
-        self.children_by_name.insert(name.to_owned(), child);
+        self.transcripts_by_name.insert(name.to_owned(), transcript);
+        self.sessions_by_name.insert(name.to_owned(), PtySession { child, _master: pair.master });
         Ok(snapshot)
     }
 
     pub fn stop(&mut self, name: &str) -> Result<Agent> {
         self.refresh()?;
-        let mut child = self.children_by_name.remove(name).ok_or_else(|| {
+        let mut session = self.sessions_by_name.remove(name).ok_or_else(|| {
             KairoError::InvalidArguments(format!("agent `{name}` is not running"))
         })?;
-        child.kill()?;
-        let _ = child.wait()?;
+        session.child.kill().map_err(runtime_error)?;
+        let _ = session.child.wait().map_err(runtime_error)?;
 
         let agent = self.agent_mut(name)?;
         agent.pid = None;
@@ -103,7 +121,7 @@ impl AgentManager {
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
-        let names = self.children_by_name.keys().cloned().collect::<Vec<_>>();
+        let names = self.sessions_by_name.keys().cloned().collect::<Vec<_>>();
         for name in names {
             self.stop(&name)?;
         }
@@ -112,20 +130,32 @@ impl AgentManager {
 
     pub fn refresh(&mut self) -> Result<()> {
         let mut finished = Vec::new();
-        for (name, child) in &mut self.children_by_name {
-            if let Some(exit_status) = child.try_wait()? {
+        for (name, session) in &mut self.sessions_by_name {
+            if let Some(exit_status) = session.child.try_wait().map_err(runtime_error)? {
                 finished.push((name.clone(), exit_status.success()));
             }
         }
 
         for (name, succeeded) in finished {
-            self.children_by_name.remove(&name);
+            self.sessions_by_name.remove(&name);
             let agent = self.agent_mut(&name)?;
             agent.pid = None;
             agent.status = if succeeded { AgentStatus::Completed } else { AgentStatus::Failed };
             agent.updated_at_ms = now_millis();
         }
         Ok(())
+    }
+
+    pub fn logs(&self, name: &str) -> Result<String> {
+        self.agent_index(name)?;
+        let transcript = self
+            .transcripts_by_name
+            .get(name)
+            .ok_or_else(|| KairoError::Runtime(format!("agent `{name}` has no transcript")))?;
+        transcript
+            .lock()
+            .map_err(|_| KairoError::Runtime(format!("agent `{name}` transcript lock is poisoned")))
+            .map(|transcript| transcript.text())
     }
 
     fn agent_index(&self, name: &str) -> Result<usize> {
@@ -139,6 +169,31 @@ impl AgentManager {
         let index = self.agent_index(name)?;
         Ok(&mut self.agents[index])
     }
+}
+
+struct PtySession {
+    child: Box<dyn Child + Send + Sync>,
+    _master: Box<dyn MasterPty + Send>,
+}
+
+fn capture_output(mut reader: Box<dyn Read + Send>, transcript: Arc<Mutex<Transcript>>) {
+    let mut buffer = [0_u8; 4096];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => {
+                if let Ok(mut transcript) = transcript.lock() {
+                    transcript.append(&buffer[..count]);
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn runtime_error(error: impl std::fmt::Display) -> KairoError {
+    KairoError::Runtime(error.to_string())
 }
 
 fn now_millis() -> u64 {
@@ -227,5 +282,32 @@ mod tests {
         let stopped = manager.stop("coder").expect("process stops");
         assert_eq!(stopped.status, AgentStatus::Stopped);
         assert_eq!(stopped.pid, None);
+    }
+
+    #[test]
+    fn captures_output_after_a_process_completes() {
+        let mut manager = AgentManager::default();
+        manager.create("coder".to_owned(), std::env::temp_dir()).expect("agent is created");
+        manager
+            .start(
+                "coder",
+                vec![
+                    "/bin/sh".to_owned(),
+                    "-c".to_owned(),
+                    "printf 'hello from pty\\n'".to_owned(),
+                ],
+            )
+            .expect("process starts");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while std::time::Instant::now() < deadline {
+            manager.refresh().expect("process state refreshes");
+            if manager.logs("coder").expect("logs are readable").contains("hello from pty") {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        panic!("PTY output was not captured before the deadline");
     }
 }

@@ -31,6 +31,7 @@ target/debug/kairo daemon status
 target/debug/kairo agent create coder --workspace "$(pwd)"
 target/debug/kairo agent start coder -- sh -c 'sleep 30'
 target/debug/kairo agent list
+target/debug/kairo agent logs coder
 target/debug/kairo agent stop coder
 target/debug/kairo daemon stop
 ```
