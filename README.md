@@ -38,6 +38,7 @@ target/debug/kairo agent start coder -- sh -c 'sleep 30'
 target/debug/kairo agent list
 target/debug/kairo agent logs coder
 target/debug/kairo agent send coder -- "echo hello"
+target/debug/kairo agent attach coder
 target/debug/kairo agent interrupt coder
 target/debug/kairo agent stop coder
 target/debug/kairo daemon stop
@@ -50,6 +51,14 @@ useful for development and tests.
 ```bash
 KAIRO_HOME=/tmp/kairo-dev target/debug/kairo daemon start
 ```
+
+## Attach to an agent
+
+`kairo agent attach <name>` opens a live terminal view of one running agent. Kairo shows the
+retained transcript, then streams new PTY output. Your typed text stays in a local buffer until
+you press Enter; Enter sends the complete line to the agent. Press `Ctrl-C` to interrupt the
+agent or `Ctrl-]` to detach while leaving it running. One agent can be attached from one terminal
+at a time, but other agents and normal Kairo commands continue to work.
 
 ## Development checks
 

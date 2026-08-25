@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        mpsc::{Receiver, SyncSender, sync_channel},
+    },
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -17,7 +20,7 @@ pub struct AgentManager {
     agents: Vec<Agent>,
     indexes_by_name: HashMap<String, usize>,
     sessions_by_name: HashMap<String, PtySession>,
-    transcripts_by_name: HashMap<String, Arc<Mutex<Transcript>>>,
+    outputs_by_name: HashMap<String, Arc<Mutex<AgentOutput>>>,
     next_id: u64,
 }
 
@@ -28,7 +31,7 @@ impl AgentManager {
             agents: Vec::new(),
             indexes_by_name: HashMap::new(),
             sessions_by_name: HashMap::new(),
-            transcripts_by_name: HashMap::new(),
+            outputs_by_name: HashMap::new(),
             next_id: 0,
         };
 
@@ -43,8 +46,8 @@ impl AgentManager {
             transcript.append(&manager.storage.events(&agent.id)?);
             manager.indexes_by_name.insert(agent.name.clone(), manager.agents.len());
             manager
-                .transcripts_by_name
-                .insert(agent.name.clone(), Arc::new(Mutex::new(transcript)));
+                .outputs_by_name
+                .insert(agent.name.clone(), Arc::new(Mutex::new(AgentOutput::new(transcript))));
             manager.next_id += 1;
             manager.agents.push(agent);
         }
@@ -83,8 +86,10 @@ impl AgentManager {
         };
 
         self.indexes_by_name.insert(name, self.agents.len());
-        self.transcripts_by_name
-            .insert(agent.name.clone(), Arc::new(Mutex::new(Transcript::default())));
+        self.outputs_by_name.insert(
+            agent.name.clone(),
+            Arc::new(Mutex::new(AgentOutput::new(Transcript::default()))),
+        );
         self.agents.push(agent.clone());
         self.storage.save_agent(&agent)?;
         Ok(agent)
@@ -122,7 +127,7 @@ impl AgentManager {
             KairoError::Runtime("PTY child started without a process ID".to_owned())
         })?;
 
-        let transcript = Arc::new(Mutex::new(Transcript::default()));
+        let output = Arc::new(Mutex::new(AgentOutput::new(Transcript::default())));
         let agent = &mut self.agents[index];
         agent.command = Some(command);
         agent.pid = Some(pid);
@@ -131,11 +136,11 @@ impl AgentManager {
         let snapshot = agent.clone();
         self.storage.clear_events(&snapshot.id)?;
         self.storage.save_agent(&snapshot)?;
-        let reader_transcript = Arc::clone(&transcript);
+        let reader_output = Arc::clone(&output);
         let reader_storage = self.storage.clone();
         let agent_id = snapshot.id.clone();
-        thread::spawn(move || capture_output(reader, reader_transcript, reader_storage, agent_id));
-        self.transcripts_by_name.insert(name.to_owned(), transcript);
+        thread::spawn(move || capture_output(reader, reader_output, reader_storage, agent_id));
+        self.outputs_by_name.insert(name.to_owned(), output);
         self.sessions_by_name
             .insert(name.to_owned(), PtySession { child, _master: pair.master, writer });
         Ok(snapshot)
@@ -188,14 +193,14 @@ impl AgentManager {
 
     pub fn logs(&self, name: &str) -> Result<String> {
         self.agent_index(name)?;
-        let transcript = self
-            .transcripts_by_name
+        let output = self
+            .outputs_by_name
             .get(name)
             .ok_or_else(|| KairoError::Runtime(format!("agent `{name}` has no transcript")))?;
-        transcript
+        output
             .lock()
             .map_err(|_| KairoError::Runtime(format!("agent `{name}` transcript lock is poisoned")))
-            .map(|transcript| transcript.text())
+            .map(|output| output.transcript.text())
     }
 
     pub fn send_input(&mut self, name: &str, input: &str) -> Result<()> {
@@ -207,12 +212,13 @@ impl AgentManager {
         let mut recorded_input = input.as_bytes().to_vec();
         recorded_input.extend_from_slice(b"\r\n");
         self.storage.append_event(&agent_id, &recorded_input)?;
-        if let Some(transcript) = self.transcripts_by_name.get(name) {
-            transcript
+        if let Some(output) = self.outputs_by_name.get(name) {
+            output
                 .lock()
                 .map_err(|_| {
                     KairoError::Runtime(format!("agent `{name}` transcript lock is poisoned"))
                 })?
+                .transcript
                 .append(&recorded_input);
         }
         let session = self.sessions_by_name.get_mut(name).ok_or_else(|| {
@@ -232,6 +238,37 @@ impl AgentManager {
         session.writer.write_all(&[3])?;
         session.writer.flush()?;
         Ok(())
+    }
+
+    pub fn attach(&mut self, name: &str) -> Result<Attachment> {
+        self.refresh()?;
+        if !self.sessions_by_name.contains_key(name) {
+            return Err(KairoError::InvalidArguments(format!("agent `{name}` is not running")));
+        }
+        let output = self
+            .outputs_by_name
+            .get(name)
+            .ok_or_else(|| KairoError::Runtime(format!("agent `{name}` has no transcript")))?;
+        let mut output = output.lock().map_err(|_| {
+            KairoError::Runtime(format!("agent `{name}` transcript lock is poisoned"))
+        })?;
+        if output.subscriber.is_some() {
+            return Err(KairoError::InvalidArguments(format!(
+                "agent `{name}` is already attached"
+            )));
+        }
+        let (sender, receiver) = sync_channel(64);
+        let initial_output = output.transcript.bytes();
+        output.subscriber = Some(sender);
+        Ok(Attachment { initial_output, receiver })
+    }
+
+    pub fn detach(&mut self, name: &str) {
+        if let Some(output) = self.outputs_by_name.get(name)
+            && let Ok(mut output) = output.lock()
+        {
+            output.subscriber = None;
+        }
     }
 
     fn agent_index(&self, name: &str) -> Result<usize> {
@@ -261,9 +298,25 @@ struct PtySession {
     writer: Box<dyn Write + Send>,
 }
 
+pub struct Attachment {
+    pub initial_output: Vec<u8>,
+    pub receiver: Receiver<Vec<u8>>,
+}
+
+struct AgentOutput {
+    transcript: Transcript,
+    subscriber: Option<SyncSender<Vec<u8>>>,
+}
+
+impl AgentOutput {
+    fn new(transcript: Transcript) -> Self {
+        Self { transcript, subscriber: None }
+    }
+}
+
 fn capture_output(
     mut reader: Box<dyn Read + Send>,
-    transcript: Arc<Mutex<Transcript>>,
+    output: Arc<Mutex<AgentOutput>>,
     storage: Storage,
     agent_id: String,
 ) {
@@ -272,13 +325,20 @@ fn capture_output(
         match reader.read(&mut buffer) {
             Ok(0) | Err(_) => break,
             Ok(count) => {
-                if let Ok(mut transcript) = transcript.lock() {
-                    transcript.append(&buffer[..count]);
-                    if storage.append_event(&agent_id, &buffer[..count]).is_err() {
-                        break;
-                    }
+                let subscriber = if let Ok(mut output) = output.lock() {
+                    output.transcript.append(&buffer[..count]);
+                    output.subscriber.clone()
                 } else {
                     break;
+                };
+                if storage.append_event(&agent_id, &buffer[..count]).is_err() {
+                    break;
+                }
+                if let Some(sender) = subscriber
+                    && sender.send(buffer[..count].to_vec()).is_err()
+                    && let Ok(mut output) = output.lock()
+                {
+                    output.subscriber = None;
                 }
             }
         }
@@ -531,5 +591,21 @@ mod tests {
         let logs = restored.logs("coder").expect("logs restore");
         assert!(logs.len() <= TRANSCRIPT_CAPACITY);
         assert!(logs.chars().all(|character| character == 'b'));
+    }
+
+    #[test]
+    fn allows_only_one_attachment_per_running_agent() {
+        let mut manager = AgentManager::default();
+        manager.create("coder".to_owned(), std::env::temp_dir()).expect("agent is created");
+        manager.start("coder", vec!["/bin/sh".to_owned()]).expect("shell starts");
+
+        let first = manager.attach("coder").expect("first attachment succeeds");
+        assert!(manager.attach("coder").is_err());
+        drop(first);
+        manager.detach("coder");
+        let second = manager.attach("coder").expect("attachment succeeds after detach");
+        drop(second);
+        manager.detach("coder");
+        manager.stop("coder").expect("shell stops");
     }
 }

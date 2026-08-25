@@ -16,6 +16,7 @@ pub enum Request {
     GetAgentLogs { name: String },
     SendAgentInput { name: String, input: String },
     InterruptAgent { name: String },
+    AttachAgent { name: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -30,6 +31,7 @@ pub enum Response {
     AgentLogs { name: String, output: String },
     AgentInputSent { name: String },
     AgentInterrupted { name: String },
+    AgentAttached { name: String },
     Error { message: String },
 }
 
