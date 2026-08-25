@@ -35,6 +35,7 @@ fn run() -> Result<()> {
         [command, action] if command == "daemon" && action == "start" => start_daemon(),
         [command, action] if command == "daemon" && action == "status" => daemon_status(),
         [command, action] if command == "daemon" && action == "stop" => stop_daemon(),
+        [command] if command == "tui" => tui::run(),
         [command, action, name, flag, workspace]
             if command == "agent" && action == "create" && flag == "--workspace" =>
         {
@@ -81,7 +82,7 @@ fn run() -> Result<()> {
             attach_agent(name.to_owned())
         }
         _ => Err(KairoError::InvalidArguments(
-            "use `kairo daemon start|status|stop`, `kairo agent create <name> --adapter codex --workspace <path>`, `kairo agent start <name> [-- <command> [args...]]`, `kairo agent stop|logs|interrupt|attach <name>`, `kairo agent send <name> -- <text>`, or `kairo agent list`".to_owned(),
+            "use `kairo tui`, `kairo daemon start|status|stop`, `kairo agent create <name> --adapter codex --workspace <path>`, `kairo agent start <name> [-- <command> [args...]]`, `kairo agent stop|logs|interrupt|attach <name>`, `kairo agent send <name> -- <text>`, or `kairo agent list`".to_owned(),
         )),
     }
 }
@@ -382,7 +383,7 @@ impl Drop for RawModeGuard {
     }
 }
 
-fn send_request(request: Request) -> Result<Response> {
+pub(crate) fn send_request(request: Request) -> Result<Response> {
     let paths = RuntimePaths::discover()?;
     let mut stream =
         UnixStream::connect(paths.socket_path()).map_err(|error| match error.kind() {
@@ -430,3 +431,4 @@ fn daemon_binary_path() -> Result<PathBuf> {
         current_binary.parent().ok_or(KairoError::DaemonBinaryNotFound)?.join("kairo-daemon");
     daemon.exists().then_some(daemon).ok_or(KairoError::DaemonBinaryNotFound)
 }
+mod tui;

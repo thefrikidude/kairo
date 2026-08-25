@@ -9,3 +9,4 @@ kairo-core = { path = "../kairo-core" }
 serde_json.workspace = true
 libc.workspace = true
 crossterm = "0.29"
+ratatui = "0.30"
