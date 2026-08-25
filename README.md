@@ -18,8 +18,8 @@ can close) without stopping the detached daemon or its agents. If the daemon its
 Kairo restores saved agents and logs on the next start; agents that were active become
 `interrupted` because their final result is unknown.
 
-There is still no PTY reattachment after a daemon crash, interactive attachment, database
-inspection command, or TUI.
+There is still no PTY reattachment after a daemon crash, database inspection command, tabbed
+TUI, or support for agent adapters beyond shell and Codex.
 
 ## Prerequisites
 
@@ -35,6 +35,8 @@ target/debug/kairo daemon start
 target/debug/kairo daemon status
 target/debug/kairo agent create coder --workspace "$(pwd)"
 target/debug/kairo agent start coder -- sh -c 'sleep 30'
+target/debug/kairo agent create codex-worker --adapter codex --workspace "$(pwd)"
+target/debug/kairo agent start codex-worker
 target/debug/kairo agent list
 target/debug/kairo agent logs coder
 target/debug/kairo agent send coder -- "echo hello"
@@ -55,10 +57,17 @@ KAIRO_HOME=/tmp/kairo-dev target/debug/kairo daemon start
 ## Attach to an agent
 
 `kairo agent attach <name>` opens a live terminal view of one running agent. Kairo shows the
-retained transcript, then streams new PTY output. Your typed text stays in a local buffer until
-you press Enter; Enter sends the complete line to the agent. Press `Ctrl-C` to interrupt the
-agent or `Ctrl-]` to detach while leaving it running. One agent can be attached from one terminal
-at a time, but other agents and normal Kairo commands continue to work.
+retained transcript, then streams new PTY output. Input is forwarded to the native agent UI, so
+Codex handles prompt editing, Enter submission, shortcuts, and approval prompts itself. Press
+`Ctrl-]` to detach while leaving the agent running. One agent can be attached from one terminal at
+a time, but other agents and normal Kairo commands continue to work.
+
+## Codex agents
+
+Create a Codex session with `--adapter codex`, then start it without supplying a shell command.
+Kairo launches the locally installed `codex` CLI with its normal terminal interface and preserves
+your existing Codex login, approval, sandbox, and model configuration. Kairo does not add unsafe
+Codex flags or provide a model account on its own.
 
 ## Development checks
 

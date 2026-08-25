@@ -9,9 +9,10 @@ use crate::Agent;
 pub enum Request {
     Ping,
     Shutdown,
-    CreateAgent { name: String, workspace: PathBuf },
+    CreateAgent { name: String, adapter: String, workspace: PathBuf },
     ListAgents,
     StartAgent { name: String, command: Vec<String> },
+    StartConfiguredAgent { name: String },
     StopAgent { name: String },
     GetAgentLogs { name: String },
     SendAgentInput { name: String, input: String },
@@ -56,6 +57,7 @@ mod tests {
     fn agent_messages_round_trip_as_json() {
         let request = Request::CreateAgent {
             name: "coder".to_owned(),
+            adapter: "shell".to_owned(),
             workspace: PathBuf::from("/tmp/kairo"),
         };
         let encoded_request = serde_json::to_string(&request).expect("request serializes");

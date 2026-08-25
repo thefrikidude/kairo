@@ -11,7 +11,7 @@ const MAX_FRAME_SIZE: usize = 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachFrame {
     Output(Vec<u8>),
-    Input(String),
+    Input(Vec<u8>),
     Interrupt,
     Detach,
 }
@@ -19,7 +19,7 @@ pub enum AttachFrame {
 pub fn write_attach_frame(writer: &mut impl Write, frame: &AttachFrame) -> Result<()> {
     let (kind, payload) = match frame {
         AttachFrame::Output(bytes) => (OUTPUT, bytes.as_slice()),
-        AttachFrame::Input(input) => (INPUT, input.as_bytes()),
+        AttachFrame::Input(input) => (INPUT, input.as_slice()),
         AttachFrame::Interrupt => (INTERRUPT, &[] as &[u8]),
         AttachFrame::Detach => (DETACH, &[] as &[u8]),
     };
@@ -45,9 +45,7 @@ pub fn read_attach_frame(reader: &mut impl Read) -> Result<AttachFrame> {
     reader.read_exact(&mut payload)?;
     match kind[0] {
         OUTPUT => Ok(AttachFrame::Output(payload)),
-        INPUT => String::from_utf8(payload)
-            .map(AttachFrame::Input)
-            .map_err(|_| KairoError::Protocol("attach input must be valid UTF-8".to_owned())),
+        INPUT => Ok(AttachFrame::Input(payload)),
         INTERRUPT if payload.is_empty() => Ok(AttachFrame::Interrupt),
         DETACH if payload.is_empty() => Ok(AttachFrame::Detach),
         _ => Err(KairoError::Protocol("invalid attach frame".to_owned())),

@@ -38,7 +38,15 @@ fn run() -> Result<()> {
         [command, action, name, flag, workspace]
             if command == "agent" && action == "create" && flag == "--workspace" =>
         {
-            create_agent(name.to_owned(), PathBuf::from(workspace))
+            create_agent(name.to_owned(), "shell".to_owned(), PathBuf::from(workspace))
+        }
+        [command, action, name, adapter_flag, adapter, workspace_flag, workspace]
+            if command == "agent"
+                && action == "create"
+                && adapter_flag == "--adapter"
+                && workspace_flag == "--workspace" =>
+        {
+            create_agent(name.to_owned(), adapter.to_owned(), PathBuf::from(workspace))
         }
         [command, action] if command == "agent" && action == "list" => list_agents(),
         [command, action, name, separator, command_parts @ ..]
@@ -48,6 +56,9 @@ fn run() -> Result<()> {
                 && !command_parts.is_empty() =>
         {
             start_agent(name.to_owned(), command_parts.to_vec())
+        }
+        [command, action, name] if command == "agent" && action == "start" => {
+            start_configured_agent(name.to_owned())
         }
         [command, action, name] if command == "agent" && action == "stop" => {
             stop_agent(name.to_owned())
@@ -70,7 +81,7 @@ fn run() -> Result<()> {
             attach_agent(name.to_owned())
         }
         _ => Err(KairoError::InvalidArguments(
-            "use `kairo daemon start|status|stop`, `kairo agent create <name> --workspace <path>`, `kairo agent start <name> -- <command> [args...]`, `kairo agent stop|logs|interrupt|attach <name>`, `kairo agent send <name> -- <text>`, or `kairo agent list`".to_owned(),
+            "use `kairo daemon start|status|stop`, `kairo agent create <name> --adapter codex --workspace <path>`, `kairo agent start <name> [-- <command> [args...]]`, `kairo agent stop|logs|interrupt|attach <name>`, `kairo agent send <name> -- <text>`, or `kairo agent list`".to_owned(),
         )),
     }
 }
@@ -131,8 +142,8 @@ fn stop_daemon() -> Result<()> {
     }
 }
 
-fn create_agent(name: String, workspace: PathBuf) -> Result<()> {
-    match send_request(Request::CreateAgent { name, workspace })? {
+fn create_agent(name: String, adapter: String, workspace: PathBuf) -> Result<()> {
+    match send_request(Request::CreateAgent { name, adapter, workspace })? {
         Response::AgentCreated { agent } => {
             println!("Created agent `{}` ({})", agent.name, agent.id);
             Ok(())
@@ -176,6 +187,22 @@ fn start_agent(name: String, command: Vec<String>) -> Result<()> {
                 KairoError::Protocol("daemon started an agent without a process ID".to_owned())
             })?;
             println!("Started agent `{}` (PID {pid})", agent.name);
+            Ok(())
+        }
+        Response::Error { message } => Err(KairoError::Protocol(message)),
+        unexpected => {
+            Err(KairoError::Protocol(format!("unexpected response to start agent: {unexpected:?}")))
+        }
+    }
+}
+
+fn start_configured_agent(name: String) -> Result<()> {
+    match send_request(Request::StartConfiguredAgent { name })? {
+        Response::AgentStarted { agent } => {
+            let pid = agent.pid.ok_or_else(|| {
+                KairoError::Protocol("daemon started an agent without a process ID".to_owned())
+            })?;
+            println!("Started {} agent `{}` (PID {pid})", agent.adapter, agent.name);
             Ok(())
         }
         Response::Error { message } => Err(KairoError::Protocol(message)),
@@ -261,13 +288,13 @@ fn attach_agent(name: String) -> Result<()> {
         }
     }
 
-    println!("Attached to `{name}`. Press Enter to send, Ctrl-C to interrupt, Ctrl-] to detach.");
+    println!("Attached to `{name}`. Codex owns input; press Ctrl-] to detach.");
     let output_stream = stream.try_clone()?;
     let stdout = Arc::new(Mutex::new(std::io::stdout()));
     let output_stdout = Arc::clone(&stdout);
     let output_thread = thread::spawn(move || forward_agent_output(output_stream, output_stdout));
     let raw_mode = RawModeGuard::enable()?;
-    let input_result = collect_attachment_input(&mut stream, stdout);
+    let input_result = forward_attachment_input(&mut stream);
     drop(raw_mode);
     let _ = write_attach_frame(&mut stream, &AttachFrame::Detach);
     let _ = stream.shutdown(std::net::Shutdown::Write);
@@ -275,43 +302,52 @@ fn attach_agent(name: String) -> Result<()> {
     input_result
 }
 
-fn collect_attachment_input(
-    stream: &mut UnixStream,
-    stdout: Arc<Mutex<std::io::Stdout>>,
-) -> Result<()> {
-    let mut input = String::new();
+fn forward_attachment_input(stream: &mut UnixStream) -> Result<()> {
     loop {
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                 KeyCode::Char(']') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Ok(());
                 }
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    write_attach_frame(stream, &AttachFrame::Interrupt)?;
-                }
-                KeyCode::Enter => {
-                    write_stdout(&stdout, b"\r\n")?;
-                    if !input.is_empty() {
-                        write_attach_frame(
-                            stream,
-                            &AttachFrame::Input(std::mem::take(&mut input)),
-                        )?;
+                _ => {
+                    if let Some(bytes) = key_to_bytes(key.code, key.modifiers) {
+                        write_attach_frame(stream, &AttachFrame::Input(bytes))?;
                     }
                 }
-                KeyCode::Backspace => {
-                    if input.pop().is_some() {
-                        write_stdout(&stdout, b"\x08 \x08")?;
-                    }
-                }
-                KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    input.push(character);
-                    write_stdout(&stdout, character.to_string().as_bytes())?;
-                }
-                _ => {}
             },
+            Event::Paste(text) => {
+                write_attach_frame(stream, &AttachFrame::Input(text.into_bytes()))?
+            }
             _ => {}
         }
     }
+}
+
+fn key_to_bytes(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
+    let bytes = match code {
+        KeyCode::Char(character) if modifiers.contains(KeyModifiers::CONTROL) => {
+            let character = character.to_ascii_lowercase();
+            if character.is_ascii_lowercase() {
+                vec![character as u8 - b'a' + 1]
+            } else {
+                return None;
+            }
+        }
+        KeyCode::Char(character) => character.to_string().into_bytes(),
+        KeyCode::Enter => b"\r".to_vec(),
+        KeyCode::Tab => b"\t".to_vec(),
+        KeyCode::Backspace => vec![127],
+        KeyCode::Esc => vec![27],
+        KeyCode::Up => b"\x1b[A".to_vec(),
+        KeyCode::Down => b"\x1b[B".to_vec(),
+        KeyCode::Right => b"\x1b[C".to_vec(),
+        KeyCode::Left => b"\x1b[D".to_vec(),
+        KeyCode::Home => b"\x1b[H".to_vec(),
+        KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::Delete => b"\x1b[3~".to_vec(),
+        _ => return None,
+    };
+    Some(bytes)
 }
 
 fn forward_agent_output(mut stream: UnixStream, stdout: Arc<Mutex<std::io::Stdout>>) -> Result<()> {

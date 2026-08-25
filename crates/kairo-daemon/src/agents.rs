@@ -55,14 +55,30 @@ impl AgentManager {
         Ok(manager)
     }
 
+    #[cfg(test)]
     pub fn create(&mut self, name: String, workspace: PathBuf) -> Result<Agent> {
+        self.create_with_adapter(name, "shell".to_owned(), workspace)
+    }
+
+    pub fn create_with_adapter(
+        &mut self,
+        name: String,
+        adapter: String,
+        workspace: PathBuf,
+    ) -> Result<Agent> {
         let name = name.trim().to_owned();
+        let adapter = adapter.trim().to_ascii_lowercase();
         if name.is_empty() {
             return Err(KairoError::InvalidArguments("agent name cannot be empty".to_owned()));
         }
         if !workspace.is_absolute() {
             return Err(KairoError::InvalidArguments(
                 "agent workspace must be an absolute path".to_owned(),
+            ));
+        }
+        if !matches!(adapter.as_str(), "shell" | "codex") {
+            return Err(KairoError::InvalidArguments(
+                "agent adapter must be `shell` or `codex`".to_owned(),
             ));
         }
         if self.indexes_by_name.contains_key(&name) {
@@ -76,7 +92,7 @@ impl AgentManager {
         let agent = Agent {
             id: format!("agent-{timestamp}-{}", self.next_id),
             name: name.clone(),
-            adapter: "shell".to_owned(),
+            adapter,
             command: None,
             workspace,
             status: AgentStatus::Stopped,
@@ -144,6 +160,12 @@ impl AgentManager {
         self.sessions_by_name
             .insert(name.to_owned(), PtySession { child, _master: pair.master, writer });
         Ok(snapshot)
+    }
+
+    pub fn start_configured(&mut self, name: &str) -> Result<Agent> {
+        let adapter = self.agents[self.agent_index(name)?].adapter.clone();
+        let command = command_for_adapter(&adapter)?;
+        self.start(name, command)
     }
 
     pub fn stop(&mut self, name: &str) -> Result<Agent> {
@@ -236,6 +258,16 @@ impl AgentManager {
             KairoError::InvalidArguments(format!("agent `{name}` is not running"))
         })?;
         session.writer.write_all(&[3])?;
+        session.writer.flush()?;
+        Ok(())
+    }
+
+    pub fn send_raw_input(&mut self, name: &str, input: &[u8]) -> Result<()> {
+        self.refresh()?;
+        let session = self.sessions_by_name.get_mut(name).ok_or_else(|| {
+            KairoError::InvalidArguments(format!("agent `{name}` is not running"))
+        })?;
+        session.writer.write_all(input)?;
         session.writer.flush()?;
         Ok(())
     }
@@ -356,6 +388,16 @@ fn is_active(status: &AgentStatus) -> bool {
     )
 }
 
+fn command_for_adapter(adapter: &str) -> Result<Vec<String>> {
+    match adapter {
+        "codex" => Ok(vec!["codex".to_owned()]),
+        "shell" => Err(KairoError::InvalidArguments(
+            "shell agents need a command: `kairo agent start <name> -- <command>`".to_owned(),
+        )),
+        _ => Err(KairoError::Runtime(format!("unknown agent adapter `{adapter}`"))),
+    }
+}
+
 fn runtime_error(error: impl std::fmt::Display) -> KairoError {
     KairoError::Runtime(error.to_string())
 }
@@ -377,7 +419,7 @@ mod tests {
 
     use crate::{storage::Storage, transcript::TRANSCRIPT_CAPACITY};
 
-    use super::{AgentManager, now_millis};
+    use super::{AgentManager, command_for_adapter, now_millis};
 
     #[test]
     fn creates_a_stopped_shell_agent() {
@@ -607,5 +649,26 @@ mod tests {
         drop(second);
         manager.detach("coder");
         manager.stop("coder").expect("shell stops");
+    }
+
+    #[test]
+    fn creates_a_codex_agent_with_its_configured_command() {
+        let mut manager = AgentManager::default();
+        let agent = manager
+            .create_with_adapter("coder".to_owned(), "codex".to_owned(), std::env::temp_dir())
+            .expect("agent is created");
+
+        assert_eq!(agent.adapter, "codex");
+        assert_eq!(command_for_adapter(&agent.adapter).expect("command resolves"), ["codex"]);
+    }
+
+    #[test]
+    fn rejects_unknown_agent_adapters() {
+        let mut manager = AgentManager::default();
+        assert!(
+            manager
+                .create_with_adapter("coder".to_owned(), "claude".to_owned(), std::env::temp_dir())
+                .is_err()
+        );
     }
 }

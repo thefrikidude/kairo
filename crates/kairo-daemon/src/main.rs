@@ -128,7 +128,8 @@ fn attach_client(
         };
         match frame {
             AttachFrame::Input(input) => {
-                if let Err(error) = agents.lock().map_err(lock_error)?.send_input(&name, &input) {
+                if let Err(error) = agents.lock().map_err(lock_error)?.send_raw_input(&name, &input)
+                {
                     break_with_error(&mut stream, error)?;
                     break;
                 }
@@ -171,12 +172,15 @@ fn dispatch(request: Request, agents: &Arc<Mutex<AgentManager>>) -> (Response, b
             Ok(()) => (Response::Accepted, true),
             Err(error) => (Response::Error { message: error.to_string() }, false),
         },
-        Request::CreateAgent { name, workspace } => agents
-            .create(name, workspace)
+        Request::CreateAgent { name, adapter, workspace } => agents
+            .create_with_adapter(name, adapter, workspace)
             .map_or_else(error_response, |agent| (Response::AgentCreated { agent }, false)),
         Request::ListAgents => (Response::Agents { agents: agents.list() }, false),
         Request::StartAgent { name, command } => agents
             .start(&name, command)
+            .map_or_else(error_response, |agent| (Response::AgentStarted { agent }, false)),
+        Request::StartConfiguredAgent { name } => agents
+            .start_configured(&name)
             .map_or_else(error_response, |agent| (Response::AgentStarted { agent }, false)),
         Request::StopAgent { name } => agents
             .stop(&name)
