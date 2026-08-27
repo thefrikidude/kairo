@@ -147,6 +147,15 @@ impl Storage {
         Ok(())
     }
 
+    pub fn delete_agent(&self, id: &str) -> Result<()> {
+        self.connection
+            .lock()
+            .map_err(lock_error)?
+            .execute("DELETE FROM agents WHERE id = ?1", params![id])
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
     pub fn append_event(&self, agent_id: &str, content: &[u8]) -> Result<()> {
         let connection = self.connection.lock().map_err(lock_error)?;
         connection

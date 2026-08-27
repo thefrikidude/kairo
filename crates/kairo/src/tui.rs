@@ -24,7 +24,7 @@ use kairo_core::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Paragraph, Wrap},
@@ -35,6 +35,8 @@ use crate::{connect_attachment, key_to_bytes, send_request};
 const REFRESH_INTERVAL: Duration = Duration::from_millis(300);
 const SCROLLBACK_ROWS: usize = 2_000;
 const SIDEBAR_WIDTH: u16 = 28;
+const HIDE_LABEL_WIDTH: u16 = 6;
+const DELETE_LABEL_WIDTH: u16 = 8;
 
 pub fn run() -> Result<()> {
     let workspace = std::env::current_dir()?;
@@ -92,6 +94,12 @@ fn handle_event(app: &mut App, event: Event, area: Rect) {
     {
         if sidebar_new_clicked(sidebar_area(area), mouse.column, mouse.row) {
             app.open_terminal();
+            return;
+        }
+        if let Some(name) =
+            sidebar_delete_name(&app.order, sidebar_area(area), mouse.column, mouse.row)
+        {
+            app.delete_terminal(&name);
             return;
         }
         if let Some(name) =
@@ -248,6 +256,27 @@ impl App {
             if self.focused.as_deref() == Some(name.as_str()) {
                 self.focused = None;
             }
+        }
+    }
+
+    fn delete_terminal(&mut self, name: &str) {
+        match send_request(Request::DeleteAgent { name: name.to_owned() }) {
+            Ok(Response::AgentDeleted { .. }) => {
+                if let Some(index) =
+                    self.terminals.iter().position(|terminal| terminal.name == name)
+                {
+                    self.terminals.remove(index).close();
+                }
+                self.agents.retain(|agent| agent.name != name);
+                self.order.retain(|terminal_name| terminal_name != name);
+                self.hidden.remove(name);
+                if self.focused.as_deref() == Some(name) {
+                    self.focused = None;
+                }
+            }
+            Ok(Response::Error { message }) => self.set_error(message),
+            Ok(unexpected) => self.set_error(format!("unexpected daemon response: {unexpected:?}")),
+            Err(error) => self.set_error(error.to_string()),
         }
     }
 
@@ -439,7 +468,8 @@ fn render(frame: &mut ratatui::Frame, app: &App) {
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(border))
-                        .title(format!(" {title}  [hide] ")),
+                        .title(format!(" {title} "))
+                        .title(Line::from("[hide]").right_aligned()),
                 )
                 .wrap(Wrap { trim: false });
             frame.render_widget(pane, area);
@@ -455,7 +485,7 @@ fn render(frame: &mut ratatui::Frame, app: &App) {
     let footer = if let Some(error) = &app.error {
         format!(" {error} ")
     } else if app.focused.is_some() {
-        " Click another pane to focus · Ctrl-] clears focus ".to_owned()
+        " Click another pane to focus · Ctrl-] clears focus · [hide] keeps it running ".to_owned()
     } else {
         " Click + Terminal or a pane · q: quit · r: refresh ".to_owned()
     };
@@ -487,6 +517,22 @@ fn render_sidebar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Terminals ")),
         area,
     );
+    for (index, name) in app.order.iter().enumerate() {
+        if app.agents.iter().any(|agent| agent.name == *name) {
+            let delete_area = Rect::new(
+                area.x.saturating_add(1),
+                area.y.saturating_add(3).saturating_add(index as u16),
+                area.width.saturating_sub(2),
+                1,
+            );
+            frame.render_widget(
+                Paragraph::new("[delete]")
+                    .alignment(Alignment::Right)
+                    .style(Style::default().fg(Color::Red)),
+                delete_area,
+            );
+        }
+    }
 }
 
 fn content_area(area: Rect) -> Rect {
@@ -535,6 +581,15 @@ fn sidebar_agent_name(names: &[String], area: Rect, column: u16, row: u16) -> Op
     let index = usize::from(row.saturating_sub(area.y.saturating_add(3)));
     (row >= area.y.saturating_add(3) && index < names.len()).then(|| names[index].clone())
 }
+fn sidebar_delete_name(names: &[String], area: Rect, column: u16, row: u16) -> Option<String> {
+    let delete_start =
+        area.x.saturating_add(area.width).saturating_sub(1).saturating_sub(DELETE_LABEL_WIDTH);
+    if column < delete_start {
+        return None;
+    }
+    let index = usize::from(row.saturating_sub(area.y.saturating_add(3)));
+    (row >= area.y.saturating_add(3) && index < names.len()).then(|| names[index].clone())
+}
 fn pane_index_at(areas: &[Rect], column: u16, row: u16) -> Option<usize> {
     areas.iter().position(|area| {
         column >= area.x
@@ -544,7 +599,9 @@ fn pane_index_at(areas: &[Rect], column: u16, row: u16) -> Option<usize> {
     })
 }
 fn pane_hide_clicked(area: Rect, column: u16, row: u16) -> bool {
-    row == area.y && column >= area.x.saturating_add(area.width).saturating_sub(8)
+    let hide_start =
+        area.x.saturating_add(area.width).saturating_sub(1).saturating_sub(HIDE_LABEL_WIDTH);
+    row == area.y && column >= hide_start
 }
 fn submitted_title(input: &mut String) -> Option<String> {
     let title = input.split_whitespace().next().map(str::to_owned);
@@ -562,7 +619,9 @@ impl Drop for App {
 
 #[cfg(test)]
 mod tests {
-    use super::{pane_areas, sidebar_agent_name, submitted_title};
+    use super::{
+        pane_areas, pane_hide_clicked, sidebar_agent_name, sidebar_delete_name, submitted_title,
+    };
     use ratatui::layout::Rect;
 
     #[test]
@@ -594,5 +653,21 @@ mod tests {
         assert_eq!(sidebar_agent_name(&names, sidebar, 4, 4).as_deref(), Some("second"));
         assert_eq!(sidebar_agent_name(&names, sidebar, 4, 2), None);
         assert_eq!(sidebar_agent_name(&names, sidebar, 0, 3), None);
+    }
+
+    #[test]
+    fn narrow_panes_keep_their_right_aligned_hide_hit_area() {
+        let panes = pane_areas(Rect::new(28, 0, 59, 20), 4);
+
+        assert!(panes.iter().all(|pane| pane_hide_clicked(*pane, pane.right() - 2, pane.y)));
+    }
+
+    #[test]
+    fn sidebar_delete_click_targets_only_the_delete_label() {
+        let names = vec!["first".to_owned(), "second".to_owned()];
+        let sidebar = Rect::new(0, 0, 28, 10);
+
+        assert_eq!(sidebar_delete_name(&names, sidebar, 25, 3).as_deref(), Some("first"));
+        assert_eq!(sidebar_delete_name(&names, sidebar, 10, 3), None);
     }
 }

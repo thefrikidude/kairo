@@ -209,6 +209,22 @@ impl AgentManager {
         Ok(snapshot)
     }
 
+    pub fn delete(&mut self, name: &str) -> Result<()> {
+        self.refresh()?;
+        if self.sessions_by_name.contains_key(name) {
+            self.stop(name)?;
+        }
+
+        let index = self.agent_index(name)?;
+        let agent = self.agents.remove(index);
+        self.indexes_by_name.remove(name);
+        for (index, agent) in self.agents.iter().enumerate() {
+            self.indexes_by_name.insert(agent.name.clone(), index);
+        }
+        self.outputs_by_name.remove(name);
+        self.storage.delete_agent(&agent.id)
+    }
+
     pub fn shutdown(&mut self) -> Result<()> {
         let names = self.sessions_by_name.keys().cloned().collect::<Vec<_>>();
         for name in names {
@@ -473,6 +489,17 @@ mod tests {
         assert_eq!(terminal.title, "Terminal 1");
         assert_eq!(terminal.status, AgentStatus::Working);
         manager.stop(&terminal.name).expect("terminal stops");
+    }
+
+    #[test]
+    fn deleting_a_terminal_stops_it_and_removes_its_record() {
+        let mut manager = AgentManager::default();
+        let terminal = manager.open_terminal(std::env::temp_dir()).expect("terminal opens");
+
+        manager.delete(&terminal.name).expect("terminal deletes");
+
+        assert!(manager.list().is_empty());
+        assert!(manager.logs(&terminal.name).is_err());
     }
 
     #[test]

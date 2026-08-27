@@ -187,6 +187,9 @@ fn dispatch(request: Request, agents: &Arc<Mutex<AgentManager>>) -> (Response, b
         Request::SetAgentTitle { name, title } => agents
             .set_title(&name, title)
             .map_or_else(error_response, |agent| (Response::AgentTitleUpdated { agent }, false)),
+        Request::DeleteAgent { name } => agents
+            .delete(&name)
+            .map_or_else(error_response, |_| (Response::AgentDeleted { name }, false)),
         Request::ListAgents => (Response::Agents { agents: agents.list() }, false),
         Request::StartAgent { name, command } => agents
             .start(&name, command)
