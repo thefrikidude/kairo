@@ -135,6 +135,7 @@ fn handle_event(app: &mut App, event: Event, area: Rect) {
                 KeyCode::Char('d') => app.request_delete(),
                 KeyCode::Up => app.select_sidebar_session(true),
                 KeyCode::Down => app.select_sidebar_session(false),
+                KeyCode::Enter => app.open_selected(),
                 _ => {}
             }
         }
@@ -286,6 +287,14 @@ impl App {
             .cloned()
             .collect::<Vec<_>>();
         self.selected = adjacent_sidebar_name(&names, self.selected.as_deref(), previous);
+    }
+
+    fn open_selected(&mut self) {
+        let Some(name) = self.selected.clone() else {
+            self.set_error("select a terminal before opening it".to_owned());
+            return;
+        };
+        self.reveal_and_focus(name);
     }
 
     fn request_delete(&mut self) {
@@ -530,7 +539,7 @@ fn render(frame: &mut ratatui::Frame, app: &App) {
     } else if app.focused.is_some() {
         " Click another pane to focus · Ctrl-] opens Kairo shortcuts ".to_owned()
     } else {
-        " ↑/↓: select · t: new · h: hide · d: delete · q: quit ".to_owned()
+        " ↑/↓: select · Enter: open · t: new · h: hide · d: delete · q: quit ".to_owned()
     };
     frame.render_widget(
         Paragraph::new(footer).style(Style::default().fg(Color::DarkGray)),

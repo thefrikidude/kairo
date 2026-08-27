@@ -39,7 +39,8 @@ keeps running terminals alive when you quit the TUI. Click `+ Terminal` to add r
 then type normal terminal commands such as `codex`, `claude`, `gemini`, `git`, or `npm`. Click a
 pane to focus it. Press `Ctrl-]` to return to Kairo's shortcuts: `t` adds a terminal, `h` hides the
 selected pane without stopping it, and `d` opens a confirmation before permanently deleting the
-selected session and its saved history. The sidebar restores hidden panes when clicked.
+selected session and its saved history. Use the Up/Down arrows to select a sidebar session, then
+press Enter to open it; the sidebar also restores hidden panes when clicked.
 
 The daemon and agent commands remain available for development and debugging:
 
