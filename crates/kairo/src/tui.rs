@@ -133,6 +133,8 @@ fn handle_event(app: &mut App, event: Event, area: Rect) {
                 KeyCode::Char('t') => app.open_terminal(),
                 KeyCode::Char('h') => app.hide_selected(),
                 KeyCode::Char('d') => app.request_delete(),
+                KeyCode::Up => app.select_sidebar_session(true),
+                KeyCode::Down => app.select_sidebar_session(false),
                 _ => {}
             }
         }
@@ -274,6 +276,16 @@ impl App {
         if self.hidden.insert(name.clone()) {
             self.focused = None;
         }
+    }
+
+    fn select_sidebar_session(&mut self, previous: bool) {
+        let names = self
+            .order
+            .iter()
+            .filter(|name| self.agents.iter().any(|agent| agent.name == ***name))
+            .cloned()
+            .collect::<Vec<_>>();
+        self.selected = adjacent_sidebar_name(&names, self.selected.as_deref(), previous);
     }
 
     fn request_delete(&mut self) {
@@ -518,7 +530,7 @@ fn render(frame: &mut ratatui::Frame, app: &App) {
     } else if app.focused.is_some() {
         " Click another pane to focus · Ctrl-] opens Kairo shortcuts ".to_owned()
     } else {
-        " t: new terminal · h: hide selected · d: delete selected · q: quit ".to_owned()
+        " ↑/↓: select · t: new · h: hide · d: delete · q: quit ".to_owned()
     };
     frame.render_widget(
         Paragraph::new(footer).style(Style::default().fg(Color::DarkGray)),
@@ -626,6 +638,21 @@ fn sidebar_agent_name(names: &[String], area: Rect, column: u16, row: u16) -> Op
     let index = usize::from(row.saturating_sub(area.y.saturating_add(3)));
     (row >= area.y.saturating_add(3) && index < names.len()).then(|| names[index].clone())
 }
+fn adjacent_sidebar_name(
+    names: &[String],
+    selected: Option<&str>,
+    previous: bool,
+) -> Option<String> {
+    let current = selected.and_then(|selected| names.iter().position(|name| name == selected));
+    let index = match (current, previous) {
+        (Some(0), true) => names.len().checked_sub(1)?,
+        (Some(index), true) => index.saturating_sub(1),
+        (Some(index), false) => (index + 1) % names.len(),
+        (None, true) => names.len().checked_sub(1)?,
+        (None, false) => 0,
+    };
+    names.get(index).cloned()
+}
 fn pane_index_at(areas: &[Rect], column: u16, row: u16) -> Option<usize> {
     areas.iter().position(|area| {
         column >= area.x
@@ -650,7 +677,7 @@ impl Drop for App {
 
 #[cfg(test)]
 mod tests {
-    use super::{pane_areas, sidebar_agent_name, submitted_title};
+    use super::{adjacent_sidebar_name, pane_areas, sidebar_agent_name, submitted_title};
     use ratatui::layout::Rect;
 
     #[test]
@@ -682,5 +709,15 @@ mod tests {
         assert_eq!(sidebar_agent_name(&names, sidebar, 4, 4).as_deref(), Some("second"));
         assert_eq!(sidebar_agent_name(&names, sidebar, 4, 2), None);
         assert_eq!(sidebar_agent_name(&names, sidebar, 0, 3), None);
+    }
+
+    #[test]
+    fn arrow_selection_moves_through_sessions_and_wraps() {
+        let names = vec!["first".to_owned(), "second".to_owned(), "third".to_owned()];
+
+        assert_eq!(adjacent_sidebar_name(&names, None, false).as_deref(), Some("first"));
+        assert_eq!(adjacent_sidebar_name(&names, Some("first"), true).as_deref(), Some("third"));
+        assert_eq!(adjacent_sidebar_name(&names, Some("third"), false).as_deref(), Some("first"));
+        assert_eq!(adjacent_sidebar_name(&names, Some("second"), false).as_deref(), Some("third"));
     }
 }
