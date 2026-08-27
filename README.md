@@ -40,7 +40,9 @@ then type normal terminal commands such as `codex`, `claude`, `gemini`, `git`, o
 pane to focus it. Press `Ctrl-]` to return to Kairo's shortcuts: `t` adds a terminal, `h` hides the
 selected pane without stopping it, and `d` opens a confirmation before permanently deleting the
 selected session and its saved history. Use the Up/Down arrows to select a sidebar session, then
-press Enter to open it; the sidebar also restores hidden panes when clicked.
+press Enter to open it. Press `r` to rename the selected session. New sessions use the first
+submitted command only: common agent CLIs such as `codex`, `claude`, and `gemini` become the title;
+other commands use the workspace folder name. The sidebar also restores hidden panes when clicked.
 
 The daemon and agent commands remain available for development and debugging:
 

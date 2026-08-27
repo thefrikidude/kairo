@@ -3,7 +3,7 @@ use std::{
     io,
     net::Shutdown,
     os::unix::net::UnixStream,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver},
     thread,
     time::{Duration, Instant},
@@ -35,6 +35,7 @@ use crate::{connect_attachment, key_to_bytes, send_request};
 const REFRESH_INTERVAL: Duration = Duration::from_millis(300);
 const SCROLLBACK_ROWS: usize = 2_000;
 const SIDEBAR_WIDTH: u16 = 28;
+const AGENT_COMMANDS: &[&str] = &["codex", "claude", "gemini", "aider", "opencode", "amp"];
 
 pub fn run() -> Result<()> {
     let workspace = std::env::current_dir()?;
@@ -87,6 +88,11 @@ fn run_app(terminal: &mut KairoTerminal, workspace: PathBuf) -> Result<()> {
 }
 
 fn handle_event(app: &mut App, event: Event, area: Rect) {
+    if app.rename_dialog.is_some() {
+        app.handle_rename_event(event);
+        return;
+    }
+
     if let Some(name) = app.delete_confirmation.clone() {
         if let Event::Key(key) = event
             && key.kind == KeyEventKind::Press
@@ -129,7 +135,7 @@ fn handle_event(app: &mut App, event: Event, area: Rect) {
         {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-                KeyCode::Char('r') => app.refresh(),
+                KeyCode::Char('r') => app.request_rename(),
                 KeyCode::Char('t') => app.open_terminal(),
                 KeyCode::Char('h') => app.hide_selected(),
                 KeyCode::Char('d') => app.request_delete(),
@@ -177,8 +183,15 @@ struct App {
     selected: Option<String>,
     focused: Option<String>,
     delete_confirmation: Option<String>,
+    rename_dialog: Option<RenameDialog>,
     error: Option<String>,
     should_quit: bool,
+}
+
+struct RenameDialog {
+    name: String,
+    input: String,
+    replace_existing: bool,
 }
 
 impl App {
@@ -192,6 +205,7 @@ impl App {
             selected: None,
             focused: None,
             delete_confirmation: None,
+            rename_dialog: None,
             error: None,
             should_quit: false,
         }
@@ -305,6 +319,73 @@ impl App {
         self.delete_confirmation = Some(name);
     }
 
+    fn request_rename(&mut self) {
+        let Some(name) = self.selected.clone() else {
+            self.set_error("select a terminal before renaming it".to_owned());
+            return;
+        };
+        let Some(agent) = self.agents.iter().find(|agent| agent.name == name) else {
+            self.set_error("selected terminal no longer exists".to_owned());
+            return;
+        };
+        self.rename_dialog =
+            Some(RenameDialog { name, input: agent.title.clone(), replace_existing: true });
+    }
+
+    fn handle_rename_event(&mut self, event: Event) {
+        match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Esc => self.rename_dialog = None,
+                KeyCode::Enter => self.save_rename(),
+                KeyCode::Backspace => {
+                    if let Some(dialog) = &mut self.rename_dialog {
+                        if dialog.replace_existing {
+                            dialog.input.clear();
+                            dialog.replace_existing = false;
+                        } else {
+                            dialog.input.pop();
+                        }
+                    }
+                }
+                KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(dialog) = &mut self.rename_dialog {
+                        if dialog.replace_existing {
+                            dialog.input.clear();
+                            dialog.replace_existing = false;
+                        }
+                        dialog.input.push(character);
+                    }
+                }
+                _ => {}
+            },
+            Event::Paste(text) => {
+                if let Some(dialog) = &mut self.rename_dialog {
+                    if dialog.replace_existing {
+                        dialog.input.clear();
+                        dialog.replace_existing = false;
+                    }
+                    dialog.input.push_str(&text);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn save_rename(&mut self) {
+        let Some(dialog) = &self.rename_dialog else {
+            return;
+        };
+        let name = dialog.name.clone();
+        let title = dialog.input.trim().to_owned();
+        if title.is_empty() {
+            self.set_error("terminal title cannot be empty".to_owned());
+            return;
+        }
+        if self.persist_title(&name, title) {
+            self.rename_dialog = None;
+        }
+    }
+
     fn delete_terminal(&mut self, name: &str) {
         match send_request(Request::DeleteAgent { name: name.to_owned() }) {
             Ok(Response::AgentDeleted { .. }) => {
@@ -349,21 +430,39 @@ impl App {
             return;
         }
         if let Some(command) = submitted_command {
-            match send_request(Request::SetAgentTitle {
-                name: name.to_owned(),
-                title: command.clone(),
-            }) {
-                Ok(Response::AgentTitleUpdated { agent }) => {
-                    if let Some(existing) = self.agents.iter_mut().find(|agent| agent.name == name)
-                    {
-                        *existing = agent;
-                    }
+            self.assign_initial_title(name, &command);
+        }
+    }
+
+    fn assign_initial_title(&mut self, name: &str, command: &str) {
+        let Some(agent) = self.agents.iter().find(|agent| agent.name == name) else {
+            return;
+        };
+        let Some(title) = automatic_title(agent, command) else {
+            return;
+        };
+        self.persist_title(name, title);
+    }
+
+    fn persist_title(&mut self, name: &str, title: String) -> bool {
+        match send_request(Request::SetAgentTitle { name: name.to_owned(), title }) {
+            Ok(Response::AgentTitleUpdated { agent }) => {
+                if let Some(existing) = self.agents.iter_mut().find(|agent| agent.name == name) {
+                    *existing = agent;
                 }
-                Ok(Response::Error { message }) => self.set_error(message),
-                Ok(unexpected) => {
-                    self.set_error(format!("unexpected daemon response: {unexpected:?}"))
-                }
-                Err(error) => self.set_error(error.to_string()),
+                true
+            }
+            Ok(Response::Error { message }) => {
+                self.set_error(message);
+                false
+            }
+            Ok(unexpected) => {
+                self.set_error(format!("unexpected daemon response: {unexpected:?}"));
+                false
+            }
+            Err(error) => {
+                self.set_error(error.to_string());
+                false
             }
         }
     }
@@ -379,7 +478,7 @@ impl App {
                 terminal.input_line.pop();
                 None
             }
-            KeyCode::Enter => submitted_title(&mut terminal.input_line),
+            KeyCode::Enter => submitted_command(&mut terminal.input_line),
             _ => None,
         }
     }
@@ -389,7 +488,7 @@ impl App {
         let mut title = None;
         for character in text.chars() {
             if matches!(character, '\n' | '\r') {
-                title = submitted_title(&mut terminal.input_line).or(title);
+                title = submitted_command(&mut terminal.input_line).or(title);
             } else {
                 terminal.input_line.push(character);
             }
@@ -532,14 +631,18 @@ fn render(frame: &mut ratatui::Frame, app: &App) {
         );
     }
     render_delete_confirmation(frame, app);
+    render_rename_dialog(frame, app);
     let footer = if let Some(error) = &app.error {
         format!(" {error} ")
+    } else if app.rename_dialog.is_some() {
+        " Enter: save name · Esc: cancel ".to_owned()
     } else if app.delete_confirmation.is_some() {
         " y: permanently delete · n: cancel ".to_owned()
     } else if app.focused.is_some() {
         " Click another pane to focus · Ctrl-] opens Kairo shortcuts ".to_owned()
     } else {
-        " ↑/↓: select · Enter: open · t: new · h: hide · d: delete · q: quit ".to_owned()
+        " ↑/↓: select · Enter: open · t: new · r: rename · h: hide · d: delete · q: quit "
+            .to_owned()
     };
     frame.render_widget(
         Paragraph::new(footer).style(Style::default().fg(Color::DarkGray)),
@@ -598,6 +701,28 @@ fn render_delete_confirmation(frame: &mut ratatui::Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).title(" Confirm deletion "))
         .wrap(Wrap { trim: false }),
         dialog,
+    );
+}
+
+fn render_rename_dialog(frame: &mut ratatui::Frame, app: &App) {
+    let Some(dialog) = &app.rename_dialog else {
+        return;
+    };
+    let area = frame.area();
+    let width = area.width.min(54);
+    let height = area.height.min(5);
+    let dialog_area = Rect::new(
+        area.x.saturating_add(area.width.saturating_sub(width) / 2),
+        area.y.saturating_add(area.height.saturating_sub(height) / 2),
+        width,
+        height,
+    );
+    frame.render_widget(Clear, dialog_area);
+    frame.render_widget(
+        Paragraph::new(format!("{}\n\nType to replace · Enter: save · Esc: cancel", dialog.input))
+            .block(Block::default().borders(Borders::ALL).title(" Rename session "))
+            .wrap(Wrap { trim: false }),
+        dialog_area,
     );
 }
 
@@ -670,10 +795,30 @@ fn pane_index_at(areas: &[Rect], column: u16, row: u16) -> Option<usize> {
             && row < area.y.saturating_add(area.height)
     })
 }
-fn submitted_title(input: &mut String) -> Option<String> {
-    let title = input.split_whitespace().next().map(str::to_owned);
+fn submitted_command(input: &mut String) -> Option<String> {
+    let command = input.split_whitespace().next().map(str::to_owned);
     input.clear();
-    title
+    command
+}
+
+fn automatic_title(agent: &Agent, command: &str) -> Option<String> {
+    if agent.title_locked {
+        return None;
+    }
+    let command = command.split_whitespace().next()?;
+    let command = Path::new(command).file_name().and_then(|name| name.to_str()).unwrap_or(command);
+    if AGENT_COMMANDS.contains(&command) {
+        return Some(command.to_owned());
+    }
+    Some(
+        agent
+            .workspace
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("/")
+            .to_owned(),
+    )
 }
 
 impl Drop for App {
@@ -686,7 +831,13 @@ impl Drop for App {
 
 #[cfg(test)]
 mod tests {
-    use super::{adjacent_sidebar_name, pane_areas, sidebar_agent_name, submitted_title};
+    use std::path::PathBuf;
+
+    use kairo_core::{Agent, AgentStatus};
+
+    use super::{
+        adjacent_sidebar_name, automatic_title, pane_areas, sidebar_agent_name, submitted_command,
+    };
     use ratatui::layout::Rect;
 
     #[test]
@@ -703,10 +854,25 @@ mod tests {
     }
 
     #[test]
-    fn submitted_command_uses_its_first_token_as_the_title() {
+    fn submitted_command_uses_its_first_token() {
         let mut input = "codex --model gpt-5".to_owned();
-        assert_eq!(submitted_title(&mut input).as_deref(), Some("codex"));
+        assert_eq!(submitted_command(&mut input).as_deref(), Some("codex"));
         assert!(input.is_empty());
+    }
+
+    #[test]
+    fn first_command_uses_agent_name_or_workspace_folder() {
+        let agent = test_agent(false, "/tmp/kairo");
+
+        assert_eq!(automatic_title(&agent, "codex --model gpt-5").as_deref(), Some("codex"));
+        assert_eq!(automatic_title(&agent, "git status").as_deref(), Some("kairo"));
+    }
+
+    #[test]
+    fn locked_titles_are_not_overwritten_by_later_commands() {
+        let agent = test_agent(true, "/tmp/kairo");
+
+        assert_eq!(automatic_title(&agent, "gemini").as_deref(), None);
     }
 
     #[test]
@@ -728,5 +894,21 @@ mod tests {
         assert_eq!(adjacent_sidebar_name(&names, Some("first"), true).as_deref(), Some("third"));
         assert_eq!(adjacent_sidebar_name(&names, Some("third"), false).as_deref(), Some("first"));
         assert_eq!(adjacent_sidebar_name(&names, Some("second"), false).as_deref(), Some("third"));
+    }
+
+    fn test_agent(title_locked: bool, workspace: &str) -> Agent {
+        Agent {
+            id: "agent-1".to_owned(),
+            name: "terminal-1".to_owned(),
+            title: "Terminal 1".to_owned(),
+            title_locked,
+            adapter: "shell".to_owned(),
+            command: None,
+            workspace: PathBuf::from(workspace),
+            status: AgentStatus::Working,
+            pid: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }
     }
 }

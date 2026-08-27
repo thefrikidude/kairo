@@ -7,6 +7,8 @@ pub struct Agent {
     pub id: String,
     pub name: String,
     pub title: String,
+    #[serde(default = "default_title_locked")]
+    pub title_locked: bool,
     pub adapter: String,
     pub command: Option<Vec<String>>,
     pub workspace: PathBuf,
@@ -14,6 +16,10 @@ pub struct Agent {
     pub pid: Option<u32>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
+}
+
+fn default_title_locked() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

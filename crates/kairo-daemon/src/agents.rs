@@ -93,6 +93,7 @@ impl AgentManager {
             id: format!("agent-{timestamp}-{}", self.next_id),
             name: name.clone(),
             title: name.clone(),
+            title_locked: true,
             adapter,
             command: None,
             workspace,
@@ -121,6 +122,7 @@ impl AgentManager {
         let name = format!("terminal-{}-{}", now_millis(), sequence);
         let mut agent = self.create_with_adapter(name.clone(), "shell".to_owned(), workspace)?;
         agent.title = format!("Terminal {sequence}");
+        agent.title_locked = false;
         self.replace_agent(&agent)?;
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned());
         self.start(&name, vec![shell])
@@ -133,6 +135,7 @@ impl AgentManager {
         }
         let agent = self.agent_mut(name)?;
         agent.title = title;
+        agent.title_locked = true;
         agent.updated_at_ms = now_millis();
         let snapshot = agent.clone();
         self.storage.save_agent(&snapshot)?;
@@ -487,7 +490,22 @@ mod tests {
 
         assert_eq!(terminal.adapter, "shell");
         assert_eq!(terminal.title, "Terminal 1");
+        assert!(!terminal.title_locked);
         assert_eq!(terminal.status, AgentStatus::Working);
+        manager.stop(&terminal.name).expect("terminal stops");
+    }
+
+    #[test]
+    fn renaming_a_terminal_locks_its_title_and_rejects_blank_names() {
+        let mut manager = AgentManager::default();
+        let terminal = manager.open_terminal(std::env::temp_dir()).expect("terminal opens");
+
+        let renamed =
+            manager.set_title(&terminal.name, "research".to_owned()).expect("terminal renames");
+
+        assert_eq!(renamed.title, "research");
+        assert!(renamed.title_locked);
+        assert!(manager.set_title(&terminal.name, "   ".to_owned()).is_err());
         manager.stop(&terminal.name).expect("terminal stops");
     }
 

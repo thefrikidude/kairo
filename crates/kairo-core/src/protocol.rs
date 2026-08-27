@@ -73,6 +73,7 @@ mod tests {
             id: "agent-1".to_owned(),
             name: "coder".to_owned(),
             title: "coder".to_owned(),
+            title_locked: true,
             adapter: "shell".to_owned(),
             command: None,
             workspace: PathBuf::from("/tmp/kairo"),
