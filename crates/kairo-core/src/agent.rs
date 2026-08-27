@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct Agent {
     pub id: String,
     pub name: String,
+    pub title: String,
     pub adapter: String,
     pub command: Option<Vec<String>>,
     pub workspace: PathBuf,

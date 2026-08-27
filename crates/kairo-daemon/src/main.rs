@@ -181,6 +181,12 @@ fn dispatch(request: Request, agents: &Arc<Mutex<AgentManager>>) -> (Response, b
         Request::CreateAgent { name, adapter, workspace } => agents
             .create_with_adapter(name, adapter, workspace)
             .map_or_else(error_response, |agent| (Response::AgentCreated { agent }, false)),
+        Request::OpenTerminal { workspace } => agents
+            .open_terminal(workspace)
+            .map_or_else(error_response, |agent| (Response::TerminalOpened { agent }, false)),
+        Request::SetAgentTitle { name, title } => agents
+            .set_title(&name, title)
+            .map_or_else(error_response, |agent| (Response::AgentTitleUpdated { agent }, false)),
         Request::ListAgents => (Response::Agents { agents: agents.list() }, false),
         Request::StartAgent { name, command } => agents
             .start(&name, command)

@@ -92,6 +92,7 @@ impl AgentManager {
         let agent = Agent {
             id: format!("agent-{timestamp}-{}", self.next_id),
             name: name.clone(),
+            title: name.clone(),
             adapter,
             command: None,
             workspace,
@@ -113,6 +114,29 @@ impl AgentManager {
 
     pub fn list(&self) -> Vec<Agent> {
         self.agents.clone()
+    }
+
+    pub fn open_terminal(&mut self, workspace: PathBuf) -> Result<Agent> {
+        let sequence = self.next_id.saturating_add(1);
+        let name = format!("terminal-{}-{}", now_millis(), sequence);
+        let mut agent = self.create_with_adapter(name.clone(), "shell".to_owned(), workspace)?;
+        agent.title = format!("Terminal {sequence}");
+        self.replace_agent(&agent)?;
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned());
+        self.start(&name, vec![shell])
+    }
+
+    pub fn set_title(&mut self, name: &str, title: String) -> Result<Agent> {
+        let title = title.trim().to_owned();
+        if title.is_empty() {
+            return Err(KairoError::InvalidArguments("terminal title cannot be empty".to_owned()));
+        }
+        let agent = self.agent_mut(name)?;
+        agent.title = title;
+        agent.updated_at_ms = now_millis();
+        let snapshot = agent.clone();
+        self.storage.save_agent(&snapshot)?;
+        Ok(snapshot)
     }
 
     pub fn start(&mut self, name: &str, command: Vec<String>) -> Result<Agent> {
@@ -327,6 +351,12 @@ impl AgentManager {
         let index = self.agent_index(name)?;
         Ok(&mut self.agents[index])
     }
+
+    fn replace_agent(&mut self, agent: &Agent) -> Result<()> {
+        let index = self.agent_index(&agent.name)?;
+        self.agents[index] = agent.clone();
+        self.storage.save_agent(agent)
+    }
 }
 
 #[cfg(test)]
@@ -433,6 +463,17 @@ mod tests {
     use crate::{storage::Storage, transcript::TRANSCRIPT_CAPACITY};
 
     use super::{AgentManager, command_for_adapter, now_millis};
+
+    #[test]
+    fn opens_a_shell_terminal_with_a_persisted_title() {
+        let mut manager = AgentManager::default();
+        let terminal = manager.open_terminal(std::env::temp_dir()).expect("terminal opens");
+
+        assert_eq!(terminal.adapter, "shell");
+        assert_eq!(terminal.title, "Terminal 1");
+        assert_eq!(terminal.status, AgentStatus::Working);
+        manager.stop(&terminal.name).expect("terminal stops");
+    }
 
     #[test]
     fn creates_a_stopped_shell_agent() {

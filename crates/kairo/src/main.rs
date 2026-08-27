@@ -32,10 +32,17 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     match arguments.as_slice() {
+        [] => {
+            ensure_daemon_running()?;
+            tui::run()
+        }
         [command, action] if command == "daemon" && action == "start" => start_daemon(),
         [command, action] if command == "daemon" && action == "status" => daemon_status(),
         [command, action] if command == "daemon" && action == "stop" => stop_daemon(),
-        [command] if command == "tui" => tui::run(),
+        [command] if command == "tui" => {
+            ensure_daemon_running()?;
+            tui::run()
+        }
         [command, action, name, flag, workspace]
             if command == "agent" && action == "create" && flag == "--workspace" =>
         {
@@ -88,11 +95,18 @@ fn run() -> Result<()> {
 }
 
 fn start_daemon() -> Result<()> {
-    if send_request(Request::Ping).is_ok() {
+    if ensure_daemon_running()? {
         println!("Kairo daemon is already running.");
-        return Ok(());
+    } else {
+        println!("Kairo daemon started.");
     }
+    Ok(())
+}
 
+fn ensure_daemon_running() -> Result<bool> {
+    if send_request(Request::Ping).is_ok() {
+        return Ok(true);
+    }
     let daemon = daemon_binary_path()?;
     let mut command = Command::new(daemon);
     command.arg("serve").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
@@ -109,8 +123,7 @@ fn start_daemon() -> Result<()> {
     for _ in 0..30 {
         thread::sleep(Duration::from_millis(50));
         if matches!(send_request(Request::Ping), Ok(Response::Pong)) {
-            println!("Kairo daemon started.");
-            return Ok(());
+            return Ok(false);
         }
     }
 

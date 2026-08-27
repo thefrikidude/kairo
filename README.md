@@ -27,23 +27,24 @@ Install a current stable Rust toolchain with [rustup](https://rustup.rs/).
 
 ## Run locally
 
-Build both binaries once, then use the CLI:
+Build both binaries once, then launch the workspace:
 
 ```bash
 cargo build --workspace
-target/debug/kairo daemon start
+target/debug/kairo
+```
+
+Kairo starts its daemon automatically, opens one shell terminal in the current directory, and
+keeps running terminals alive when you quit the TUI. Click `+ Terminal` to add right-side panes,
+then type normal terminal commands such as `codex`, `claude`, `gemini`, `git`, or `npm`. Click a
+pane to focus it; `Ctrl-]` clears keyboard focus; click `[hide]` to remove a pane from the layout
+without stopping it. The sidebar lists running panes and restores hidden panes when clicked.
+
+The daemon and agent commands remain available for development and debugging:
+
+```bash
 target/debug/kairo daemon status
-target/debug/kairo tui
-target/debug/kairo agent create coder --workspace "$(pwd)"
-target/debug/kairo agent start coder -- sh -c 'sleep 30'
-target/debug/kairo agent create codex-worker --adapter codex --workspace "$(pwd)"
-target/debug/kairo agent start codex-worker
 target/debug/kairo agent list
-target/debug/kairo agent logs coder
-target/debug/kairo agent send coder -- "echo hello"
-target/debug/kairo agent attach coder
-target/debug/kairo agent interrupt coder
-target/debug/kairo agent stop coder
 target/debug/kairo daemon stop
 ```
 
@@ -65,19 +66,16 @@ a time, but other agents and normal Kairo commands continue to work.
 
 ## TUI overview
 
-`kairo tui` opens Kairo's terminal dashboard. Its sidebar lists currently running agents; click
-one to open its live native terminal. The dashboard workspace stays blank, so it never prints raw
-ANSI control sequences from retained logs. Kairo renders the live terminal screen, forwards your
-keys to the agent, and resizes the PTY when the Kairo window size changes. Click another sidebar
-agent to switch, press `Ctrl-]` to return to the blank dashboard, and press `q` to exit from the
-dashboard. Mouse input inside the agent terminal is not supported yet.
+`kairo` is a terminal multiplexer. Its sidebar lists running terminal panes, while the main area
+tiles every visible pane left-to-right at equal width. Kairo resizes each PTY whenever a pane is
+added, hidden, restored, or when the outer terminal window changes size. Mouse input inside a
+terminal application is not supported yet; clicks are used to focus, hide, and restore panes.
 
 ## Codex agents
 
-Create a Codex session with `--adapter codex`, then start it without supplying a shell command.
-Kairo launches the locally installed `codex` CLI with its normal terminal interface and preserves
-your existing Codex login, approval, sandbox, and model configuration. Kairo does not add unsafe
-Codex flags or provide a model account on its own.
+In any Kairo pane, type `codex` and press Enter. Kairo launches the locally installed Codex CLI
+with its normal terminal interface and preserves your existing Codex login, approval, sandbox, and
+model configuration. Kairo does not add unsafe Codex flags or provide a model account on its own.
 
 ## Development checks
 

@@ -33,6 +33,7 @@ impl Storage {
                 CREATE TABLE IF NOT EXISTS agents (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
+                    title TEXT,
                     adapter TEXT NOT NULL,
                     command_json TEXT,
                     workspace TEXT NOT NULL,
@@ -52,6 +53,19 @@ impl Storage {
                 ",
             )
             .map_err(storage_error)?;
+        let has_title = connection
+            .prepare("SELECT 1 FROM pragma_table_info('agents') WHERE name = 'title'")
+            .map_err(storage_error)?
+            .exists([])
+            .map_err(storage_error)?;
+        if !has_title {
+            connection
+                .execute("ALTER TABLE agents ADD COLUMN title TEXT", [])
+                .map_err(storage_error)?;
+        }
+        connection
+            .execute("UPDATE agents SET title = name WHERE title IS NULL OR title = ''", [])
+            .map_err(storage_error)?;
         Ok(Self { connection: Arc::new(Mutex::new(connection)) })
     }
 
@@ -59,27 +73,27 @@ impl Storage {
         let connection = self.connection.lock().map_err(lock_error)?;
         let mut statement = connection
             .prepare(
-                "SELECT id, name, adapter, command_json, workspace, status, pid, created_at_ms, updated_at_ms
+                "SELECT id, name, title, adapter, command_json, workspace, status, pid, created_at_ms, updated_at_ms
                  FROM agents ORDER BY created_at_ms, rowid",
             )
             .map_err(storage_error)?;
         let rows = statement
             .query_map([], |row| {
-                let command_json: Option<String> = row.get(3)?;
+                let command_json: Option<String> = row.get(4)?;
                 let command = command_json
                     .map(|value| serde_json::from_str(&value))
                     .transpose()
                     .map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            3,
+                            4,
                             rusqlite::types::Type::Text,
                             Box::new(error),
                         )
                     })?;
-                let status: String = row.get(5)?;
+                let status: String = row.get(6)?;
                 let status = serde_json::from_str(&format!("\"{status}\"")).map_err(|error| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        5,
+                        6,
                         rusqlite::types::Type::Text,
                         Box::new(error),
                     )
@@ -87,13 +101,14 @@ impl Storage {
                 Ok(Agent {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    adapter: row.get(2)?,
+                    title: row.get(2)?,
+                    adapter: row.get(3)?,
                     command,
-                    workspace: row.get::<_, String>(4)?.into(),
+                    workspace: row.get::<_, String>(5)?.into(),
                     status,
-                    pid: row.get(6)?,
-                    created_at_ms: row.get::<_, i64>(7)?.max(0) as u64,
-                    updated_at_ms: row.get::<_, i64>(8)?.max(0) as u64,
+                    pid: row.get(7)?,
+                    created_at_ms: row.get::<_, i64>(8)?.max(0) as u64,
+                    updated_at_ms: row.get::<_, i64>(9)?.max(0) as u64,
                 })
             })
             .map_err(storage_error)?;
@@ -109,15 +124,16 @@ impl Storage {
             .lock()
             .map_err(lock_error)?
             .execute(
-                "INSERT INTO agents (id, name, adapter, command_json, workspace, status, pid, created_at_ms, updated_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "INSERT INTO agents (id, name, title, adapter, command_json, workspace, status, pid, created_at_ms, updated_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name, adapter = excluded.adapter, command_json = excluded.command_json,
+                    name = excluded.name, title = excluded.title, adapter = excluded.adapter, command_json = excluded.command_json,
                     workspace = excluded.workspace, status = excluded.status, pid = excluded.pid,
                     created_at_ms = excluded.created_at_ms, updated_at_ms = excluded.updated_at_ms",
                 params![
                     agent.id,
                     agent.name,
+                    agent.title,
                     agent.adapter,
                     command,
                     agent.workspace.to_string_lossy(),
@@ -208,4 +224,39 @@ fn lock_error<T>(_error: std::sync::PoisonError<T>) -> KairoError {
 
 fn storage_error(error: impl std::fmt::Display) -> KairoError {
     KairoError::Runtime(format!("storage error: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Connection, Storage};
+
+    #[test]
+    fn migration_assigns_existing_agents_a_title_from_their_name() {
+        let connection = Connection::open_in_memory().expect("open test database");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE agents (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    adapter TEXT NOT NULL,
+                    command_json TEXT,
+                    workspace TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    pid INTEGER,
+                    created_at_ms INTEGER NOT NULL,
+                    updated_at_ms INTEGER NOT NULL
+                );
+                INSERT INTO agents VALUES (
+                    'agent-1', 'old-terminal', 'shell', NULL, '/tmp', 'stopped', NULL, 1, 1
+                );
+                ",
+            )
+            .expect("create old database schema");
+
+        let storage = Storage::from_connection(connection).expect("migrate old database");
+        let agents = storage.load_agents().expect("load migrated agents");
+
+        assert_eq!(agents[0].title, "old-terminal");
+    }
 }
