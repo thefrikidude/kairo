@@ -24,10 +24,10 @@ use kairo_core::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
 use crate::{connect_attachment, key_to_bytes, send_request};
@@ -35,8 +35,6 @@ use crate::{connect_attachment, key_to_bytes, send_request};
 const REFRESH_INTERVAL: Duration = Duration::from_millis(300);
 const SCROLLBACK_ROWS: usize = 2_000;
 const SIDEBAR_WIDTH: u16 = 28;
-const HIDE_LABEL_WIDTH: u16 = 6;
-const DELETE_LABEL_WIDTH: u16 = 8;
 
 pub fn run() -> Result<()> {
     let workspace = std::env::current_dir()?;
@@ -89,17 +87,24 @@ fn run_app(terminal: &mut KairoTerminal, workspace: PathBuf) -> Result<()> {
 }
 
 fn handle_event(app: &mut App, event: Event, area: Rect) {
+    if let Some(name) = app.delete_confirmation.clone() {
+        if let Event::Key(key) = event
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Enter => app.delete_terminal(&name),
+                KeyCode::Char('n') | KeyCode::Esc => app.delete_confirmation = None,
+                _ => {}
+            }
+        }
+        return;
+    }
+
     if let Event::Mouse(mouse) = &event
         && mouse.kind == MouseEventKind::Down(MouseButton::Left)
     {
         if sidebar_new_clicked(sidebar_area(area), mouse.column, mouse.row) {
             app.open_terminal();
-            return;
-        }
-        if let Some(name) =
-            sidebar_delete_name(&app.order, sidebar_area(area), mouse.column, mouse.row)
-        {
-            app.delete_terminal(&name);
             return;
         }
         if let Some(name) =
@@ -111,10 +116,8 @@ fn handle_event(app: &mut App, event: Event, area: Rect) {
         let names = app.visible_names();
         let panes = pane_areas(main_area(area), names.len());
         if let Some(index) = pane_index_at(&panes, mouse.column, mouse.row) {
-            if pane_hide_clicked(panes[index], mouse.column, mouse.row) {
-                app.hide_pane(index);
-            } else if let Some(name) = names.get(index) {
-                app.focused = Some(name.clone());
+            if let Some(name) = names.get(index) {
+                app.select_and_focus(name.clone());
             }
             return;
         }
@@ -127,6 +130,9 @@ fn handle_event(app: &mut App, event: Event, area: Rect) {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                 KeyCode::Char('r') => app.refresh(),
+                KeyCode::Char('t') => app.open_terminal(),
+                KeyCode::Char('h') => app.hide_selected(),
+                KeyCode::Char('d') => app.request_delete(),
                 _ => {}
             }
         }
@@ -165,7 +171,9 @@ struct App {
     terminals: Vec<LiveTerminal>,
     order: Vec<String>,
     hidden: HashSet<String>,
+    selected: Option<String>,
     focused: Option<String>,
+    delete_confirmation: Option<String>,
     error: Option<String>,
     should_quit: bool,
 }
@@ -178,7 +186,9 @@ impl App {
             terminals: Vec::new(),
             order: Vec::new(),
             hidden: HashSet::new(),
+            selected: None,
             focused: None,
+            delete_confirmation: None,
             error: None,
             should_quit: false,
         }
@@ -202,6 +212,7 @@ impl App {
             }
         }
         self.hidden.retain(|name| names.contains(name));
+        self.selected = self.selected.take().filter(|name| names.contains(name));
         self.focused = self.focused.take().filter(|name| names.contains(name));
         self.remove_finished_terminals(&names);
         let to_attach = self
@@ -247,16 +258,30 @@ impl App {
         if !self.order.contains(&name) {
             self.order.push(name.clone());
         }
+        self.select_and_focus(name);
+    }
+
+    fn select_and_focus(&mut self, name: String) {
+        self.selected = Some(name.clone());
         self.focused = Some(name);
     }
 
-    fn hide_pane(&mut self, index: usize) {
-        if let Some(name) = self.visible_names().get(index).cloned() {
-            self.hidden.insert(name.clone());
-            if self.focused.as_deref() == Some(name.as_str()) {
-                self.focused = None;
-            }
+    fn hide_selected(&mut self) {
+        let Some(name) = self.selected.clone() else {
+            self.set_error("select a terminal before hiding it".to_owned());
+            return;
+        };
+        if self.hidden.insert(name.clone()) {
+            self.focused = None;
         }
+    }
+
+    fn request_delete(&mut self) {
+        let Some(name) = self.selected.clone() else {
+            self.set_error("select a terminal before deleting it".to_owned());
+            return;
+        };
+        self.delete_confirmation = Some(name);
     }
 
     fn delete_terminal(&mut self, name: &str) {
@@ -270,9 +295,13 @@ impl App {
                 self.agents.retain(|agent| agent.name != name);
                 self.order.retain(|terminal_name| terminal_name != name);
                 self.hidden.remove(name);
+                if self.selected.as_deref() == Some(name) {
+                    self.selected = None;
+                }
                 if self.focused.as_deref() == Some(name) {
                     self.focused = None;
                 }
+                self.delete_confirmation = None;
             }
             Ok(Response::Error { message }) => self.set_error(message),
             Ok(unexpected) => self.set_error(format!("unexpected daemon response: {unexpected:?}")),
@@ -468,8 +497,7 @@ fn render(frame: &mut ratatui::Frame, app: &App) {
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(border))
-                        .title(format!(" {title} "))
-                        .title(Line::from("[hide]").right_aligned()),
+                        .title(format!(" {title} ")),
                 )
                 .wrap(Wrap { trim: false });
             frame.render_widget(pane, area);
@@ -482,12 +510,15 @@ fn render(frame: &mut ratatui::Frame, app: &App) {
             main,
         );
     }
+    render_delete_confirmation(frame, app);
     let footer = if let Some(error) = &app.error {
         format!(" {error} ")
+    } else if app.delete_confirmation.is_some() {
+        " y: permanently delete · n: cancel ".to_owned()
     } else if app.focused.is_some() {
-        " Click another pane to focus · Ctrl-] clears focus · [hide] keeps it running ".to_owned()
+        " Click another pane to focus · Ctrl-] opens Kairo shortcuts ".to_owned()
     } else {
-        " Click + Terminal or a pane · q: quit · r: refresh ".to_owned()
+        " t: new terminal · h: hide selected · d: delete selected · q: quit ".to_owned()
     };
     frame.render_widget(
         Paragraph::new(footer).style(Style::default().fg(Color::DarkGray)),
@@ -503,9 +534,10 @@ fn render_sidebar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     for name in &app.order {
         if let Some(agent) = app.agents.iter().find(|agent| agent.name == *name) {
             let focused = app.focused.as_deref() == Some(name.as_str());
+            let selected = app.selected.as_deref() == Some(name.as_str());
             let hidden = app.hidden.contains(name);
             let marker = if hidden { "○" } else { "●" };
-            let style = if focused {
+            let style = if focused || selected {
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
@@ -517,22 +549,35 @@ fn render_sidebar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Terminals ")),
         area,
     );
-    for (index, name) in app.order.iter().enumerate() {
-        if app.agents.iter().any(|agent| agent.name == *name) {
-            let delete_area = Rect::new(
-                area.x.saturating_add(1),
-                area.y.saturating_add(3).saturating_add(index as u16),
-                area.width.saturating_sub(2),
-                1,
-            );
-            frame.render_widget(
-                Paragraph::new("[delete]")
-                    .alignment(Alignment::Right)
-                    .style(Style::default().fg(Color::Red)),
-                delete_area,
-            );
-        }
-    }
+}
+
+fn render_delete_confirmation(frame: &mut ratatui::Frame, app: &App) {
+    let Some(name) = &app.delete_confirmation else {
+        return;
+    };
+    let title = app
+        .agents
+        .iter()
+        .find(|agent| agent.name == *name)
+        .map_or(name.as_str(), |agent| agent.title.as_str());
+    let area = frame.area();
+    let width = area.width.min(54);
+    let height = area.height.min(7);
+    let dialog = Rect::new(
+        area.x.saturating_add(area.width.saturating_sub(width) / 2),
+        area.y.saturating_add(area.height.saturating_sub(height) / 2),
+        width,
+        height,
+    );
+    frame.render_widget(Clear, dialog);
+    frame.render_widget(
+        Paragraph::new(format!(
+            "Delete `{title}` permanently?\n\nThis stops it and erases its saved history.\n\ny: delete    n: cancel"
+        ))
+        .block(Block::default().borders(Borders::ALL).title(" Confirm deletion "))
+        .wrap(Wrap { trim: false }),
+        dialog,
+    );
 }
 
 fn content_area(area: Rect) -> Rect {
@@ -581,15 +626,6 @@ fn sidebar_agent_name(names: &[String], area: Rect, column: u16, row: u16) -> Op
     let index = usize::from(row.saturating_sub(area.y.saturating_add(3)));
     (row >= area.y.saturating_add(3) && index < names.len()).then(|| names[index].clone())
 }
-fn sidebar_delete_name(names: &[String], area: Rect, column: u16, row: u16) -> Option<String> {
-    let delete_start =
-        area.x.saturating_add(area.width).saturating_sub(1).saturating_sub(DELETE_LABEL_WIDTH);
-    if column < delete_start {
-        return None;
-    }
-    let index = usize::from(row.saturating_sub(area.y.saturating_add(3)));
-    (row >= area.y.saturating_add(3) && index < names.len()).then(|| names[index].clone())
-}
 fn pane_index_at(areas: &[Rect], column: u16, row: u16) -> Option<usize> {
     areas.iter().position(|area| {
         column >= area.x
@@ -597,11 +633,6 @@ fn pane_index_at(areas: &[Rect], column: u16, row: u16) -> Option<usize> {
             && row >= area.y
             && row < area.y.saturating_add(area.height)
     })
-}
-fn pane_hide_clicked(area: Rect, column: u16, row: u16) -> bool {
-    let hide_start =
-        area.x.saturating_add(area.width).saturating_sub(1).saturating_sub(HIDE_LABEL_WIDTH);
-    row == area.y && column >= hide_start
 }
 fn submitted_title(input: &mut String) -> Option<String> {
     let title = input.split_whitespace().next().map(str::to_owned);
@@ -619,9 +650,7 @@ impl Drop for App {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        pane_areas, pane_hide_clicked, sidebar_agent_name, sidebar_delete_name, submitted_title,
-    };
+    use super::{pane_areas, sidebar_agent_name, submitted_title};
     use ratatui::layout::Rect;
 
     #[test]
@@ -653,21 +682,5 @@ mod tests {
         assert_eq!(sidebar_agent_name(&names, sidebar, 4, 4).as_deref(), Some("second"));
         assert_eq!(sidebar_agent_name(&names, sidebar, 4, 2), None);
         assert_eq!(sidebar_agent_name(&names, sidebar, 0, 3), None);
-    }
-
-    #[test]
-    fn narrow_panes_keep_their_right_aligned_hide_hit_area() {
-        let panes = pane_areas(Rect::new(28, 0, 59, 20), 4);
-
-        assert!(panes.iter().all(|pane| pane_hide_clicked(*pane, pane.right() - 2, pane.y)));
-    }
-
-    #[test]
-    fn sidebar_delete_click_targets_only_the_delete_label() {
-        let names = vec!["first".to_owned(), "second".to_owned()];
-        let sidebar = Rect::new(0, 0, 28, 10);
-
-        assert_eq!(sidebar_delete_name(&names, sidebar, 25, 3).as_deref(), Some("first"));
-        assert_eq!(sidebar_delete_name(&names, sidebar, 10, 3), None);
     }
 }

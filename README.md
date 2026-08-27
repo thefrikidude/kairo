@@ -37,9 +37,9 @@ target/debug/kairo
 Kairo starts its daemon automatically, opens one shell terminal in the current directory, and
 keeps running terminals alive when you quit the TUI. Click `+ Terminal` to add right-side panes,
 then type normal terminal commands such as `codex`, `claude`, `gemini`, `git`, or `npm`. Click a
-pane to focus it; `Ctrl-]` clears keyboard focus; click `[hide]` to remove a pane from the layout
-without stopping it. The sidebar lists running panes and restores hidden panes when clicked; click
-`[delete]` there to stop a session and permanently remove its saved history.
+pane to focus it. Press `Ctrl-]` to return to Kairo's shortcuts: `t` adds a terminal, `h` hides the
+selected pane without stopping it, and `d` opens a confirmation before permanently deleting the
+selected session and its saved history. The sidebar restores hidden panes when clicked.
 
 The daemon and agent commands remain available for development and debugging:
 
