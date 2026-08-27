@@ -65,12 +65,12 @@ a time, but other agents and normal Kairo commands continue to work.
 
 ## TUI overview
 
-`kairo tui` opens Kairo's terminal dashboard. It shows one tab per registered agent and the
-selected agent's retained log, refreshing from the daemon every 300 milliseconds. In dashboard
-mode, use `Left`/`Right` (or `h`/`l`) to switch tabs, `r` to refresh immediately, and `q` to exit.
-Press `Enter` on a running agent to open its live terminal in that tab. Kairo renders the native
-terminal screen, forwards your keys to the agent, and resizes the PTY when the Kairo window size
-changes. Press `Ctrl-]` to return to Kairo controls while leaving the agent running.
+`kairo tui` opens Kairo's terminal dashboard. Its sidebar lists currently running agents; click
+one to open its live native terminal. The dashboard workspace stays blank, so it never prints raw
+ANSI control sequences from retained logs. Kairo renders the live terminal screen, forwards your
+keys to the agent, and resizes the PTY when the Kairo window size changes. Click another sidebar
+agent to switch, press `Ctrl-]` to return to the blank dashboard, and press `q` to exit from the
+dashboard. Mouse input inside the agent terminal is not supported yet.
 
 ## Codex agents
 
