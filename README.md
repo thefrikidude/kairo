@@ -1,4 +1,5 @@
 # Kairo
+https://github.com/user-attachments/assets/18fd9938-8c6c-45c5-93f0-7073f68743df
 
 Kairo is a terminal-native runtime for managing persistent AI coding agents. It does not
 implement an AI agent itself; future versions will run existing agent CLIs inside managed
