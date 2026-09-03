@@ -1,88 +1,84 @@
 # Kairo
-https://github.com/user-attachments/assets/18fd9938-8c6c-45c5-93f0-7073f68743df
 
-Kairo is a small, terminal-first coding agent written in TypeScript. It uses Gemini through a provider boundary, works only inside the workspace you choose, and asks before every file change or shell command.
+Kairo is an extensible, terminal-first coding-agent runtime. Its goal is to become an OpenCode-style local workspace: reliable tool use, persistent tasks, pluggable models, model routing, and eventually specialized subagents working under one coordinator.
+
+The project starts with the part that matters most: one agent that can understand a repository, make a safe change, recover from failures, and verify its work.
+
+## Current capabilities
+
+- Interactive Gemini coding-agent REPL for one local workspace.
+- Workspace-confined file listing, code search, file reading, exact text edits, file writes, and shell commands.
+- Explicit approval before every edit, write, or shell command.
+- Streaming model output, local SQLite session history, and session resume.
+- Gemini credentials from the macOS Keychain, with `GEMINI_API_KEY` as a temporary or CI override.
+
+Kairo does not currently implement model routing, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
+
+## Requirements
+
+- Node.js 20 or newer
+- pnpm
+- A Gemini API key for the current provider implementation
+- macOS for `kairo auth login`; on other systems, set `GEMINI_API_KEY` instead
 
 ## Quick start
 
 ```bash
 pnpm install
 pnpm build
-pnpm exec kairo auth login
-pnpm exec kairo .
+node dist/index.js auth login
+node dist/index.js .
 ```
 
-`GEMINI_API_KEY` overrides the macOS Keychain credential, which is useful in CI. Keys are never written to Kairo's configuration or session database.
-
-Use `/help` inside the REPL to see commands. Sessions are stored locally in the platform state directory and can be resumed with `kairo resume <id>`.
-
-There is still no PTY reattachment after a daemon crash, database inspection command, or support
-for agent adapters beyond shell and Codex.
-
-## Prerequisites
-
-Install a current stable Rust toolchain with [rustup](https://rustup.rs/).
-
-## Run locally
-
-Build both binaries once, then launch the workspace:
+To avoid saving a key to the Keychain, provide it only for the current command:
 
 ```bash
-cargo build --workspace
-target/debug/kairo
+GEMINI_API_KEY=your_key_here node dist/index.js .
 ```
 
-Kairo starts its daemon automatically, opens one shell terminal in the current directory, and
-keeps running terminals alive when you quit the TUI. Click `+ Terminal` to add right-side panes,
-then type normal terminal commands such as `codex`, `claude`, `gemini`, `git`, or `npm`. Click a
-pane to focus it. Press `Ctrl-]` to return to Kairo's shortcuts: `t` adds a terminal, `h` hides the
-selected pane without stopping it, and `d` opens a confirmation before permanently deleting the
-selected session and its saved history. Use the Up/Down arrows to select a sidebar session, then
-press Enter to open it. Press `r` to rename the selected session. New sessions use the first
-submitted command only: common agent CLIs such as `codex`, `claude`, and `gemini` become the title;
-other commands use the workspace folder name. The sidebar also restores hidden panes when clicked.
+Kairo never stores API keys in its config file, session database, or Git repository.
 
-The daemon and agent commands remain available for development and debugging:
+## Commands
 
 ```bash
-target/debug/kairo daemon status
-target/debug/kairo agent list
-target/debug/kairo daemon stop
+# Start a new workspace session
+node dist/index.js [workspace]
+
+# Credentials
+node dist/index.js auth login
+node dist/index.js auth logout
+node dist/index.js auth status
+
+# Model configuration
+node dist/index.js config get model
+node dist/index.js config set model <model-name>
+
+# Session history
+node dist/index.js sessions list
+node dist/index.js resume <session-id>
 ```
 
-The runtime socket and SQLite database default to `$XDG_RUNTIME_DIR/kairo` when available,
-otherwise `$HOME/.kairo`. Set `KAIRO_HOME` to an absolute path to isolate Kairo state, which is
-useful for development and tests.
+Inside a session, use `/help`, `/new`, `/history`, `/resume <id>`, `/model`, and `/quit`.
+
+## Safety model
+
+Kairo resolves tool paths against the selected workspace and rejects attempts to escape it, including through symlinks. Read-only tools run immediately. Mutating actions always show the requested action and require a `y` or `yes` confirmation.
+
+Tool calls, approvals, outputs, and conversation messages are persisted so an interrupted session can be resumed. Session data is stored under the platform state directory; set `KAIRO_STATE_DIR` to use an isolated location for development or tests.
+
+## Roadmap
+
+1. **Make one agent dependable** — bounded tool loops, failure recovery, repository context selection, compaction, task checkpoints, and post-change verification.
+2. **Add provider abstraction** — make Gemini only the first `ModelProvider`, then add other cloud and local models without changing the agent loop.
+3. **Route tasks to models** — select fast, cheap, or stronger models based on task class, measured cost, latency, and reliability.
+4. **Add specialized subagents** — research, coding, and testing child sessions coordinated by a main agent.
+5. **Build an evaluation system** — run repeatable coding tasks and compare models, routing rules, agent profiles, cost, latency, and verified success.
+
+## Development
 
 ```bash
-KAIRO_HOME=/tmp/kairo-dev target/debug/kairo daemon start
+pnpm check
+pnpm test
 ```
 
-## Attach to an agent
-
-`kairo agent attach <name>` opens a live terminal view of one running agent. Kairo shows the
-retained transcript, then streams new PTY output. Input is forwarded to the native agent UI, so
-Codex handles prompt editing, Enter submission, shortcuts, and approval prompts itself. Press
-`Ctrl-]` to detach while leaving the agent running. One agent can be attached from one terminal at
-a time, but other agents and normal Kairo commands continue to work.
-
-## TUI overview
-
-`kairo` is a terminal multiplexer. Its sidebar lists running terminal panes, while the main area
-tiles every visible pane left-to-right at equal width. Kairo resizes each PTY whenever a pane is
-added, hidden, restored, or when the outer terminal window changes size. Mouse input inside a
-terminal application is not supported yet; clicks are used to focus, hide, and restore panes.
-
-## Codex agents
-
-In any Kairo pane, type `codex` and press Enter. Kairo launches the locally installed Codex CLI
-with its normal terminal interface and preserves your existing Codex login, approval, sandbox, and
-model configuration. Kairo does not add unsafe Codex flags or provide a model account on its own.
-
-## Development checks
-
-```bash
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
+The tests cover session persistence, denied mutating actions, workspace boundaries, symlink escapes, and tool execution behavior.
