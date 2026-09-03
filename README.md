@@ -1,4 +1,5 @@
 # Kairo
+https://github.com/user-attachments/assets/18fd9938-8c6c-45c5-93f0-7073f68743df
 
 Kairo is a small, terminal-first coding agent written in TypeScript. It uses Gemini through a provider boundary, works only inside the workspace you choose, and asks before every file change or shell command.
 
