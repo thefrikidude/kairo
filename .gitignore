@@ -1,2 +1,7 @@
-/target/
-.DS_Store
+node_modules/
+dist/
+target/
+.env
+.kairo/
+*.db
+*.db-*

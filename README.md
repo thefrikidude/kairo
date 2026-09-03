@@ -1,22 +1,19 @@
 # Kairo
 
-Kairo is a terminal-native runtime for managing persistent AI coding agents. It does not
-implement an AI agent itself; future versions will run existing agent CLIs inside managed
-terminal sessions.
+Kairo is a small, terminal-first coding agent written in TypeScript. It uses Gemini through a provider boundary, works only inside the workspace you choose, and asks before every file change or shell command.
 
-## Current milestone
+## Quick start
 
-This first milestone establishes the process boundary:
+```bash
+pnpm install
+pnpm build
+pnpm exec kairo auth login
+pnpm exec kairo .
+```
 
-- `kairo-daemon` is a background process that owns the local runtime socket.
-- `kairo` is a short-lived terminal client that sends commands to the daemon.
-- `kairo-core` holds the shared protocol, runtime-path logic, and errors.
+`GEMINI_API_KEY` overrides the macOS Keychain credential, which is useful in CI. Keys are never written to Kairo's configuration or session database.
 
-The daemon supervises one PTY-backed shell command per agent and preserves each agent's most
-recent 64 KiB of terminal history in a local SQLite database. The CLI can exit (or its terminal
-can close) without stopping the detached daemon or its agents. If the daemon itself crashes,
-Kairo restores saved agents and logs on the next start; agents that were active become
-`interrupted` because their final result is unknown.
+Use `/help` inside the REPL to see commands. Sessions are stored locally in the platform state directory and can be resumed with `kairo resume <id>`.
 
 There is still no PTY reattachment after a daemon crash, database inspection command, or support
 for agent adapters beyond shell and Codex.
