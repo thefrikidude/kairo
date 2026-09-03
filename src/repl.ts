@@ -19,10 +19,15 @@ export async function runRepl(createAgent: (approval: ApprovalPolicy) => Agent, 
     const line = (await rl.question("\nkairo> ")).trim();
     if (!line) continue;
     if (line === "/quit" || line === "/exit") break;
-    if (line === "/help") { console.log("/help  /new  /resume <id>  /history  /model  /quit"); continue; }
+    if (line === "/help") { console.log("/help  /new  /resume [session-id]  /history  /status  /changes  /verify <command>  /compact  /cancel  /model  /quit"); continue; }
     if (line === "/new") { active = store.create(active.workspace); console.log(`New session: ${active.id}`); continue; }
     if (line === "/history") { for (const item of store.list()) console.log(`${item.id}  ${item.workspace}  ${new Date(item.updatedAt).toLocaleString()}`); continue; }
     if (line === "/model") { console.log("Model is configured with `kairo config get model`."); continue; }
+    if (line === "/status" || line === "/changes") { const task = agent.status(active.id); if (!task) console.log("No task has run in this session."); else if (line === "/changes") console.log(task.changedFiles.length ? task.changedFiles.join("\n") : "No files changed."); else console.log(`${task.status}: ${task.prompt}${task.error ? `\nError: ${task.error}` : ""}${task.verificationCommand ? `\nVerification: ${task.verificationCommand}` : ""}`); continue; }
+    if (line === "/compact") { const summary = agent.compact(active.id); console.log(summary ? "Context checkpoint saved." : "No task to compact."); continue; }
+    if (line === "/cancel") { const task = agent.cancel(active.id); console.log(task ? "Task cancelled." : "No task to cancel."); continue; }
+    if (line === "/resume") { try { await agent.resume(active.id, (text) => stdout.write(text)); stdout.write("\n"); } catch (error) { console.error(`Kairo: ${(error as Error).message}`); } continue; }
+    if (line.startsWith("/verify ")) { try { await agent.verify(active.id, line.slice(8).trim(), (text) => stdout.write(text)); } catch (error) { console.error(`Kairo: ${(error as Error).message}`); } continue; }
     if (line.startsWith("/resume ")) { const next = store.get(line.slice(8).trim()); if (!next) console.log("Session not found."); else { active = next; console.log(`Resumed ${active.id}`); } continue; }
     try { await agent.run(active.id, line, (text) => stdout.write(text)); stdout.write("\n"); } catch (error) { console.error(`Kairo: ${(error as Error).message}`); }
   }

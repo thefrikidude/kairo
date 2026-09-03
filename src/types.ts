@@ -25,3 +25,29 @@ export interface ToolDefinition {
 export interface ToolResult { ok: boolean; output: string; }
 export interface ApprovalPolicy { approve(call: ToolCall, description: string): Promise<boolean>; }
 export interface CredentialStore { get(): Promise<string | undefined>; save(value: string): Promise<void>; clear(): Promise<void>; }
+
+export type TaskStatus = "planning" | "acting" | "verifying" | "completed" | "verification_required" | "failed" | "interrupted" | "cancelled";
+
+export interface Task {
+  id: string;
+  sessionId: string;
+  prompt: string;
+  status: TaskStatus;
+  changedFiles: string[];
+  verificationCommand?: string;
+  verificationOutput?: string;
+  verificationPassed?: boolean;
+  summary?: string;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ContextCheckpoint {
+  id: string;
+  sessionId: string;
+  taskId?: string;
+  summary: string;
+  throughMessageId: number;
+  createdAt: number;
+}
