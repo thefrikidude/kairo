@@ -4,6 +4,20 @@ Kairo is an extensible, terminal-first coding-agent runtime. Its goal is to beco
 
 The project starts with the part that matters most: one agent that can understand a repository, make a safe change, recover from failures, and verify its work.
 
+## Architecture
+
+Kairo follows a dependency-inverted, SOLID-oriented layout:
+
+```text
+src/
+├── domain/          # Task, message, tool models and dependency ports
+├── application/     # Coding-agent and context-management use cases
+├── infrastructure/  # SQLite, Gemini, filesystem tools, Keychain, configuration
+└── interface/cli/   # Terminal command parsing and interactive REPL
+```
+
+The application layer depends only on `domain/` interfaces. Gemini, SQLite, and terminal tools are adapters, so they can be replaced without rewriting the coding-agent workflow.
+
 ## Current capabilities
 
 - Interactive Gemini coding-agent REPL for one local workspace.
@@ -27,14 +41,14 @@ Kairo does not currently implement model routing, a full-screen terminal UI, MCP
 ```bash
 pnpm install
 pnpm build
-node dist/index.js auth login
-node dist/index.js .
+node dist/interface/cli/index.js auth login
+node dist/interface/cli/index.js .
 ```
 
 To avoid saving a key to the Keychain, provide it only for the current command:
 
 ```bash
-GEMINI_API_KEY=your_key_here node dist/index.js .
+GEMINI_API_KEY=your_key_here node dist/interface/cli/index.js .
 ```
 
 Kairo never stores API keys in its config file, session database, or Git repository.
@@ -43,20 +57,20 @@ Kairo never stores API keys in its config file, session database, or Git reposit
 
 ```bash
 # Start a new workspace session
-node dist/index.js [workspace]
+node dist/interface/cli/index.js [workspace]
 
 # Credentials
-node dist/index.js auth login
-node dist/index.js auth logout
-node dist/index.js auth status
+node dist/interface/cli/index.js auth login
+node dist/interface/cli/index.js auth logout
+node dist/interface/cli/index.js auth status
 
 # Model configuration
-node dist/index.js config get model
-node dist/index.js config set model <model-name>
+node dist/interface/cli/index.js config get model
+node dist/interface/cli/index.js config set model <model-name>
 
 # Session history
-node dist/index.js sessions list
-node dist/index.js resume <session-id>
+node dist/interface/cli/index.js sessions list
+node dist/interface/cli/index.js resume <session-id>
 ```
 
 Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, and `/quit`.
