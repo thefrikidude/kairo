@@ -1,15 +1,16 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import type { ApprovalPolicy, ToolCall } from "./types.js";
-import { Agent } from "./agent.js";
-import { SessionStore, type Session } from "./store.js";
+import type { ToolCall } from "../../domain/models.js";
+import type { ApprovalPolicy } from "../../domain/ports.js";
+import { CodingAgent } from "../../application/coding-agent.js";
+import { SqliteSessionStore, type Session } from "../../infrastructure/persistence/sqlite-session-store.js";
 
 export class TerminalApproval implements ApprovalPolicy {
   constructor(private readonly rl: ReturnType<typeof createInterface>) {}
   async approve(_call: ToolCall, description: string): Promise<boolean> { const answer = await this.rl.question(`\nApproval required:\n${description}\nAllow? [y/N] `); return /^(y|yes)$/i.test(answer.trim()); }
 }
 
-export async function runRepl(createAgent: (approval: ApprovalPolicy) => Agent, store: SessionStore, session: Session): Promise<void> {
+export async function runRepl(createAgent: (approval: ApprovalPolicy) => CodingAgent, store: SqliteSessionStore, session: Session): Promise<void> {
   const rl = createInterface({ input: stdin, output: stdout });
   console.log(`Kairo session ${session.id}\nWorkspace: ${session.workspace}\nType /help for commands.`);
   const approval = new TerminalApproval(rl);

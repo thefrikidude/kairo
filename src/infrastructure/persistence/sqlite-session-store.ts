@@ -1,11 +1,11 @@
 import Database from "better-sqlite3";
-import { databasePath, ensureStateDir } from "./paths.js";
-import type { ContextCheckpoint, Message, Task, TaskStatus } from "./types.js";
+import { databasePath, ensureStateDir } from "../filesystem/platform-paths.js";
+import type { ContextCheckpoint, Message, Task, TaskStatus } from "../../domain/models.js";
 
 export interface Session { id: string; workspace: string; createdAt: number; updatedAt: number; }
-export class SessionStore {
+export class SqliteSessionStore {
   private constructor(private readonly db: Database.Database) {}
-  static async open(path?: string): Promise<SessionStore> {
+  static async open(path?: string): Promise<SqliteSessionStore> {
     if (!path) await ensureStateDir();
     const db = new Database(path || databasePath());
     db.exec(`PRAGMA journal_mode=WAL;
@@ -20,7 +20,7 @@ export class SessionStore {
       CREATE INDEX IF NOT EXISTS checkpoints_session_created ON context_checkpoints(session_id, created_at DESC);`);
     const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as { name: string }[];
     if (!columns.some((column) => column.name === "verification_ok")) db.exec("ALTER TABLE tasks ADD COLUMN verification_ok INTEGER");
-    const store = new SessionStore(db);
+    const store = new SqliteSessionStore(db);
     store.recoverInterruptedTasks();
     return store;
   }

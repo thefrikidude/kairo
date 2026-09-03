@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-import type { Message, ModelProvider, ModelTurn, ToolDefinition } from "./types.js";
+import type { Message, ModelTurn } from "../../domain/models.js";
+import type { ModelProvider, ToolDefinition } from "../../domain/ports.js";
 
 const systemInstruction = "You are Kairo, a careful coding agent. Work only through the provided tools. Inspect relevant files before changing code. After any edit, run an appropriate verification command before declaring success. When a tool fails, inspect its error and try a materially different repair; do not repeat the same call. Keep tool use focused because outputs may be truncated and execution is bounded. Explain the completed work, verification evidence, and remaining limitations concisely.";
 

@@ -1,7 +1,8 @@
 import { readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import type { ToolCall, ToolDefinition, ToolResult } from "./types.js";
+import type { ToolCall, ToolResult } from "../../domain/models.js";
+import type { ToolDefinition, ToolExecutor } from "../../domain/ports.js";
 
 const MAX_OUTPUT = 48_000;
 const ignored = new Set([".git", "node_modules", "dist", ".kairo"]);
@@ -16,7 +17,7 @@ export const definitions: ToolDefinition[] = [
   { name: "run_command", description: "Run a shell command inside the workspace.", mutating: true, parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } }
 ];
 
-export class WorkspaceTools {
+export class WorkspaceTools implements ToolExecutor {
   readonly root: string;
   private constructor(root: string) { this.root = root; }
   static async create(workspace: string): Promise<WorkspaceTools> { return new WorkspaceTools(await realpath(workspace)); }

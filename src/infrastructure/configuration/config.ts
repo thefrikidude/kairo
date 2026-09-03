@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { configPath, ensureStateDir } from "./paths.js";
+import { configPath, ensureStateDir } from "../filesystem/platform-paths.js";
 
 export interface KairoConfig { model: string; }
 const defaults: KairoConfig = { model: "gemini-2.5-flash" };

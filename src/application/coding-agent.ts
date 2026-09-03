@@ -1,16 +1,15 @@
-import { ContextManager } from "./context.js";
-import type { ApprovalPolicy, Message, ModelProvider, Task, ToolCall, ToolResult } from "./types.js";
-import { definitions, WorkspaceTools } from "./tools.js";
-import { SessionStore } from "./store.js";
+import { ContextManager } from "./context-manager.js";
+import type { Message, Task, ToolCall, ToolResult } from "../domain/models.js";
+import type { ApprovalPolicy, ModelProvider, TaskStore, ToolDefinition, ToolExecutor } from "../domain/ports.js";
 
 const MAX_MODEL_TURNS = 20;
 const MAX_TOOL_CALLS = 40;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const MAX_IDENTICAL_CALLS = 2;
 
-export class Agent {
+export class CodingAgent {
   private readonly context: ContextManager;
-  constructor(private readonly provider: ModelProvider, private readonly store: SessionStore, private readonly tools: WorkspaceTools, private readonly approval: ApprovalPolicy) { this.context = new ContextManager(store); }
+  constructor(private readonly provider: ModelProvider, private readonly store: TaskStore, private readonly tools: ToolExecutor, private readonly approval: ApprovalPolicy, private readonly toolDefinitions: ToolDefinition[]) { this.context = new ContextManager(store); }
 
   async run(sessionId: string, input: string, onText: (text: string) => void): Promise<void> {
     const task = this.store.startTask(sessionId, input);
@@ -78,7 +77,7 @@ export class Agent {
   private save(session: string, message: Message): void { this.store.addMessage(session, message); }
 
   private async executeTool(task: Task, call: ToolCall, onText: (text: string) => void): Promise<ToolResult> {
-    const definition = definitions.find((item) => item.name === call.name);
+    const definition = this.toolDefinitions.find((item) => item.name === call.name);
     this.save(task.sessionId, { role: "model", content: JSON.stringify(call.args), toolCallId: call.id, toolName: call.name, createdAt: Date.now() });
     let approved: boolean | null = null;
     if (!definition) return this.record(task, call, false, "Unknown tool requested.", false);

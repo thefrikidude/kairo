@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceTools } from "./tools.js";
+import { WorkspaceTools } from "./workspace-tools.js";
 
 test("workspace tools read, edit, truncate, and reject escapes", async () => {
   const root = await mkdtemp(join(tmpdir(), "kairo-tools-")); await mkdir(join(root, "src"));

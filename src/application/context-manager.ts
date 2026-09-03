@@ -1,12 +1,12 @@
-import type { Message, Task } from "./types.js";
-import { SessionStore } from "./store.js";
+import type { Message, Task } from "../domain/models.js";
+import type { TaskStore } from "../domain/ports.js";
 
 const AUTO_COMPACT_AFTER = 48;
 const MODEL_MESSAGE_LIMIT = 32;
 const excerpt = (value: string, length = 700) => value.length > length ? `${value.slice(0, length)}…` : value;
 
 export class ContextManager {
-  constructor(private readonly store: SessionStore) {}
+  constructor(private readonly store: TaskStore) {}
   prepare(sessionId: string, task: Task): Message[] {
     if (this.store.messageCount(sessionId) >= AUTO_COMPACT_AFTER) this.compact(sessionId, task);
     const checkpoint = this.store.latestCheckpoint(sessionId);

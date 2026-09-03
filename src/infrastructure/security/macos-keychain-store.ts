@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { CredentialStore } from "./types.js";
+import type { CredentialStore } from "../../domain/ports.js";
 const run = promisify(execFile);
 const service = "dev.kairo.gemini";
 const account = "default";
