@@ -15,3 +15,11 @@ test("sessions persist messages and sort by latest activity", async () => {
   assert.equal(store.list()[0]?.id, session.id);
   store.close();
 });
+
+test("active tasks recover as interrupted after restart", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-recover-")); const path = join(dir, "sessions.sqlite");
+  const first = await SessionStore.open(path); const session = first.create("/workspace"); const task = first.startTask(session.id, "repair tests"); first.updateTask(task.id, { status: "acting" }); first.close();
+  const restarted = await SessionStore.open(path);
+  assert.equal(restarted.task(task.id)?.status, "interrupted");
+  restarted.close();
+});
