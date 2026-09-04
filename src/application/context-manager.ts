@@ -71,7 +71,7 @@ export class ContextManager {
     task: Task,
     profile: NonNullable<ReturnType<TaskStore["repositoryProfile"]>>,
   ): string {
-    const relevantFiles = this.selector.select(task.prompt, profile);
+    const relevantFiles = this.selector.select(this.retrievalQuery(task), profile);
     return [
       "Repository profile:",
       `Root: ${profile.root}`,
@@ -84,5 +84,11 @@ export class ContextManager {
       `Relevant files for this task: ${relevantFiles.join(", ") || "use search_files to locate files"}`,
       "Use the profile as a guide, inspect files before edits, and choose an appropriate verification command after changes.",
     ].join("\n");
+  }
+  private retrievalQuery(task: Task): string {
+    return [task.prompt, task.error, task.verificationOutput]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.slice(0, 8_000))
+      .join("\n");
   }
 }

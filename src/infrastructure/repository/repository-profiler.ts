@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
-import type { RepositoryProfile } from "../../domain/models.js";
+import { basename, join, posix, relative } from "node:path";
+import type { RepositoryFile, RepositoryProfile } from "../../domain/models.js";
 import { VerificationPlanner } from "../../application/verification-planner.js";
 
 const DEFAULT_IGNORES = [".git", "node_modules", "dist", "build", "coverage", ".next", ".kairo"];
@@ -15,6 +15,9 @@ const CONFIG_FILES = [
   ".eslintrc.json",
 ];
 const MAX_INDEXED_FILES = 800;
+const MAX_TERMS_PER_FILE = 400;
+const MAX_SYMBOLS_PER_FILE = 80;
+const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 
 export class RepositoryProfiler {
   async profile(root: string): Promise<RepositoryProfile> {
@@ -37,7 +40,7 @@ export class RepositoryProfiler {
           : names.has("package-lock.json")
             ? "npm"
             : "unknown";
-    const indexedFiles = await this.indexFiles(root, ignoredPaths);
+    const files = await this.indexFiles(root, ignoredPaths);
     const scripts = this.scripts(packageJson);
     const profile: RepositoryProfile = {
       root,
@@ -48,7 +51,8 @@ export class RepositoryProfiler {
       sourceRoots,
       testRoots,
       ignoredPaths,
-      indexedFiles,
+      indexedFiles: files.map((file) => file.path),
+      files: this.connectFiles(files, sourceRoots, testRoots),
       verificationCandidates: [],
       createdAt: Date.now(),
     };
@@ -86,19 +90,104 @@ export class RepositoryProfiler {
       ),
     );
   }
-  private async indexFiles(root: string, ignoredPaths: string[]): Promise<string[]> {
-    const files: string[] = [];
+  private async indexFiles(root: string, ignoredPaths: string[]): Promise<RepositoryFile[]> {
+    const files: RepositoryFile[] = [];
     const visit = async (directory: string): Promise<void> => {
       for (const entry of await readdir(directory, { withFileTypes: true })) {
         if (files.length >= MAX_INDEXED_FILES || ignoredPaths.includes(entry.name)) continue;
         const full = join(directory, entry.name);
         const path = relative(root, full);
         if (entry.isDirectory()) await visit(full);
-        else if (entry.isFile() && this.isUseful(path, await stat(full))) files.push(path);
+        else if (entry.isFile() && this.isUseful(path, await stat(full))) {
+          const text = await this.readText(full);
+          files.push({
+            path,
+            terms: this.terms(text),
+            symbols: this.symbols(text),
+            imports: this.imports(text),
+            relatedFiles: [],
+          });
+        }
       }
     };
     await visit(root);
-    return files.sort();
+    return files.sort((left, right) => left.path.localeCompare(right.path));
+  }
+  private async readText(path: string): Promise<string> {
+    try {
+      return await readFile(path, "utf8");
+    } catch {
+      return "";
+    }
+  }
+  private terms(text: string): string[] {
+    return [text, text.replace(/([a-z])([A-Z])/g, "$1 $2")]
+      .flatMap((part) => part.toLowerCase().split(/[^a-z0-9_$]+/))
+      .filter((term) => term.length > 2)
+      .filter((term, index, terms) => terms.indexOf(term) === index)
+      .slice(0, MAX_TERMS_PER_FILE);
+  }
+  private symbols(text: string): string[] {
+    return [
+      ...text.matchAll(
+        /(?:function|class|interface|type|enum|const|let|var)\s+([A-Za-z_$][\w$]*)/g,
+      ),
+    ]
+      .map((match) => match[1]!.toLowerCase())
+      .slice(0, MAX_SYMBOLS_PER_FILE);
+  }
+  private connectFiles(
+    files: RepositoryFile[],
+    sourceRoots: string[],
+    testRoots: string[],
+  ): RepositoryFile[] {
+    const paths = new Set(files.map((file) => file.path));
+    const byPath = new Map(files.map((file) => [file.path, file]));
+    for (const file of files) {
+      const targets = new Set<string>();
+      for (const specifier of file.imports) {
+        const target = this.resolveImport(file.path, specifier, paths);
+        if (target) targets.add(target);
+      }
+      const testTarget = this.testTarget(file.path, paths, sourceRoots, testRoots);
+      if (testTarget) targets.add(testTarget);
+      file.relatedFiles = [...targets].sort();
+    }
+    for (const file of files) {
+      for (const target of file.relatedFiles) {
+        const targetFile = byPath.get(target);
+        if (targetFile && !targetFile.relatedFiles.includes(file.path))
+          targetFile.relatedFiles.push(file.path);
+      }
+    }
+    return files.map((file) => ({ ...file, relatedFiles: file.relatedFiles.sort() }));
+  }
+  private imports(text: string): string[] {
+    return [...text.matchAll(/(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g)]
+      .map((match) => match[1]!)
+      .filter((specifier) => specifier.startsWith("."));
+  }
+  private resolveImport(from: string, specifier: string, paths: Set<string>): string | undefined {
+    const base = posix.normalize(posix.join(posix.dirname(from), specifier));
+    const extensionless = base.replace(/\.[^.\/]+$/, "");
+    return [
+      base,
+      extensionless,
+      ...SOURCE_EXTENSIONS.map((extension) => `${extensionless}${extension}`),
+      ...SOURCE_EXTENSIONS.map((extension) => `${extensionless}/index${extension}`),
+    ].find((candidate) => paths.has(candidate));
+  }
+  private testTarget(
+    file: string,
+    paths: Set<string>,
+    sourceRoots: string[],
+    testRoots: string[],
+  ): string | undefined {
+    if (!testRoots.some((root) => file.startsWith(`${root}/`))) return undefined;
+    const name = basename(file).replace(/\.(test|spec)\.[^.]+$/, "");
+    return sourceRoots
+      .flatMap((root) => SOURCE_EXTENSIONS.map((extension) => `${root}/${name}${extension}`))
+      .find((candidate) => paths.has(candidate));
   }
   private isUseful(path: string, file: { size: number }): boolean {
     return (

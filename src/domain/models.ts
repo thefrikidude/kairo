@@ -29,6 +29,14 @@ export interface VerificationCandidate {
   command: string;
 }
 
+export interface RepositoryFile {
+  path: string;
+  terms: string[];
+  symbols: string[];
+  imports: string[];
+  relatedFiles: string[];
+}
+
 export interface RepositoryProfile {
   root: string;
   packageName?: string;
@@ -39,6 +47,7 @@ export interface RepositoryProfile {
   testRoots: string[];
   ignoredPaths: string[];
   indexedFiles: string[];
+  files: RepositoryFile[];
   verificationCandidates: VerificationCandidate[];
   createdAt: number;
 }
