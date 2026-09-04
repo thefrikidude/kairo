@@ -3,15 +3,34 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "kairo": "./dist/interface/cli/index.js" },
-  "engines": { "node": ">=20" },
+  "bin": {
+    "kairo": "./dist/interface/cli/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "check": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "npm run build && node --test dist",
     "start": "tsx src/interface/cli/index.ts"
   },
-  "dependencies": { "@google/genai": "^1.0.0", "better-sqlite3": "^12.0.0" },
-  "devDependencies": { "@types/better-sqlite3": "^7.6.0", "@types/node": "^22.0.0", "tsx": "^4.0.0", "typescript": "^5.0.0" }
-  ,"pnpm": { "onlyBuiltDependencies": ["better-sqlite3"] }
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "better-sqlite3": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
 }

@@ -8,14 +8,34 @@ const account = "default";
 export class MacOSKeychainStore implements CredentialStore {
   async get(): Promise<string | undefined> {
     if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
-    try { return (await run("security", ["find-generic-password", "-s", service, "-a", account, "-w"])).stdout.trim() || undefined; }
-    catch { return undefined; }
+    try {
+      return (
+        (
+          await run("security", ["find-generic-password", "-s", service, "-a", account, "-w"])
+        ).stdout.trim() || undefined
+      );
+    } catch {
+      return undefined;
+    }
   }
   async save(value: string): Promise<void> {
     if (!value.trim()) throw new Error("API key cannot be empty.");
-    await run("security", ["add-generic-password", "-U", "-s", service, "-a", account, "-w", value.trim()]);
+    await run("security", [
+      "add-generic-password",
+      "-U",
+      "-s",
+      service,
+      "-a",
+      account,
+      "-w",
+      value.trim(),
+    ]);
   }
   async clear(): Promise<void> {
-    try { await run("security", ["delete-generic-password", "-s", service, "-a", account]); } catch { /* missing credential is already logged out */ }
+    try {
+      await run("security", ["delete-generic-password", "-s", service, "-a", account]);
+    } catch {
+      /* missing credential is already logged out */
+    }
   }
 }

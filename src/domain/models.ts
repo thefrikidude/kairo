@@ -8,11 +8,29 @@ export interface Message {
   toolName?: string;
 }
 
-export interface ToolCall { id: string; name: string; args: Record<string, unknown>; }
-export interface ModelTurn { text: string; toolCalls: ToolCall[]; }
-export interface ToolResult { ok: boolean; output: string; }
+export interface ToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+export interface ModelTurn {
+  text: string;
+  toolCalls: ToolCall[];
+}
+export interface ToolResult {
+  ok: boolean;
+  output: string;
+}
 
-export type TaskStatus = "planning" | "acting" | "verifying" | "completed" | "verification_required" | "failed" | "interrupted" | "cancelled";
+export type TaskStatus =
+  | "planning"
+  | "acting"
+  | "verifying"
+  | "completed"
+  | "verification_required"
+  | "failed"
+  | "interrupted"
+  | "cancelled";
 
 export interface Task {
   id: string;

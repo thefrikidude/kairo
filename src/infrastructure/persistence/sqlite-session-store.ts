@@ -2,7 +2,12 @@ import Database from "better-sqlite3";
 import { databasePath, ensureStateDir } from "../filesystem/platform-paths.js";
 import type { ContextCheckpoint, Message, Task, TaskStatus } from "../../domain/models.js";
 
-export interface Session { id: string; workspace: string; createdAt: number; updatedAt: number; }
+export interface Session {
+  id: string;
+  workspace: string;
+  createdAt: number;
+  updatedAt: number;
+}
 export class SqliteSessionStore {
   private constructor(private readonly db: Database.Database) {}
   static async open(path?: string): Promise<SqliteSessionStore> {
@@ -18,54 +23,262 @@ export class SqliteSessionStore {
       CREATE INDEX IF NOT EXISTS tasks_session_updated ON tasks(session_id, updated_at DESC);
       CREATE TABLE IF NOT EXISTS context_checkpoints (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT, summary TEXT NOT NULL, through_message_id INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE INDEX IF NOT EXISTS checkpoints_session_created ON context_checkpoints(session_id, created_at DESC);`);
-    const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as { name: string }[];
-    if (!columns.some((column) => column.name === "verification_ok")) db.exec("ALTER TABLE tasks ADD COLUMN verification_ok INTEGER");
+    const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as {
+      name: string;
+    }[];
+    if (!columns.some((column) => column.name === "verification_ok"))
+      db.exec("ALTER TABLE tasks ADD COLUMN verification_ok INTEGER");
     const store = new SqliteSessionStore(db);
     store.recoverInterruptedTasks();
     return store;
   }
-  close(): void { this.db.close(); }
+  close(): void {
+    this.db.close();
+  }
   create(workspace: string): Session {
-    const now = Date.now(); const id = `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+    const now = Date.now();
+    const id = `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
     this.db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?)").run(id, workspace, now, now);
     return { id, workspace, createdAt: now, updatedAt: now };
   }
   get(id: string): Session | undefined {
-    const row = this.db.prepare("SELECT id, workspace, created_at, updated_at FROM sessions WHERE id = ?").get(id) as Record<string, unknown> | undefined;
-    return row && { id: String(row.id), workspace: String(row.workspace), createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) };
+    const row = this.db
+      .prepare("SELECT id, workspace, created_at, updated_at FROM sessions WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
+    return (
+      row && {
+        id: String(row.id),
+        workspace: String(row.workspace),
+        createdAt: Number(row.created_at),
+        updatedAt: Number(row.updated_at),
+      }
+    );
   }
-  list(): Session[] { return (this.db.prepare("SELECT id, workspace, created_at, updated_at FROM sessions ORDER BY updated_at DESC").all() as Record<string, unknown>[]).map((r) => ({ id: String(r.id), workspace: String(r.workspace), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) })); }
-  messages(sessionId: string): Message[] { return (this.db.prepare("SELECT role, content, tool_call_id, tool_name, created_at FROM messages WHERE session_id=? ORDER BY id").all(sessionId) as Record<string, unknown>[]).map((r) => ({ role: r.role as Message["role"], content: String(r.content), toolCallId: r.tool_call_id ? String(r.tool_call_id) : undefined, toolName: r.tool_name ? String(r.tool_name) : undefined, createdAt: Number(r.created_at) })); }
-  recentMessages(sessionId: string, limit: number): Message[] { return (this.db.prepare("SELECT role, content, tool_call_id, tool_name, created_at FROM (SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?) ORDER BY id").all(sessionId, limit) as Record<string, unknown>[]).map((r) => ({ role: r.role as Message["role"], content: String(r.content), toolCallId: r.tool_call_id ? String(r.tool_call_id) : undefined, toolName: r.tool_name ? String(r.tool_name) : undefined, createdAt: Number(r.created_at) })); }
-  addMessage(sessionId: string, message: Message): void { this.db.prepare("INSERT INTO messages(session_id, role, content, tool_call_id, tool_name, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(sessionId, message.role, message.content, message.toolCallId ?? null, message.toolName ?? null, message.createdAt); this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(Date.now(), sessionId); }
-  recordTool(sessionId: string, id: string, name: string, args: Record<string, unknown>, approved: boolean | null, output: string): void { this.db.prepare("INSERT INTO tool_events(session_id, call_id, name, args_json, approved, output, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(sessionId, id, name, JSON.stringify(args), approved === null ? null : Number(approved), output, Date.now()); }
+  list(): Session[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT id, workspace, created_at, updated_at FROM sessions ORDER BY updated_at DESC",
+        )
+        .all() as Record<string, unknown>[]
+    ).map((r) => ({
+      id: String(r.id),
+      workspace: String(r.workspace),
+      createdAt: Number(r.created_at),
+      updatedAt: Number(r.updated_at),
+    }));
+  }
+  messages(sessionId: string): Message[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT role, content, tool_call_id, tool_name, created_at FROM messages WHERE session_id=? ORDER BY id",
+        )
+        .all(sessionId) as Record<string, unknown>[]
+    ).map((r) => ({
+      role: r.role as Message["role"],
+      content: String(r.content),
+      toolCallId: r.tool_call_id ? String(r.tool_call_id) : undefined,
+      toolName: r.tool_name ? String(r.tool_name) : undefined,
+      createdAt: Number(r.created_at),
+    }));
+  }
+  recentMessages(sessionId: string, limit: number): Message[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT role, content, tool_call_id, tool_name, created_at FROM (SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
+        )
+        .all(sessionId, limit) as Record<string, unknown>[]
+    ).map((r) => ({
+      role: r.role as Message["role"],
+      content: String(r.content),
+      toolCallId: r.tool_call_id ? String(r.tool_call_id) : undefined,
+      toolName: r.tool_name ? String(r.tool_name) : undefined,
+      createdAt: Number(r.created_at),
+    }));
+  }
+  addMessage(sessionId: string, message: Message): void {
+    this.db
+      .prepare(
+        "INSERT INTO messages(session_id, role, content, tool_call_id, tool_name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        sessionId,
+        message.role,
+        message.content,
+        message.toolCallId ?? null,
+        message.toolName ?? null,
+        message.createdAt,
+      );
+    this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(Date.now(), sessionId);
+  }
+  recordTool(
+    sessionId: string,
+    id: string,
+    name: string,
+    args: Record<string, unknown>,
+    approved: boolean | null,
+    output: string,
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO tool_events(session_id, call_id, name, args_json, approved, output, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        sessionId,
+        id,
+        name,
+        JSON.stringify(args),
+        approved === null ? null : Number(approved),
+        output,
+        Date.now(),
+      );
+  }
   startTask(sessionId: string, prompt: string): Task {
-    const now = Date.now(); const id = `task-${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-    this.db.prepare("INSERT INTO tasks(id, session_id, prompt, status, changed_files_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, sessionId, prompt, "planning", "[]", now, now);
+    const now = Date.now();
+    const id = `task-${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+    this.db
+      .prepare(
+        "INSERT INTO tasks(id, session_id, prompt, status, changed_files_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(id, sessionId, prompt, "planning", "[]", now, now);
     return this.task(id)!;
   }
-  task(id: string): Task | undefined { return this.toTask(this.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Record<string, unknown> | undefined); }
-  latestTask(sessionId: string): Task | undefined { return this.toTask(this.db.prepare("SELECT * FROM tasks WHERE session_id=? ORDER BY updated_at DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined); }
-  updateTask(id: string, patch: Partial<Pick<Task, "status" | "changedFiles" | "verificationCommand" | "verificationOutput" | "verificationPassed" | "summary" | "error">>): Task {
-    const task = this.task(id); if (!task) throw new Error(`Task not found: ${id}`);
+  task(id: string): Task | undefined {
+    return this.toTask(
+      this.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as
+        Record<string, unknown> | undefined,
+    );
+  }
+  latestTask(sessionId: string): Task | undefined {
+    return this.toTask(
+      this.db
+        .prepare("SELECT * FROM tasks WHERE session_id=? ORDER BY updated_at DESC LIMIT 1")
+        .get(sessionId) as Record<string, unknown> | undefined,
+    );
+  }
+  updateTask(
+    id: string,
+    patch: Partial<
+      Pick<
+        Task,
+        | "status"
+        | "changedFiles"
+        | "verificationCommand"
+        | "verificationOutput"
+        | "verificationPassed"
+        | "summary"
+        | "error"
+      >
+    >,
+  ): Task {
+    const task = this.task(id);
+    if (!task) throw new Error(`Task not found: ${id}`);
     const next = { ...task, ...patch, updatedAt: Date.now() };
-    this.db.prepare("UPDATE tasks SET status=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, summary=?, error=?, updated_at=? WHERE id=?").run(next.status, JSON.stringify(next.changedFiles), next.verificationCommand ?? null, next.verificationOutput ?? null, next.verificationPassed === undefined ? null : Number(next.verificationPassed), next.summary ?? null, next.error ?? null, next.updatedAt, id);
+    this.db
+      .prepare(
+        "UPDATE tasks SET status=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, summary=?, error=?, updated_at=? WHERE id=?",
+      )
+      .run(
+        next.status,
+        JSON.stringify(next.changedFiles),
+        next.verificationCommand ?? null,
+        next.verificationOutput ?? null,
+        next.verificationPassed === undefined ? null : Number(next.verificationPassed),
+        next.summary ?? null,
+        next.error ?? null,
+        next.updatedAt,
+        id,
+      );
     return next;
   }
-  saveCheckpoint(sessionId: string, taskId: string | undefined, summary: string, throughMessageId: number): ContextCheckpoint {
-    const checkpoint: ContextCheckpoint = { id: `checkpoint-${crypto.randomUUID()}`, sessionId, taskId, summary, throughMessageId, createdAt: Date.now() };
-    this.db.prepare("INSERT INTO context_checkpoints VALUES (?, ?, ?, ?, ?, ?)").run(checkpoint.id, checkpoint.sessionId, checkpoint.taskId ?? null, checkpoint.summary, checkpoint.throughMessageId, checkpoint.createdAt);
+  saveCheckpoint(
+    sessionId: string,
+    taskId: string | undefined,
+    summary: string,
+    throughMessageId: number,
+  ): ContextCheckpoint {
+    const checkpoint: ContextCheckpoint = {
+      id: `checkpoint-${crypto.randomUUID()}`,
+      sessionId,
+      taskId,
+      summary,
+      throughMessageId,
+      createdAt: Date.now(),
+    };
+    this.db
+      .prepare("INSERT INTO context_checkpoints VALUES (?, ?, ?, ?, ?, ?)")
+      .run(
+        checkpoint.id,
+        checkpoint.sessionId,
+        checkpoint.taskId ?? null,
+        checkpoint.summary,
+        checkpoint.throughMessageId,
+        checkpoint.createdAt,
+      );
     return checkpoint;
   }
   latestCheckpoint(sessionId: string): ContextCheckpoint | undefined {
-    const row = this.db.prepare("SELECT * FROM context_checkpoints WHERE session_id=? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined;
-    return row && { id: String(row.id), sessionId: String(row.session_id), taskId: row.task_id ? String(row.task_id) : undefined, summary: String(row.summary), throughMessageId: Number(row.through_message_id), createdAt: Number(row.created_at) };
+    const row = this.db
+      .prepare(
+        "SELECT * FROM context_checkpoints WHERE session_id=? ORDER BY created_at DESC LIMIT 1",
+      )
+      .get(sessionId) as Record<string, unknown> | undefined;
+    return (
+      row && {
+        id: String(row.id),
+        sessionId: String(row.session_id),
+        taskId: row.task_id ? String(row.task_id) : undefined,
+        summary: String(row.summary),
+        throughMessageId: Number(row.through_message_id),
+        createdAt: Number(row.created_at),
+      }
+    );
   }
-  messageCount(sessionId: string): number { return Number((this.db.prepare("SELECT count(*) AS count FROM messages WHERE session_id=?").get(sessionId) as { count: number }).count); }
-  lastMessageId(sessionId: string): number { return Number((this.db.prepare("SELECT coalesce(max(id), 0) AS id FROM messages WHERE session_id=?").get(sessionId) as { id: number }).id); }
-  private recoverInterruptedTasks(): void { this.db.prepare("UPDATE tasks SET status='interrupted', updated_at=? WHERE status IN ('planning', 'acting', 'verifying')").run(Date.now()); }
+  messageCount(sessionId: string): number {
+    return Number(
+      (
+        this.db
+          .prepare("SELECT count(*) AS count FROM messages WHERE session_id=?")
+          .get(sessionId) as { count: number }
+      ).count,
+    );
+  }
+  lastMessageId(sessionId: string): number {
+    return Number(
+      (
+        this.db
+          .prepare("SELECT coalesce(max(id), 0) AS id FROM messages WHERE session_id=?")
+          .get(sessionId) as { id: number }
+      ).id,
+    );
+  }
+  private recoverInterruptedTasks(): void {
+    this.db
+      .prepare(
+        "UPDATE tasks SET status='interrupted', updated_at=? WHERE status IN ('planning', 'acting', 'verifying')",
+      )
+      .run(Date.now());
+  }
   private toTask(row: Record<string, unknown> | undefined): Task | undefined {
     if (!row) return undefined;
-    return { id: String(row.id), sessionId: String(row.session_id), prompt: String(row.prompt), status: row.status as TaskStatus, changedFiles: JSON.parse(String(row.changed_files_json)) as string[], verificationCommand: row.verification_command ? String(row.verification_command) : undefined, verificationOutput: row.verification_output ? String(row.verification_output) : undefined, verificationPassed: row.verification_ok === null || row.verification_ok === undefined ? undefined : Boolean(row.verification_ok), summary: row.summary ? String(row.summary) : undefined, error: row.error ? String(row.error) : undefined, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) };
+    return {
+      id: String(row.id),
+      sessionId: String(row.session_id),
+      prompt: String(row.prompt),
+      status: row.status as TaskStatus,
+      changedFiles: JSON.parse(String(row.changed_files_json)) as string[],
+      verificationCommand: row.verification_command ? String(row.verification_command) : undefined,
+      verificationOutput: row.verification_output ? String(row.verification_output) : undefined,
+      verificationPassed:
+        row.verification_ok === null || row.verification_ok === undefined
+          ? undefined
+          : Boolean(row.verification_ok),
+      summary: row.summary ? String(row.summary) : undefined,
+      error: row.error ? String(row.error) : undefined,
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
   }
 }

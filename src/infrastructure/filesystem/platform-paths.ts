@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 
 export function stateDir(): string {
-  return process.env.KAIRO_STATE_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kairo");
+  return (
+    process.env.KAIRO_STATE_DIR ||
+    join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "kairo")
+  );
 }
 export async function ensureStateDir(): Promise<string> {
   const dir = stateDir();
