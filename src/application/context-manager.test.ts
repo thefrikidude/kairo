@@ -38,6 +38,7 @@ test("context begins with the persisted repository profile and verification guid
     testRoots: ["tests"],
     ignoredPaths: ["node_modules"],
     indexedFiles: ["src/login.ts", "tests/login.test.ts"],
+    files: [],
     verificationCandidates: [{ label: "test", command: "pnpm test" }],
     createdAt: 1,
   });

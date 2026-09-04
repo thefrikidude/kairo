@@ -76,3 +76,30 @@ test("profiles npm and tolerates missing or malformed package metadata", async (
   assert.equal(emptyProfile.packageManager, "unknown");
   assert.deepEqual(emptyProfile.scripts, {});
 });
+
+test("records local import and test-to-source relationships", async () => {
+  const root = await fixture("kairo-relations-");
+  await Promise.all([mkdir(join(root, "src")), mkdir(join(root, "tests"))]);
+  await Promise.all([
+    writeFile(join(root, "src", "validation.ts"), "export const validateEmail = () => true;"),
+    writeFile(
+      join(root, "src", "login.ts"),
+      'import { validateEmail } from "./validation.js"; export { validateEmail };',
+    ),
+    writeFile(join(root, "tests", "login.test.ts"), 'import "../src/login.js";'),
+  ]);
+  const profile = await new RepositoryProfiler().profile(root);
+  assert.deepEqual(profile.files.find((file) => file.path === "src/login.ts")?.relatedFiles, [
+    "src/validation.ts",
+    "tests/login.test.ts",
+  ]);
+  assert.deepEqual(
+    profile.files.find((file) => file.path === "tests/login.test.ts")?.relatedFiles,
+    ["src/login.ts"],
+  );
+  assert.ok(
+    profile.files
+      .find((file) => file.path === "src/validation.ts")
+      ?.symbols.includes("validateemail"),
+  );
+});

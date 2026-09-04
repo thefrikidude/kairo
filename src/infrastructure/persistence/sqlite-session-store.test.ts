@@ -45,6 +45,7 @@ test("repository profiles persist for resumed sessions", async () => {
     testRoots: ["test"],
     ignoredPaths: ["node_modules"],
     indexedFiles: ["src/index.ts"],
+    files: [],
     verificationCandidates: [{ label: "test", command: "pnpm test" }],
     createdAt: 1,
   };

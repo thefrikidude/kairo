@@ -22,7 +22,7 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 
 - Interactive Gemini coding-agent REPL for one local workspace.
 - A bounded JavaScript/TypeScript repository profile on session start: package manager, scripts, config files, source/test roots, ignored paths, and a compact file index.
-- Task-aware file ranking and line-range reads, so Gemini receives likely relevant files without flooding its context.
+- Task-aware file ranking and line-range reads, so Gemini receives likely relevant files without flooding its context. Ranking combines task/error terms, declared symbols, local imports, and test-to-source relationships.
 - Workspace-confined file listing, code search, file reading, exact text edits, file writes, and shell commands.
 - Explicit approval before every edit, write, or shell command.
 - Bounded model/tool loops, repeated-call protection, failure tracking, and explicit verification status after edits.
