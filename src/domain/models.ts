@@ -20,6 +20,27 @@ export interface ModelTurn {
 export interface ToolResult {
   ok: boolean;
   output: string;
+  exitCode?: number | null;
+  durationMs?: number;
+}
+
+export interface VerificationCandidate {
+  label: "test" | "typecheck" | "lint" | "build";
+  command: string;
+}
+
+export interface RepositoryProfile {
+  root: string;
+  packageName?: string;
+  packageManager: "npm" | "pnpm" | "yarn" | "bun" | "unknown";
+  scripts: Record<string, string>;
+  configFiles: string[];
+  sourceRoots: string[];
+  testRoots: string[];
+  ignoredPaths: string[];
+  indexedFiles: string[];
+  verificationCandidates: VerificationCandidate[];
+  createdAt: number;
 }
 
 export type TaskStatus =
@@ -41,6 +62,8 @@ export interface Task {
   verificationCommand?: string;
   verificationOutput?: string;
   verificationPassed?: boolean;
+  verificationExitCode?: number | null;
+  verificationDiscovered?: boolean;
   summary?: string;
   error?: string;
   createdAt: number;

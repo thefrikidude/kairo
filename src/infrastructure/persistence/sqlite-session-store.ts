@@ -1,6 +1,12 @@
 import Database from "better-sqlite3";
 import { databasePath, ensureStateDir } from "../filesystem/platform-paths.js";
-import type { ContextCheckpoint, Message, Task, TaskStatus } from "../../domain/models.js";
+import type {
+  ContextCheckpoint,
+  Message,
+  RepositoryProfile,
+  Task,
+  TaskStatus,
+} from "../../domain/models.js";
 
 export interface Session {
   id: string;
@@ -19,15 +25,20 @@ export class SqliteSessionStore {
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_call_id TEXT, tool_name TEXT, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE TABLE IF NOT EXISTS tool_events (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, call_id TEXT NOT NULL, name TEXT NOT NULL, args_json TEXT NOT NULL, approved INTEGER, output TEXT, created_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, changed_files_json TEXT NOT NULL DEFAULT '[]', verification_command TEXT, verification_output TEXT, verification_ok INTEGER, summary TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
+      CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, changed_files_json TEXT NOT NULL DEFAULT '[]', verification_command TEXT, verification_output TEXT, verification_ok INTEGER, verification_exit_code INTEGER, verification_discovered INTEGER, summary TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE INDEX IF NOT EXISTS tasks_session_updated ON tasks(session_id, updated_at DESC);
       CREATE TABLE IF NOT EXISTS context_checkpoints (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT, summary TEXT NOT NULL, through_message_id INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
-      CREATE INDEX IF NOT EXISTS checkpoints_session_created ON context_checkpoints(session_id, created_at DESC);`);
+      CREATE INDEX IF NOT EXISTS checkpoints_session_created ON context_checkpoints(session_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS repository_profiles (session_id TEXT PRIMARY KEY, profile_json TEXT NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));`);
     const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as {
       name: string;
     }[];
     if (!columns.some((column) => column.name === "verification_ok"))
       db.exec("ALTER TABLE tasks ADD COLUMN verification_ok INTEGER");
+    if (!columns.some((column) => column.name === "verification_exit_code"))
+      db.exec("ALTER TABLE tasks ADD COLUMN verification_exit_code INTEGER");
+    if (!columns.some((column) => column.name === "verification_discovered"))
+      db.exec("ALTER TABLE tasks ADD COLUMN verification_discovered INTEGER");
     const store = new SqliteSessionStore(db);
     store.recoverInterruptedTasks();
     return store;
@@ -168,6 +179,8 @@ export class SqliteSessionStore {
         | "verificationCommand"
         | "verificationOutput"
         | "verificationPassed"
+        | "verificationExitCode"
+        | "verificationDiscovered"
         | "summary"
         | "error"
       >
@@ -178,7 +191,7 @@ export class SqliteSessionStore {
     const next = { ...task, ...patch, updatedAt: Date.now() };
     this.db
       .prepare(
-        "UPDATE tasks SET status=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, summary=?, error=?, updated_at=? WHERE id=?",
+        "UPDATE tasks SET status=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, verification_exit_code=?, verification_discovered=?, summary=?, error=?, updated_at=? WHERE id=?",
       )
       .run(
         next.status,
@@ -186,6 +199,8 @@ export class SqliteSessionStore {
         next.verificationCommand ?? null,
         next.verificationOutput ?? null,
         next.verificationPassed === undefined ? null : Number(next.verificationPassed),
+        next.verificationExitCode ?? null,
+        next.verificationDiscovered === undefined ? null : Number(next.verificationDiscovered),
         next.summary ?? null,
         next.error ?? null,
         next.updatedAt,
@@ -254,6 +269,19 @@ export class SqliteSessionStore {
       ).id,
     );
   }
+  saveRepositoryProfile(sessionId: string, profile: RepositoryProfile): void {
+    this.db
+      .prepare(
+        "INSERT INTO repository_profiles(session_id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET profile_json=excluded.profile_json, updated_at=excluded.updated_at",
+      )
+      .run(sessionId, JSON.stringify(profile), Date.now());
+  }
+  repositoryProfile(sessionId: string): RepositoryProfile | undefined {
+    const row = this.db
+      .prepare("SELECT profile_json FROM repository_profiles WHERE session_id=?")
+      .get(sessionId) as { profile_json: string } | undefined;
+    return row ? (JSON.parse(row.profile_json) as RepositoryProfile) : undefined;
+  }
   private recoverInterruptedTasks(): void {
     this.db
       .prepare(
@@ -275,6 +303,14 @@ export class SqliteSessionStore {
         row.verification_ok === null || row.verification_ok === undefined
           ? undefined
           : Boolean(row.verification_ok),
+      verificationExitCode:
+        row.verification_exit_code === null || row.verification_exit_code === undefined
+          ? undefined
+          : Number(row.verification_exit_code),
+      verificationDiscovered:
+        row.verification_discovered === null || row.verification_discovered === undefined
+          ? undefined
+          : Boolean(row.verification_discovered),
       summary: row.summary ? String(row.summary) : undefined,
       error: row.error ? String(row.error) : undefined,
       createdAt: Number(row.created_at),

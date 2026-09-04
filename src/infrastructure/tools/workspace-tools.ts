@@ -5,7 +5,7 @@ import type { ToolCall, ToolResult } from "../../domain/models.js";
 import type { ToolDefinition, ToolExecutor } from "../../domain/ports.js";
 
 const MAX_OUTPUT = 48_000;
-const ignored = new Set([".git", "node_modules", "dist", ".kairo"]);
+const ignored = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".kairo"]);
 const truncate = (value: string) =>
   value.length > MAX_OUTPUT ? `${value.slice(0, MAX_OUTPUT)}\n[output truncated]` : value;
 
@@ -24,6 +24,20 @@ export const definitions: ToolDefinition[] = [
       type: "object",
       properties: { path: { type: "string" } },
       required: ["path"],
+    },
+  },
+  {
+    name: "read_file_range",
+    description: "Read a bounded inclusive line range from a UTF-8 workspace file.",
+    mutating: false,
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        startLine: { type: "number" },
+        endLine: { type: "number" },
+      },
+      required: ["path", "startLine", "endLine"],
     },
   },
   {
@@ -118,6 +132,11 @@ export class WorkspaceTools implements ToolExecutor {
             ok: true,
             output: truncate(await readFile(await this.filePath(call.args.path), "utf8")),
           };
+        case "read_file_range":
+          return {
+            ok: true,
+            output: await this.readRange(call.args),
+          };
         case "search_files":
           return {
             ok: true,
@@ -176,6 +195,23 @@ export class WorkspaceTools implements ToolExecutor {
     }
     return matches.length ? truncate(matches.join("\n")) : "No matches found.";
   }
+  private async readRange(args: Record<string, unknown>): Promise<string> {
+    const { startLine, endLine } = args;
+    if (
+      !Number.isInteger(startLine) ||
+      !Number.isInteger(endLine) ||
+      (startLine as number) < 1 ||
+      (endLine as number) < (startLine as number) ||
+      (endLine as number) - (startLine as number) >= 500
+    )
+      throw new Error("Use an inclusive line range from 1 to at most 500 lines.");
+    const lines = (await readFile(await this.filePath(args.path), "utf8")).split("\n");
+    const start = startLine as number;
+    const selected = lines.slice(start - 1, endLine as number);
+    return selected.length
+      ? truncate(selected.map((line, index) => `${start + index}: ${line}`).join("\n"))
+      : "No lines found in this range.";
+  }
   private async edit(args: Record<string, unknown>): Promise<ToolResult> {
     const path = await this.filePath(args.path, true);
     if (typeof args.oldText !== "string" || typeof args.newText !== "string")
@@ -191,6 +227,7 @@ export class WorkspaceTools implements ToolExecutor {
   private command(command: string): Promise<ToolResult> {
     if (!command.trim()) return Promise.resolve({ ok: false, output: "command cannot be empty" });
     return new Promise((done) => {
+      const startedAt = Date.now();
       const child = spawn(command, {
         cwd: this.root,
         shell: true,
@@ -208,11 +245,18 @@ export class WorkspaceTools implements ToolExecutor {
         done({
           ok: code === 0,
           output: truncate(output || `Command exited with ${code}`),
+          exitCode: code,
+          durationMs: Date.now() - startedAt,
         });
       });
       child.on("error", (error) => {
         clearTimeout(timer);
-        done({ ok: false, output: error.message });
+        done({
+          ok: false,
+          output: error.message,
+          exitCode: null,
+          durationMs: Date.now() - startedAt,
+        });
       });
     });
   }

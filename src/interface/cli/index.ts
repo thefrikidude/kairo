@@ -8,6 +8,7 @@ import { MacOSKeychainStore } from "../../infrastructure/security/macos-keychain
 import { GeminiProvider } from "../../infrastructure/providers/gemini-provider.js";
 import { SqliteSessionStore } from "../../infrastructure/persistence/sqlite-session-store.js";
 import { WorkspaceTools, definitions } from "../../infrastructure/tools/workspace-tools.js";
+import { RepositoryProfiler } from "../../infrastructure/repository/repository-profiler.js";
 import { CodingAgent } from "../../application/coding-agent.js";
 import { runRepl } from "./repl.js";
 
@@ -81,6 +82,8 @@ async function main(): Promise<void> {
   const config = await loadConfig();
   const tools = await WorkspaceTools.create(workspace);
   const active = session || store.create(workspace);
+  if (!store.repositoryProfile(active.id))
+    store.saveRepositoryProfile(active.id, await new RepositoryProfiler().profile(tools.root));
   await runRepl(
     (approval) =>
       new CodingAgent(

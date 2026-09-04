@@ -73,6 +73,8 @@ export class CodingAgent {
       verificationCommand: command,
       verificationOutput: undefined,
       verificationPassed: undefined,
+      verificationExitCode: undefined,
+      verificationDiscovered: this.isDiscoveredVerification(task.sessionId, command),
     });
     const call: ToolCall = {
       id: crypto.randomUUID(),
@@ -83,6 +85,7 @@ export class CodingAgent {
     task = this.store.updateTask(task.id, {
       verificationOutput: result.output,
       verificationPassed: result.ok,
+      verificationExitCode: result.exitCode ?? null,
       status: result.ok ? "completed" : "failed",
       error: result.ok ? undefined : result.output,
     });
@@ -205,6 +208,11 @@ export class CodingAgent {
         verificationCommand: String(call.args.command ?? ""),
         verificationOutput: result.output,
         verificationPassed: result.ok,
+        verificationExitCode: result.exitCode ?? null,
+        verificationDiscovered: this.isDiscoveredVerification(
+          task.sessionId,
+          String(call.args.command ?? ""),
+        ),
       });
     this.store.recordTool(task.sessionId, call.id, call.name, call.args, approved, result.output);
     this.save(task.sessionId, {
@@ -233,5 +241,12 @@ export class CodingAgent {
       createdAt: Date.now(),
     });
     return { ok, output };
+  }
+  private isDiscoveredVerification(sessionId: string, command: string): boolean {
+    return (
+      this.store
+        .repositoryProfile(sessionId)
+        ?.verificationCandidates.some((candidate) => candidate.command === command) ?? false
+    );
   }
 }

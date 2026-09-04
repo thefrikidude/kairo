@@ -49,6 +49,8 @@ export interface TaskStore {
         | "verificationCommand"
         | "verificationOutput"
         | "verificationPassed"
+        | "verificationExitCode"
+        | "verificationDiscovered"
         | "summary"
         | "error"
       >
@@ -63,6 +65,8 @@ export interface TaskStore {
   latestCheckpoint(sessionId: string): ContextCheckpoint | undefined;
   messageCount(sessionId: string): number;
   lastMessageId(sessionId: string): number;
+  saveRepositoryProfile(sessionId: string, profile: import("./models.js").RepositoryProfile): void;
+  repositoryProfile(sessionId: string): import("./models.js").RepositoryProfile | undefined;
 }
 
 export interface ApprovalPolicy {
