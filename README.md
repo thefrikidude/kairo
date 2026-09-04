@@ -28,6 +28,7 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 - Bounded model/tool loops, repeated-call protection, failure tracking, and explicit verification status after edits.
 - Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume. Repository profiles are persisted with sessions, so resuming does not rediscover from zero.
 - Discovered test, typecheck, lint, and build scripts are included in the task context. A successful approved command records its command, output, exit status, and verification result.
+- Failed post-edit verification creates a bounded repair brief from stack traces and test failures. Gemini can continue repairing in the same task, but every edit and retry still requires approval.
 - Gemini credentials from the macOS Keychain, with `GEMINI_API_KEY` as a temporary or CI override.
 
 Kairo does not currently implement model routing, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.

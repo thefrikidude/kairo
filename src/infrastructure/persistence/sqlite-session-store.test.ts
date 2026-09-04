@@ -57,3 +57,24 @@ test("repository profiles persist for resumed sessions", async () => {
   assert.deepEqual(restarted.repositoryProfile(session.id), profile);
   restarted.close();
 });
+
+test("repair attempts persist failure evidence for an interrupted task", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-repair-store-"));
+  const store = await SqliteSessionStore.open(join(dir, "sessions.sqlite"));
+  const session = store.create("/workspace");
+  const task = store.startTask(session.id, "repair login");
+  store.recordRepairAttempt({
+    id: "repair-1",
+    taskId: task.id,
+    command: "pnpm test",
+    evidence: {
+      summary: "FAIL tests/login.test.ts",
+      fileLocations: [{ path: "tests/login.test.ts", line: 8 }],
+      excerpts: ["Expected false"],
+    },
+    selectedFiles: ["tests/login.test.ts"],
+    createdAt: 1,
+  });
+  assert.deepEqual(store.repairAttempts(task.id)[0]?.selectedFiles, ["tests/login.test.ts"]);
+  store.close();
+});

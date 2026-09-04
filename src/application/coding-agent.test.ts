@@ -118,6 +118,97 @@ class RepeatingProvider implements ModelProvider {
     };
   }
 }
+
+class RepairingProvider implements ModelProvider {
+  private turn = 0;
+  async stream(messages: Message[], _onText: (chunk: string) => void): Promise<ModelTurn> {
+    this.turn += 1;
+    if (this.turn === 1)
+      return {
+        text: "",
+        toolCalls: [{ id: "write", name: "write_file", args: { path: "a.txt", content: "x" } }],
+      };
+    if (this.turn === 2)
+      return {
+        text: "",
+        toolCalls: [{ id: "fail", name: "run_command", args: { command: "false" } }],
+      };
+    if (this.turn === 3) {
+      assert.ok(messages.some((message) => message.content.includes("Repair attempt 1/2")));
+      return {
+        text: "",
+        toolCalls: [
+          { id: "edit", name: "edit_file", args: { path: "a.txt", oldText: "x", newText: "y" } },
+        ],
+      };
+    }
+    if (this.turn === 4)
+      return {
+        text: "",
+        toolCalls: [{ id: "verify", name: "run_command", args: { command: "test -f a.txt" } }],
+      };
+    return { text: "repaired", toolCalls: [] };
+  }
+}
+
+test("agent continues with a persisted, focused repair after failed verification", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-repair-"));
+  const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
+  const session = store.create(root);
+  const agent = new CodingAgent(
+    new RepairingProvider(),
+    store,
+    await WorkspaceTools.create(root),
+    new Allow(),
+    definitions,
+  );
+  await agent.run(session.id, "create a file", () => {});
+  const task = agent.status(session.id)!;
+  assert.equal(task.status, "completed");
+  assert.equal(store.repairAttempts(task.id).length, 1);
+  assert.equal(store.repairAttempts(task.id)[0]?.command, "false");
+  store.close();
+});
+
+class ExhaustedRepairProvider implements ModelProvider {
+  private turn = 0;
+  async stream(_messages: Message[], _onText: (chunk: string) => void): Promise<ModelTurn> {
+    this.turn += 1;
+    if (this.turn === 1)
+      return {
+        text: "",
+        toolCalls: [{ id: "write", name: "write_file", args: { path: "a.txt", content: "x" } }],
+      };
+    return {
+      text: "",
+      toolCalls: [
+        {
+          id: `failure-${this.turn}`,
+          name: "run_command",
+          args: { command: `false # ${this.turn}` },
+        },
+      ],
+    };
+  }
+}
+
+test("agent stops after the bounded repair budget is exhausted", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-repair-limit-"));
+  const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
+  const session = store.create(root);
+  await new CodingAgent(
+    new ExhaustedRepairProvider(),
+    store,
+    await WorkspaceTools.create(root),
+    new Allow(),
+    definitions,
+  ).run(session.id, "create a file", () => {});
+  const task = store.latestTask(session.id)!;
+  assert.equal(task.status, "failed");
+  assert.match(task.error!, /Repair limit reached/);
+  assert.equal(store.repairAttempts(task.id).length, 2);
+  store.close();
+});
 test("agent stops repeated failing tool calls", async () => {
   const root = await mkdtemp(join(tmpdir(), "kairo-loop-"));
   const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
