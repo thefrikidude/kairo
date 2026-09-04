@@ -23,3 +23,27 @@ test("context compacts long history into a durable checkpoint", async () => {
   assert.match(messages[0]!.content, /Context checkpoint/);
   store.close();
 });
+
+test("context begins with the persisted repository profile and verification guidance", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-profile-context-"));
+  const store = await SqliteSessionStore.open(join(dir, "sessions.sqlite"));
+  const session = store.create("/workspace");
+  const task = store.startTask(session.id, "Fix login validation");
+  store.saveRepositoryProfile(session.id, {
+    root: "/workspace",
+    packageManager: "pnpm",
+    scripts: { test: "node --test" },
+    configFiles: ["tsconfig.json"],
+    sourceRoots: ["src"],
+    testRoots: ["tests"],
+    ignoredPaths: ["node_modules"],
+    indexedFiles: ["src/login.ts", "tests/login.test.ts"],
+    verificationCandidates: [{ label: "test", command: "pnpm test" }],
+    createdAt: 1,
+  });
+  const messages = new ContextManager(store).prepare(session.id, task);
+  assert.match(messages[0]!.content, /Package manager: pnpm/);
+  assert.match(messages[0]!.content, /Recommended verification: test = pnpm test/);
+  assert.match(messages[0]!.content, /src\/login.ts/);
+  store.close();
+});
