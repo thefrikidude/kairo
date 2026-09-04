@@ -19,6 +19,7 @@ const MAX_REPAIR_ATTEMPTS = 2;
 export class CodingAgent {
   private readonly context: ContextManager;
   private readonly failureAnalyzer = new FailureAnalyzer();
+  /** Creates the coordinator with its model, durable state, tools, and approval boundary. */
   constructor(
     private readonly provider: ModelProvider,
     private readonly store: TaskStore,
@@ -29,11 +30,13 @@ export class CodingAgent {
     this.context = new ContextManager(store);
   }
 
+  /** Starts a new persisted task and drives it until it completes, pauses, or fails. */
   async run(sessionId: string, input: string, onText: (text: string) => void): Promise<void> {
     const task = this.store.startTask(sessionId, input);
     await this.executeTask(task, input, onText);
   }
 
+  /** Restarts the latest unfinished task using its saved conversation and repair history. */
   async resume(sessionId: string, onText: (text: string) => void): Promise<void> {
     const task = this.store.latestTask(sessionId);
     if (!task) throw new Error("This session has no task to resume.");
@@ -51,9 +54,11 @@ export class CodingAgent {
     await this.executeTask(resumed, undefined, onText);
   }
 
+  /** Returns the newest task state for a session without changing it. */
   status(sessionId: string): Task | undefined {
     return this.store.latestTask(sessionId);
   }
+  /** Marks the active task as cancelled so later model turns cannot continue it. */
   cancel(sessionId: string): Task | undefined {
     const task = this.store.latestTask(sessionId);
     return (
@@ -64,11 +69,13 @@ export class CodingAgent {
       })
     );
   }
+  /** Saves a compact checkpoint for the current task's long conversation. */
   compact(sessionId: string): string | undefined {
     const task = this.store.latestTask(sessionId);
     return task && this.context.compact(sessionId, task);
   }
 
+  /** Runs a user-requested verification command through the normal approval gate. */
   async verify(sessionId: string, command: string, onText: (text: string) => void): Promise<void> {
     let task = this.store.latestTask(sessionId);
     if (!task) throw new Error("Start a task before running verification.");
@@ -96,6 +103,7 @@ export class CodingAgent {
     onText(result.ok ? "\n[Verification passed]\n" : "\n[Verification failed]\n");
   }
 
+  /** Executes bounded model and tool turns for one task. */
   private async executeTask(
     initialTask: Task,
     initialInput: string | undefined,
@@ -162,6 +170,7 @@ export class CodingAgent {
     }
   }
 
+  /** Completes only tasks whose changed files have a successful verification result. */
   private finish(task: Task): Task {
     return this.store.updateTask(task.id, {
       status:
@@ -170,14 +179,17 @@ export class CodingAgent {
           : "completed",
     });
   }
+  /** Records a terminal task failure and makes the reason visible in the REPL. */
   private fail(task: Task, error: string, onText: (text: string) => void): void {
     this.store.updateTask(task.id, { status: "failed", error });
     onText(`\nKairo stopped: ${error}\n`);
   }
+  /** Appends a durable conversation message for later context reconstruction. */
   private save(session: string, message: Message): void {
     this.store.addMessage(session, message);
   }
 
+  /** Applies approval, executes one tool call, and persists its observable outcome. */
   private async executeTool(
     task: Task,
     call: ToolCall,
@@ -257,6 +269,7 @@ export class CodingAgent {
     return result;
   }
 
+  /** Persists a tool call that could not reach the executor, such as a denied request. */
   private record(
     task: Task,
     call: ToolCall,
@@ -274,6 +287,7 @@ export class CodingAgent {
     });
     return { ok, output };
   }
+  /** Identifies commands suggested by the workspace's discovered verification scripts. */
   private isDiscoveredVerification(sessionId: string, command: string): boolean {
     return (
       this.store

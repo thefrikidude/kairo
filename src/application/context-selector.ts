@@ -16,6 +16,7 @@ const STOP_WORDS = new Set([
 ]);
 
 export class ContextSelector {
+  /** Returns the highest-scoring repository files for a task or verification failure. */
   select(task: string, profile: RepositoryProfile, limit = 12): string[] {
     const terms = this.terms(task);
     const files = profile.files?.length
@@ -38,11 +39,13 @@ export class ContextSelector {
       .slice(0, limit)
       .map((item) => item.path);
   }
+  /** Produces normal and camel-case-split query terms for code identifiers. */
   private terms(value: string): string[] {
     return [value, value.replace(/([a-z])([A-Z])/g, "$1 $2")]
       .flatMap((part) => part.toLowerCase().split(/[^a-z0-9_$]+/))
       .filter((term) => term.length > 2 && !STOP_WORDS.has(term));
   }
+  /** Adds graph proximity to a file's direct lexical and structural relevance. */
   private score(
     file: { path: string; terms: string[]; symbols: string[]; relatedFiles: string[] },
     terms: string[],
@@ -52,6 +55,7 @@ export class ContextSelector {
     const relationshipScore = file.relatedFiles.some((path) => direct.has(path)) ? 3 : 0;
     return this.directScore(file, terms, profile) + relationshipScore;
   }
+  /** Scores paths, file text, symbols, and source/test roles independently. */
   private directScore(
     file: { path: string; terms: string[]; symbols: string[] },
     terms: string[],

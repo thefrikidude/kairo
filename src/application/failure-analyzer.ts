@@ -4,6 +4,7 @@ const MAX_EXCERPTS = 8;
 const MAX_OUTPUT = 8_000;
 
 export class FailureAnalyzer {
+  /** Extracts bounded paths and useful error lines from a failed verification command. */
   analyze(command: string, output: string): FailureEvidence {
     // Keep persisted repair context small even when a test runner emits a large stack trace.
     const lines = output

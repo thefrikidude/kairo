@@ -12,17 +12,20 @@ import { RepositoryProfiler } from "../../infrastructure/repository/repository-p
 import { CodingAgent } from "../../application/coding-agent.js";
 import { runRepl } from "./repl.js";
 
+/** Prints the supported command-line shapes when arguments are invalid. */
 function usage(): void {
   console.log(
     "Usage: kairo [workspace] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
   );
 }
+/** Asks for a one-line credential before sending it to the Keychain adapter. */
 async function prompt(question: string): Promise<string> {
   const rl = createInterface({ input: stdin, output: stdout });
   const value = await rl.question(question);
   rl.close();
   return value;
 }
+/** Parses CLI commands, wires concrete adapters, and starts the workspace REPL. */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const credentials = new MacOSKeychainStore();

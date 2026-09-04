@@ -8,6 +8,7 @@ const labels: Array<[VerificationCandidate["label"], string[]]> = [
 ];
 
 export class VerificationPlanner {
+  /** Converts recognized package scripts into safe, ordered verification suggestions. */
   candidates(
     profile: Pick<RepositoryProfile, "packageManager" | "scripts">,
   ): VerificationCandidate[] {

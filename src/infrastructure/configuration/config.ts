@@ -6,6 +6,7 @@ export interface KairoConfig {
 }
 const defaults: KairoConfig = { model: "gemini-2.5-flash" };
 
+/** Loads the user configuration, falling back to safe defaults when it is absent. */
 export async function loadConfig(): Promise<KairoConfig> {
   try {
     return {
@@ -17,6 +18,7 @@ export async function loadConfig(): Promise<KairoConfig> {
     throw new Error(`Could not read Kairo config: ${(error as Error).message}`);
   }
 }
+/** Updates one supported configuration value while preserving all other settings. */
 export async function setConfig(key: string, value: string): Promise<void> {
   if (key !== "model" || !value.trim())
     throw new Error("Only a non-empty `model` setting is supported.");

@@ -10,6 +10,7 @@ const excerpt = (value: string, length = 700) =>
 export class ContextManager {
   private readonly selector = new ContextSelector();
   constructor(private readonly store: TaskStore) {}
+  /** Builds the bounded message list that is sent to the model for the next turn. */
   prepare(sessionId: string, task: Task): Message[] {
     if (this.store.messageCount(sessionId) >= AUTO_COMPACT_AFTER) this.compact(sessionId, task);
     const checkpoint = this.store.latestCheckpoint(sessionId);
@@ -42,6 +43,7 @@ export class ContextManager {
     ];
     return context;
   }
+  /** Converts older conversation evidence into a durable summary before it is omitted. */
   compact(sessionId: string, task: Task): string {
     const current = this.store.latestCheckpoint(sessionId);
     const lastId = this.store.lastMessageId(sessionId);
@@ -68,12 +70,14 @@ export class ContextManager {
     this.store.updateTask(task.id, { summary });
     return summary;
   }
+  /** Drops leading tool-only messages that Gemini cannot interpret as a fresh conversation. */
   private cleanStart(messages: Message[]): Message[] {
     const first = messages.findIndex(
       (message) => message.role === "user" || (message.role === "model" && !message.toolCallId),
     );
     return first < 0 ? messages.slice(-1) : messages.slice(first);
   }
+  /** Renders repository facts and ranked files as concise model guidance. */
   private profileContext(
     task: Task,
     profile: NonNullable<ReturnType<TaskStore["repositoryProfile"]>>,
@@ -92,12 +96,14 @@ export class ContextManager {
       "Use the profile as a guide, inspect files before edits, and choose an appropriate verification command after changes.",
     ].join("\n");
   }
+  /** Combines the request and latest failure evidence for relevance ranking. */
   private retrievalQuery(task: Task): string {
     return [task.prompt, task.error, task.verificationOutput]
       .filter((value): value is string => Boolean(value))
       .map((value) => value.slice(0, 8_000))
       .join("\n");
   }
+  /** Renders the latest persisted failure as an actionable repair instruction. */
   private repairBrief(task: Task): string {
     const attempts = this.store.repairAttempts(task.id);
     const latest = attempts.at(-1);

@@ -6,6 +6,7 @@ const service = "dev.kairo.gemini";
 const account = "default";
 
 export class MacOSKeychainStore implements CredentialStore {
+  /** Reads an environment override first, then the macOS Keychain credential. */
   async get(): Promise<string | undefined> {
     if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
     try {
@@ -18,6 +19,7 @@ export class MacOSKeychainStore implements CredentialStore {
       return undefined;
     }
   }
+  /** Saves a non-empty Gemini key in the macOS Keychain rather than local config. */
   async save(value: string): Promise<void> {
     if (!value.trim()) throw new Error("API key cannot be empty.");
     await run("security", [
@@ -31,6 +33,7 @@ export class MacOSKeychainStore implements CredentialStore {
       value.trim(),
     ]);
   }
+  /** Removes Kairo's saved Keychain entry during logout. */
   async clear(): Promise<void> {
     try {
       await run("security", ["delete-generic-password", "-s", service, "-a", account]);

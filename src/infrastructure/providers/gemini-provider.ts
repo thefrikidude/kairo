@@ -7,6 +7,7 @@ const systemInstruction =
 
 export class GeminiProvider implements ModelProvider {
   private readonly client: GoogleGenAI;
+  /** Configures the Gemini client with the selected model and Kairo tool schema. */
   constructor(
     apiKey: string,
     private readonly model: string,
@@ -14,6 +15,7 @@ export class GeminiProvider implements ModelProvider {
   ) {
     this.client = new GoogleGenAI({ apiKey });
   }
+  /** Streams Gemini text and normalizes function calls into the provider-neutral model turn. */
   async stream(messages: Message[], onText: (chunk: string) => void): Promise<ModelTurn> {
     const contents = messages.map((message) => {
       if (message.role === "tool")

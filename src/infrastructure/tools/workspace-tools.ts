@@ -88,16 +88,20 @@ export const definitions: ToolDefinition[] = [
 
 export class WorkspaceTools implements ToolExecutor {
   readonly root: string;
+  /** Stores the already-resolved workspace root used for every safety check. */
   private constructor(root: string) {
     this.root = root;
   }
+  /** Resolves the requested workspace once before exposing any file tools. */
   static async create(workspace: string): Promise<WorkspaceTools> {
     return new WorkspaceTools(await realpath(workspace));
   }
+  /** Returns whether an absolute path remains inside the resolved workspace root. */
   private inside(path: string): boolean {
     const rel = relative(this.root, path);
     return rel === "" || (!rel.startsWith("..") && !rel.includes("../"));
   }
+  /** Validates a user path and rejects traversal or symlink escapes before access. */
   private async filePath(input: unknown, forWrite = false): Promise<string> {
     if (typeof input !== "string" || !input.trim())
       throw new Error("A non-empty path is required.");
@@ -115,11 +119,13 @@ export class WorkspaceTools implements ToolExecutor {
       return candidate;
     }
   }
+  /** Produces the exact action text shown in the terminal approval prompt. */
   description(call: ToolCall): string {
     return call.name === "run_command"
       ? `Run command in ${this.root}:\n${String(call.args.command ?? "")}`
       : `${call.name}: ${String(call.args.path ?? "workspace")}`;
   }
+  /** Dispatches a validated tool request and converts executor errors into tool results. */
   async execute(call: ToolCall): Promise<ToolResult> {
     try {
       switch (call.name) {
@@ -163,6 +169,7 @@ export class WorkspaceTools implements ToolExecutor {
       return { ok: false, output: `Tool error: ${(error as Error).message}` };
     }
   }
+  /** Recursively lists a bounded set of non-ignored workspace files. */
   private async list(dir: string): Promise<string> {
     const out: string[] = [];
     const visit = async (current: string): Promise<void> => {
@@ -178,6 +185,7 @@ export class WorkspaceTools implements ToolExecutor {
     await visit(dir);
     return out.length ? truncate(out.sort().join("\n")) : "No files found.";
   }
+  /** Searches readable workspace files for a literal query with bounded matches. */
   private async search(query: string, dir: string): Promise<string> {
     if (!query) throw new Error("query cannot be empty");
     const files = (await this.list(dir)).split("\n");
@@ -196,6 +204,7 @@ export class WorkspaceTools implements ToolExecutor {
     }
     return matches.length ? truncate(matches.join("\n")) : "No matches found.";
   }
+  /** Returns an inclusive, line-numbered slice while enforcing a small read limit. */
   private async readRange(args: Record<string, unknown>): Promise<string> {
     const { startLine, endLine } = args;
     if (
@@ -213,6 +222,7 @@ export class WorkspaceTools implements ToolExecutor {
       ? truncate(selected.map((line, index) => `${start + index}: ${line}`).join("\n"))
       : "No lines found in this range.";
   }
+  /** Replaces one unambiguous text occurrence in a workspace file. */
   private async edit(args: Record<string, unknown>): Promise<ToolResult> {
     const path = await this.filePath(args.path, true);
     if (typeof args.oldText !== "string" || typeof args.newText !== "string")
@@ -225,6 +235,7 @@ export class WorkspaceTools implements ToolExecutor {
     await writeFile(path, text.replace(args.oldText, args.newText), "utf8");
     return { ok: true, output: `Edited ${relative(this.root, path)}` };
   }
+  /** Runs a shell command in the workspace and captures bounded output and timing. */
   private command(command: string): Promise<ToolResult> {
     if (!command.trim()) return Promise.resolve({ ok: false, output: "command cannot be empty" });
     return new Promise((done) => {

@@ -9,13 +9,16 @@ import {
 } from "../../infrastructure/persistence/sqlite-session-store.js";
 
 export class TerminalApproval implements ApprovalPolicy {
+  /** Keeps the shared readline interface used for approval questions. */
   constructor(private readonly rl: ReturnType<typeof createInterface>) {}
+  /** Prompts the user for explicit approval and denies every other response. */
   async approve(_call: ToolCall, description: string): Promise<boolean> {
     const answer = await this.rl.question(`\nApproval required:\n${description}\nAllow? [y/N] `);
     return /^(y|yes)$/i.test(answer.trim());
   }
 }
 
+/** Runs the interactive command loop for one active workspace session. */
 export async function runRepl(
   createAgent: (approval: ApprovalPolicy) => CodingAgent,
   store: SqliteSessionStore,

@@ -16,7 +16,9 @@ export interface Session {
   updatedAt: number;
 }
 export class SqliteSessionStore {
+  /** Wraps an already-initialized database; callers use open() to guarantee setup. */
   private constructor(private readonly db: Database.Database) {}
+  /** Opens the database, creates current schema objects, and recovers interrupted tasks. */
   static async open(path?: string): Promise<SqliteSessionStore> {
     if (!path) await ensureStateDir();
     const db = new Database(path || databasePath());
@@ -46,15 +48,18 @@ export class SqliteSessionStore {
     store.recoverInterruptedTasks();
     return store;
   }
+  /** Closes the SQLite handle after the CLI session exits. */
   close(): void {
     this.db.close();
   }
+  /** Creates a durable session associated with one resolved workspace. */
   create(workspace: string): Session {
     const now = Date.now();
     const id = `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
     this.db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?)").run(id, workspace, now, now);
     return { id, workspace, createdAt: now, updatedAt: now };
   }
+  /** Loads one session by id, if it still exists. */
   get(id: string): Session | undefined {
     const row = this.db
       .prepare("SELECT id, workspace, created_at, updated_at FROM sessions WHERE id = ?")
@@ -68,6 +73,7 @@ export class SqliteSessionStore {
       }
     );
   }
+  /** Lists sessions from most recently active to oldest. */
   list(): Session[] {
     return (
       this.db
@@ -82,6 +88,7 @@ export class SqliteSessionStore {
       updatedAt: Number(r.updated_at),
     }));
   }
+  /** Loads all messages required to reconstruct a full conversation. */
   messages(sessionId: string): Message[] {
     return (
       this.db
@@ -97,6 +104,7 @@ export class SqliteSessionStore {
       createdAt: Number(r.created_at),
     }));
   }
+  /** Loads only the newest messages for bounded model context. */
   recentMessages(sessionId: string, limit: number): Message[] {
     return (
       this.db
@@ -112,6 +120,7 @@ export class SqliteSessionStore {
       createdAt: Number(r.created_at),
     }));
   }
+  /** Appends one durable message and refreshes the owning session timestamp. */
   addMessage(sessionId: string, message: Message): void {
     this.db
       .prepare(
@@ -127,6 +136,7 @@ export class SqliteSessionStore {
       );
     this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(Date.now(), sessionId);
   }
+  /** Records the requested action, approval decision, and visible tool output. */
   recordTool(
     sessionId: string,
     id: string,
@@ -149,6 +159,7 @@ export class SqliteSessionStore {
         Date.now(),
       );
   }
+  /** Creates a new task in the initial planning state. */
   startTask(sessionId: string, prompt: string): Task {
     const now = Date.now();
     const id = `task-${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -159,12 +170,14 @@ export class SqliteSessionStore {
       .run(id, sessionId, prompt, "planning", "[]", now, now);
     return this.task(id)!;
   }
+  /** Loads one task by id and maps database columns to domain names. */
   task(id: string): Task | undefined {
     return this.toTask(
       this.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as
         Record<string, unknown> | undefined,
     );
   }
+  /** Finds the newest task belonging to a session. */
   latestTask(sessionId: string): Task | undefined {
     return this.toTask(
       this.db
@@ -172,6 +185,7 @@ export class SqliteSessionStore {
         .get(sessionId) as Record<string, unknown> | undefined,
     );
   }
+  /** Merges a partial task update and writes the complete task state atomically. */
   updateTask(
     id: string,
     patch: Partial<
@@ -211,6 +225,7 @@ export class SqliteSessionStore {
       );
     return next;
   }
+  /** Persists a summary that replaces older conversation detail in future context. */
   saveCheckpoint(
     sessionId: string,
     taskId: string | undefined,
@@ -237,6 +252,7 @@ export class SqliteSessionStore {
       );
     return checkpoint;
   }
+  /** Retrieves the most recent compaction checkpoint for a session. */
   latestCheckpoint(sessionId: string): ContextCheckpoint | undefined {
     const row = this.db
       .prepare(
@@ -254,6 +270,7 @@ export class SqliteSessionStore {
       }
     );
   }
+  /** Counts messages to decide when automatic compaction is needed. */
   messageCount(sessionId: string): number {
     return Number(
       (
@@ -263,6 +280,7 @@ export class SqliteSessionStore {
       ).count,
     );
   }
+  /** Returns the newest message id used to mark checkpoint coverage. */
   lastMessageId(sessionId: string): number {
     return Number(
       (
@@ -272,6 +290,7 @@ export class SqliteSessionStore {
       ).id,
     );
   }
+  /** Upserts the session's bounded repository intelligence profile. */
   saveRepositoryProfile(sessionId: string, profile: RepositoryProfile): void {
     this.db
       .prepare(
@@ -279,12 +298,14 @@ export class SqliteSessionStore {
       )
       .run(sessionId, JSON.stringify(profile), Date.now());
   }
+  /** Reads the saved profile so a resumed session does not need to rediscover files. */
   repositoryProfile(sessionId: string): RepositoryProfile | undefined {
     const row = this.db
       .prepare("SELECT profile_json FROM repository_profiles WHERE session_id=?")
       .get(sessionId) as { profile_json: string } | undefined;
     return row ? (JSON.parse(row.profile_json) as RepositoryProfile) : undefined;
   }
+  /** Persists one verification failure that started an agent repair cycle. */
   recordRepairAttempt(attempt: RepairAttempt): void {
     this.db
       .prepare(
@@ -299,6 +320,7 @@ export class SqliteSessionStore {
         attempt.createdAt,
       );
   }
+  /** Returns repair attempts in the order they happened for context and evaluation. */
   repairAttempts(taskId: string): RepairAttempt[] {
     return (
       this.db
@@ -313,6 +335,7 @@ export class SqliteSessionStore {
       createdAt: Number(row.created_at),
     }));
   }
+  /** Marks tasks left active by a process exit so the user can explicitly resume them. */
   private recoverInterruptedTasks(): void {
     this.db
       .prepare(
@@ -320,6 +343,7 @@ export class SqliteSessionStore {
       )
       .run(Date.now());
   }
+  /** Converts a raw SQLite row into the application's Task object. */
   private toTask(row: Record<string, unknown> | undefined): Task | undefined {
     if (!row) return undefined;
     return {

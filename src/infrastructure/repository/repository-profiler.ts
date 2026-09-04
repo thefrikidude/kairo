@@ -21,6 +21,7 @@ const MAX_SYMBOLS_PER_FILE = 80;
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 
 export class RepositoryProfiler {
+  /** Builds a bounded JavaScript/TypeScript workspace profile for a new session. */
   async profile(root: string): Promise<RepositoryProfile> {
     const [packageJson, gitignore] = await Promise.all([
       this.readPackage(root),
@@ -60,6 +61,7 @@ export class RepositoryProfiler {
     return { ...profile, verificationCandidates: new VerificationPlanner().candidates(profile) };
   }
 
+  /** Reads package metadata without failing profiling when the manifest is malformed. */
   private async readPackage(root: string): Promise<Record<string, unknown> | undefined> {
     try {
       const parsed: unknown = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
@@ -70,6 +72,7 @@ export class RepositoryProfiler {
       return undefined;
     }
   }
+  /** Extracts simple ignore entries that can safely prune the bounded file scan. */
   private async readGitignore(root: string): Promise<string[]> {
     try {
       return (await readFile(join(root, ".gitignore"), "utf8"))
@@ -82,6 +85,7 @@ export class RepositoryProfiler {
       return [];
     }
   }
+  /** Keeps only valid string-valued package scripts. */
   private scripts(packageJson: Record<string, unknown> | undefined): Record<string, string> {
     const scripts = packageJson?.scripts;
     if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) return {};
@@ -91,6 +95,7 @@ export class RepositoryProfiler {
       ),
     );
   }
+  /** Walks useful workspace files and derives their compact searchable metadata. */
   private async indexFiles(root: string, ignoredPaths: string[]): Promise<RepositoryFile[]> {
     const files: RepositoryFile[] = [];
     const visit = async (directory: string): Promise<void> => {
@@ -114,6 +119,7 @@ export class RepositoryProfiler {
     await visit(root);
     return files.sort((left, right) => left.path.localeCompare(right.path));
   }
+  /** Treats unreadable or binary-like files as empty so profiling remains resilient. */
   private async readText(path: string): Promise<string> {
     try {
       return await readFile(path, "utf8");
@@ -121,6 +127,7 @@ export class RepositoryProfiler {
       return "";
     }
   }
+  /** Produces bounded identifier-friendly terms from source text. */
   private terms(text: string): string[] {
     return [text, text.replace(/([a-z])([A-Z])/g, "$1 $2")]
       .flatMap((part) => part.toLowerCase().split(/[^a-z0-9_$]+/))
@@ -128,6 +135,7 @@ export class RepositoryProfiler {
       .filter((term, index, terms) => terms.indexOf(term) === index)
       .slice(0, MAX_TERMS_PER_FILE);
   }
+  /** Extracts common declaration names for higher-confidence symbol matches. */
   private symbols(text: string): string[] {
     return [
       ...text.matchAll(
@@ -137,6 +145,7 @@ export class RepositoryProfiler {
       .map((match) => match[1]!.toLowerCase())
       .slice(0, MAX_SYMBOLS_PER_FILE);
   }
+  /** Connects local imports and conventional test filenames into a small file graph. */
   private connectFiles(
     files: RepositoryFile[],
     sourceRoots: string[],
@@ -164,11 +173,13 @@ export class RepositoryProfiler {
     }
     return files.map((file) => ({ ...file, relatedFiles: file.relatedFiles.sort() }));
   }
+  /** Finds relative ES module specifiers declared in a source file. */
   private imports(text: string): string[] {
     return [...text.matchAll(/(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g)]
       .map((match) => match[1]!)
       .filter((specifier) => specifier.startsWith("."));
   }
+  /** Resolves a relative import against indexed TypeScript and JavaScript files. */
   private resolveImport(from: string, specifier: string, paths: Set<string>): string | undefined {
     const base = posix.normalize(posix.join(posix.dirname(from), specifier));
     const extensionless = base.replace(/\.[^.\/]+$/, "");
@@ -179,6 +190,7 @@ export class RepositoryProfiler {
       ...SOURCE_EXTENSIONS.map((extension) => `${extensionless}/index${extension}`),
     ].find((candidate) => paths.has(candidate));
   }
+  /** Maps a conventional test filename to the matching source-root implementation. */
   private testTarget(
     file: string,
     paths: Set<string>,
@@ -191,6 +203,7 @@ export class RepositoryProfiler {
       .flatMap((root) => SOURCE_EXTENSIONS.map((extension) => `${root}/${name}${extension}`))
       .find((candidate) => paths.has(candidate));
   }
+  /** Excludes large generated artifacts and lockfiles from the retrieval profile. */
   private isUseful(path: string, file: { size: number }): boolean {
     return (
       file.size <= 200_000 &&
