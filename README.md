@@ -21,10 +21,13 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 ## Current capabilities
 
 - Interactive Gemini coding-agent REPL for one local workspace.
+- A bounded JavaScript/TypeScript repository profile on session start: package manager, scripts, config files, source/test roots, ignored paths, and a compact file index.
+- Task-aware file ranking and line-range reads, so Gemini receives likely relevant files without flooding its context.
 - Workspace-confined file listing, code search, file reading, exact text edits, file writes, and shell commands.
 - Explicit approval before every edit, write, or shell command.
 - Bounded model/tool loops, repeated-call protection, failure tracking, and explicit verification status after edits.
-- Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume.
+- Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume. Repository profiles are persisted with sessions, so resuming does not rediscover from zero.
+- Discovered test, typecheck, lint, and build scripts are included in the task context. A successful approved command records its command, output, exit status, and verification result.
 - Gemini credentials from the macOS Keychain, with `GEMINI_API_KEY` as a temporary or CI override.
 
 Kairo does not currently implement model routing, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
@@ -83,7 +86,7 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 
 ## Roadmap
 
-1. **Make one agent dependable** — in progress: bounded tool loops, failure recovery, deterministic context checkpoints, task checkpoints, interrupted-task recovery, and post-change verification are implemented. Next is better repository relevance ranking and richer automated repair after failed tests.
+1. **Make one agent dependable** — in progress: bounded tool loops, failure recovery, deterministic context checkpoints, repository profiling and relevance ranking, interrupted-task recovery, and post-change verification are implemented. Next is richer automated repair after failed tests.
 2. **Add provider abstraction** — make Gemini only the first `ModelProvider`, then add other cloud and local models without changing the agent loop.
 3. **Route tasks to models** — select fast, cheap, or stronger models based on task class, measured cost, latency, and reliability.
 4. **Add specialized subagents** — research, coding, and testing child sessions coordinated by a main agent.
@@ -96,4 +99,4 @@ pnpm check
 pnpm test
 ```
 
-The tests cover session persistence, denied mutating actions, workspace boundaries, symlink escapes, and tool execution behavior.
+The tests cover repository profiling, script discovery, ignored/generated-file filtering, task-aware file ranking, persisted profiles, session recovery, approval behavior, workspace boundaries, symlink escapes, and verification exit status.

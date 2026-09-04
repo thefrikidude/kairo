@@ -14,6 +14,16 @@ test("workspace tools read, edit, truncate, and reject escapes", async () => {
     (await tools.execute({ id: "1", name: "read_file", args: { path: "src/a.txt" } })).output,
     /one/,
   );
+  assert.match(
+    (
+      await tools.execute({
+        id: "range",
+        name: "read_file_range",
+        args: { path: "src/a.txt", startLine: 2, endLine: 2 },
+      })
+    ).output,
+    /2: two/,
+  );
   assert.equal(
     (
       await tools.execute({
@@ -35,6 +45,16 @@ test("workspace tools read, edit, truncate, and reject escapes", async () => {
   await symlink(tmpdir(), join(root, "escape"));
   assert.equal(
     (await tools.execute({ id: "5", name: "read_file", args: { path: "escape/nope" } })).ok,
+    false,
+  );
+  assert.equal(
+    (
+      await tools.execute({
+        id: "invalid-range",
+        name: "read_file_range",
+        args: { path: "src/a.txt", startLine: 0, endLine: 2 },
+      })
+    ).ok,
     false,
   );
 });

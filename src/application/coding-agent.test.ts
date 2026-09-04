@@ -80,6 +80,8 @@ test("agent requires verification after a successful edit and records manual ver
   assert.equal(agent.status(session.id)?.status, "verification_required");
   await agent.verify(session.id, "test -f a.txt", () => {});
   assert.equal(agent.status(session.id)?.status, "completed");
+  assert.equal(agent.status(session.id)?.verificationExitCode, 0);
+  assert.equal(agent.status(session.id)?.verificationDiscovered, false);
   store.close();
 });
 
@@ -98,6 +100,7 @@ test("failed verification does not mark a changed task complete", async () => {
   await agent.verify(session.id, "false", () => {});
   assert.equal(agent.status(session.id)?.status, "failed");
   assert.equal(agent.status(session.id)?.verificationPassed, false);
+  assert.equal(agent.status(session.id)?.verificationExitCode, 1);
   store.close();
 });
 
