@@ -1,4 +1,5 @@
 import { ContextManager } from "./context-manager.js";
+import { FailureAnalyzer } from "./failure-analyzer.js";
 import type { Message, Task, ToolCall, ToolResult } from "../domain/models.js";
 import type {
   ApprovalPolicy,
@@ -12,9 +13,12 @@ const MAX_MODEL_TURNS = 20;
 const MAX_TOOL_CALLS = 40;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const MAX_IDENTICAL_CALLS = 2;
+// A small cap prevents an agent from repeatedly editing a workspace without converging.
+const MAX_REPAIR_ATTEMPTS = 2;
 
 export class CodingAgent {
   private readonly context: ContextManager;
+  private readonly failureAnalyzer = new FailureAnalyzer();
   constructor(
     private readonly provider: ModelProvider,
     private readonly store: TaskStore,
@@ -142,6 +146,10 @@ export class CodingAgent {
             return this.fail(task, `Repeated identical tool call blocked: ${call.name}.`, onText);
           const outcome = await this.executeTool(task, call, onText);
           task = this.store.task(task.id)!;
+          if (task.status === "failed") {
+            onText(`\nKairo stopped: ${task.error}\n`);
+            return;
+          }
           failures = outcome.ok ? 0 : failures + 1;
           if (failures >= MAX_CONSECUTIVE_FAILURES)
             return this.fail(task, "Too many consecutive tool failures.", onText);
@@ -214,6 +222,30 @@ export class CodingAgent {
           String(call.args.command ?? ""),
         ),
       });
+    if (call.name === "run_command" && !result.ok && task.changedFiles.length) {
+      const attempts = this.store.repairAttempts(task.id);
+      if (attempts.length >= MAX_REPAIR_ATTEMPTS) {
+        this.store.updateTask(task.id, {
+          status: "failed",
+          error: `Repair limit reached after ${MAX_REPAIR_ATTEMPTS} failed verification attempts.`,
+        });
+      } else {
+        const command = String(call.args.command ?? "");
+        const evidence = this.failureAnalyzer.analyze(command, result.output);
+        this.store.recordRepairAttempt({
+          id: `repair-${crypto.randomUUID()}`,
+          taskId: task.id,
+          command,
+          evidence,
+          selectedFiles: evidence.fileLocations.map((location) => location.path),
+          createdAt: Date.now(),
+        });
+        // The next model turn receives a compact repair brief from ContextManager.
+        onText(
+          `\n[Verification failed — repair attempt ${attempts.length + 1}/${MAX_REPAIR_ATTEMPTS}]\n`,
+        );
+      }
+    }
     this.store.recordTool(task.sessionId, call.id, call.name, call.args, approved, result.output);
     this.save(task.sessionId, {
       role: "tool",

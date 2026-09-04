@@ -3,6 +3,7 @@ import { databasePath, ensureStateDir } from "../filesystem/platform-paths.js";
 import type {
   ContextCheckpoint,
   Message,
+  RepairAttempt,
   RepositoryProfile,
   Task,
   TaskStatus,
@@ -30,6 +31,8 @@ export class SqliteSessionStore {
       CREATE TABLE IF NOT EXISTS context_checkpoints (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT, summary TEXT NOT NULL, through_message_id INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE INDEX IF NOT EXISTS checkpoints_session_created ON context_checkpoints(session_id, created_at DESC);
       CREATE TABLE IF NOT EXISTS repository_profiles (session_id TEXT PRIMARY KEY, profile_json TEXT NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));`);
+    db.exec(`CREATE TABLE IF NOT EXISTS repair_attempts (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, command TEXT NOT NULL, evidence_json TEXT NOT NULL, selected_files_json TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(task_id) REFERENCES tasks(id));
+      CREATE INDEX IF NOT EXISTS repair_attempts_task_created ON repair_attempts(task_id, created_at DESC);`);
     const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as {
       name: string;
     }[];
@@ -281,6 +284,34 @@ export class SqliteSessionStore {
       .prepare("SELECT profile_json FROM repository_profiles WHERE session_id=?")
       .get(sessionId) as { profile_json: string } | undefined;
     return row ? (JSON.parse(row.profile_json) as RepositoryProfile) : undefined;
+  }
+  recordRepairAttempt(attempt: RepairAttempt): void {
+    this.db
+      .prepare(
+        "INSERT INTO repair_attempts(id, task_id, command, evidence_json, selected_files_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        attempt.id,
+        attempt.taskId,
+        attempt.command,
+        JSON.stringify(attempt.evidence),
+        JSON.stringify(attempt.selectedFiles),
+        attempt.createdAt,
+      );
+  }
+  repairAttempts(taskId: string): RepairAttempt[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM repair_attempts WHERE task_id=? ORDER BY created_at")
+        .all(taskId) as Record<string, unknown>[]
+    ).map((row) => ({
+      id: String(row.id),
+      taskId: String(row.task_id),
+      command: String(row.command),
+      evidence: JSON.parse(String(row.evidence_json)) as RepairAttempt["evidence"],
+      selectedFiles: JSON.parse(String(row.selected_files_json)) as string[],
+      createdAt: Number(row.created_at),
+    }));
   }
   private recoverInterruptedTasks(): void {
     this.db

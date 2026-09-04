@@ -5,6 +5,7 @@ import type {
   Task,
   ToolCall,
   ToolResult,
+  RepairAttempt,
 } from "./models.js";
 
 export interface ModelProvider {
@@ -67,6 +68,8 @@ export interface TaskStore {
   lastMessageId(sessionId: string): number;
   saveRepositoryProfile(sessionId: string, profile: import("./models.js").RepositoryProfile): void;
   repositoryProfile(sessionId: string): import("./models.js").RepositoryProfile | undefined;
+  recordRepairAttempt(attempt: RepairAttempt): void;
+  repairAttempts(taskId: string): RepairAttempt[];
 }
 
 export interface ApprovalPolicy {

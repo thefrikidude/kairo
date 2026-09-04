@@ -105,6 +105,7 @@ export class WorkspaceTools implements ToolExecutor {
     if (!this.inside(candidate)) throw new Error("Path is outside the workspace.");
     try {
       const actual = await realpath(candidate);
+      // Resolving first catches a path that looks local but exits through a symlink.
       if (!this.inside(actual)) throw new Error("Symlink escapes the workspace.");
       return actual;
     } catch (error: unknown) {

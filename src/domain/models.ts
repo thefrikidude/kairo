@@ -52,6 +52,21 @@ export interface RepositoryProfile {
   createdAt: number;
 }
 
+export interface FailureEvidence {
+  summary: string;
+  fileLocations: Array<{ path: string; line?: number; column?: number }>;
+  excerpts: string[];
+}
+
+export interface RepairAttempt {
+  id: string;
+  taskId: string;
+  command: string;
+  evidence: FailureEvidence;
+  selectedFiles: string[];
+  createdAt: number;
+}
+
 export type TaskStatus =
   | "planning"
   | "acting"

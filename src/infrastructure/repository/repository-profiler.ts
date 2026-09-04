@@ -15,6 +15,7 @@ const CONFIG_FILES = [
   ".eslintrc.json",
 ];
 const MAX_INDEXED_FILES = 800;
+// The profile is stored with a session, so these caps prevent large repositories from bloating SQLite.
 const MAX_TERMS_PER_FILE = 400;
 const MAX_SYMBOLS_PER_FILE = 80;
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
@@ -153,6 +154,7 @@ export class RepositoryProfiler {
       if (testTarget) targets.add(testTarget);
       file.relatedFiles = [...targets].sort();
     }
+    // Make relationships bidirectional so a failing test can lead back to its implementation.
     for (const file of files) {
       for (const target of file.relatedFiles) {
         const targetFile = byPath.get(target);

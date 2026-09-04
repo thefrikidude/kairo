@@ -30,6 +30,7 @@ export class ContextSelector {
     const direct = new Set(
       files.filter((file) => this.directScore(file, terms, profile) > 0).map((file) => file.path),
     );
+    // Relationship proximity only boosts files that are connected to independently relevant files.
     return files
       .map((file) => ({ path: file.path, score: this.score(file, terms, profile, direct) }))
       .filter((item) => item.score > 0)

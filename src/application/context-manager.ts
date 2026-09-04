@@ -20,8 +20,15 @@ export class ContextManager {
       content: this.profileContext(task, profile),
       createdAt: profile.createdAt,
     };
+    const repairBrief = this.repairBrief(task);
+    const repairContext = repairBrief && {
+      role: "user" as const,
+      content: repairBrief,
+      createdAt: Date.now(),
+    };
     const context = [
       ...(repositoryContext ? [repositoryContext] : []),
+      ...(repairContext ? [repairContext] : []),
       ...(checkpoint
         ? [
             {
@@ -90,5 +97,20 @@ export class ContextManager {
       .filter((value): value is string => Boolean(value))
       .map((value) => value.slice(0, 8_000))
       .join("\n");
+  }
+  private repairBrief(task: Task): string {
+    const attempts = this.store.repairAttempts(task.id);
+    const latest = attempts.at(-1);
+    if (!latest) return "";
+    const locations = latest.evidence.fileLocations
+      .map((location) => `${location.path}${location.line ? `:${location.line}` : ""}`)
+      .join(", ");
+    return [
+      `Repair attempt ${attempts.length}/2 after \`${latest.command}\` failed.`,
+      `Failure: ${latest.evidence.summary}`,
+      `Locations: ${locations || "none extracted"}`,
+      `Evidence: ${latest.evidence.excerpts.join(" | ") || "inspect the command output"}`,
+      "Inspect the evidence and relevant files, make a materially different repair, then rerun verification.",
+    ].join("\n");
   }
 }
