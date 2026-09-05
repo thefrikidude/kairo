@@ -77,6 +77,10 @@ node dist/interface/cli/index.js config set model <model-name>
 # Session history
 node dist/interface/cli/index.js sessions list
 node dist/interface/cli/index.js resume <session-id>
+
+# Run the isolated scripted benchmark suite
+node dist/interface/cli/index.js eval
+node dist/interface/cli/index.js eval --json
 ```
 
 Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, and `/quit`.
@@ -98,6 +102,8 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 ## Development
 
 Trace durations separate model streaming, tool execution, and approval waiting; they are measured operation time, not total task wall time. Unfinished operations remain visible after interruption. Older tasks have no historical trace backfill. Command-check counts currently follow Kairo's existing verification behavior (all executed shell commands); a passing command is not proof of task correctness. Token usage and cost are not measured yet.
+
+`kairo eval` runs deterministic scripted model decisions against disposable fixture copies. It measures the agent loop, tool safety, repair flow, verification, and tracing without calling Gemini. It is the reproducible baseline for later live Gemini evaluations; it does not measure Gemini reasoning quality yet.
 
 ```bash
 pnpm check
