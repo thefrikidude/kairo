@@ -124,3 +124,24 @@ export interface ContextCheckpoint {
   throughMessageId: number;
   createdAt: number;
 }
+
+/** One benchmark result combines the task outcome, an independent verifier, and agent metrics. */
+export interface EvaluationResult {
+  id: string;
+  passed: boolean;
+  taskStatus: TaskStatus;
+  verified: boolean;
+  expectationPassed: boolean;
+  error?: string;
+  metrics: {
+    modelTurns: number;
+    toolExecutions: number;
+    toolFailures: number;
+    approvals: number;
+    repairs: number;
+    verificationPasses: number;
+    verificationFailures: number;
+    modelMs: number;
+    toolMs: number;
+  };
+}
