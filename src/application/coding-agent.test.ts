@@ -4,6 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodingAgent } from "./coding-agent.js";
+import { taskMetrics } from "./task-metrics.js";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
 import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-tools.js";
 import type { ModelTurn, Message, ToolCall } from "../domain/models.js";
@@ -54,6 +55,12 @@ test("agent records denied mutating calls and continues", async () => {
     output += text;
   });
   assert.match(output, /Denied/);
+  const metrics = taskMetrics(store.taskEvents(store.latestTask(session.id)!.id));
+  assert.equal(metrics.modelTurns, 2);
+  assert.equal(metrics.toolRequests, 1);
+  assert.equal(metrics.toolExecutions, 0);
+  assert.equal(metrics.denials, 1);
+  assert.equal(metrics.toolFailures, 0);
   assert.match(output, /done/);
   assert.match(
     store
@@ -167,6 +174,17 @@ test("agent continues with a persisted, focused repair after failed verification
   assert.equal(task.status, "completed");
   assert.equal(store.repairAttempts(task.id).length, 1);
   assert.equal(store.repairAttempts(task.id)[0]?.command, "false");
+  const events = store.taskEvents(task.id);
+  const metrics = taskMetrics(events);
+  assert.equal(metrics.repairs, 1);
+  assert.equal(metrics.modelTurns, 5);
+  assert.equal(metrics.toolExecutions, 4);
+  assert.equal(metrics.approvals, 4);
+  assert.equal(metrics.verificationPasses, 1);
+  assert.equal(metrics.verificationFailures, 1);
+  assert.equal(metrics.unfinishedOperations, 0);
+  assert.ok(metrics.modelMs >= 0);
+  assert.equal(events.at(-1)?.outcome, "completed");
   store.close();
 });
 

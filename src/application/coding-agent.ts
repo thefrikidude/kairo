@@ -1,6 +1,13 @@
 import { ContextManager } from "./context-manager.js";
 import { FailureAnalyzer } from "./failure-analyzer.js";
-import type { Message, Task, ToolCall, ToolResult } from "../domain/models.js";
+import type {
+  Message,
+  Task,
+  ToolCall,
+  ToolResult,
+  TaskEvent,
+  ModelTurn,
+} from "../domain/models.js";
 import type {
   ApprovalPolicy,
   ModelProvider,
@@ -125,10 +132,7 @@ export class CodingAgent {
           onText("\nTask cancelled.\n");
           return;
         }
-        const result = await this.provider.stream(
-          this.context.prepare(task.sessionId, task),
-          onText,
-        );
+        const result = await this.modelTurn(task, onText);
         if (result.text)
           this.save(task.sessionId, {
             role: "model",
@@ -195,6 +199,51 @@ export class CodingAgent {
     call: ToolCall,
     onText: (text: string) => void,
   ): Promise<ToolResult> {
+    this.event(task, {
+      kind: "tool_requested",
+      operationId: call.id,
+      name: call.name.slice(0, 120),
+    });
+    return this.executeApprovedTool(task, call, onText);
+  }
+
+  /** Records model latency even when streaming fails; partial operations remain visible after restart. */
+  private async modelTurn(task: Task, onText: (text: string) => void): Promise<ModelTurn> {
+    const messages = this.context.prepare(task.sessionId, task);
+    const operationId = crypto.randomUUID();
+    this.event(task, { kind: "model_started", operationId });
+    const started = performance.now();
+    try {
+      const result = await this.provider.stream(messages, onText);
+      this.event(task, {
+        kind: "model_finished",
+        operationId,
+        outcome: "succeeded",
+        durationMs: performance.now() - started,
+      });
+      return result;
+    } catch (error) {
+      this.event(task, {
+        kind: "model_finished",
+        operationId,
+        outcome: "failed",
+        durationMs: performance.now() - started,
+      });
+      throw error;
+    }
+  }
+
+  /** Attaches identity and wall-clock time without retaining prompts or tool arguments. */
+  private event(task: Task, event: Omit<TaskEvent, "taskId" | "createdAt">): void {
+    this.store.recordTaskEvent({ ...event, taskId: task.id, createdAt: Date.now() });
+  }
+
+  /** Executes a tool only after approval; execution duration excludes the user's decision time. */
+  private async executeApprovedTool(
+    task: Task,
+    call: ToolCall,
+    onText: (text: string) => void,
+  ): Promise<ToolResult> {
     const definition = this.toolDefinitions.find((item) => item.name === call.name);
     this.save(task.sessionId, {
       role: "model",
@@ -206,14 +255,50 @@ export class CodingAgent {
     let approved: boolean | null = null;
     if (!definition) return this.record(task, call, false, "Unknown tool requested.", false);
     if (definition.mutating) {
+      const approvalStarted = performance.now();
       approved = await this.approval.approve(call, this.tools.description(call));
+      this.event(task, {
+        kind: "approval",
+        operationId: call.id,
+        outcome: approved ? "approved" : "denied",
+        durationMs: performance.now() - approvalStarted,
+      });
       if (!approved) {
         onText(`\n[Denied] ${call.name}\n`);
         return this.record(task, call, false, "User denied this action.", false);
       }
     }
     onText(`\n[Tool] ${call.name}\n`);
-    const result = await this.tools.execute(call);
+    this.event(task, { kind: "tool_started", operationId: call.id, name: call.name });
+    const started = performance.now();
+    let result: ToolResult;
+    try {
+      result = await this.tools.execute(call);
+    } catch (error) {
+      this.event(task, {
+        kind: "tool_finished",
+        operationId: call.id,
+        name: call.name,
+        outcome: "failed",
+        durationMs: performance.now() - started,
+      });
+      throw error;
+    }
+    this.event(task, {
+      kind: "tool_finished",
+      operationId: call.id,
+      name: call.name,
+      outcome: result.ok ? "succeeded" : "failed",
+      durationMs: performance.now() - started,
+      exitCode: result.exitCode,
+    });
+    if (call.name === "run_command")
+      this.event(task, {
+        kind: "verification",
+        operationId: call.id,
+        outcome: result.ok ? "passed" : "failed",
+        exitCode: result.exitCode,
+      });
     if (
       result.ok &&
       (call.name === "write_file" || call.name === "edit_file") &&
@@ -277,6 +362,12 @@ export class CodingAgent {
     output: string,
     approved: boolean,
   ): ToolResult {
+    this.event(task, {
+      kind: "tool_finished",
+      operationId: call.id,
+      name: call.name.slice(0, 120),
+      outcome: output === "User denied this action." ? "denied" : "rejected",
+    });
     this.store.recordTool(task.sessionId, call.id, call.name, call.args, approved, output);
     this.save(task.sessionId, {
       role: "tool",

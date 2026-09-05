@@ -3,6 +3,7 @@ import { stdin, stdout } from "node:process";
 import type { ToolCall } from "../../domain/models.js";
 import type { ApprovalPolicy } from "../../domain/ports.js";
 import { CodingAgent } from "../../application/coding-agent.js";
+import { formatMetrics, formatTrace } from "./task-trace.js";
 import {
   SqliteSessionStore,
   type Session,
@@ -37,7 +38,7 @@ export async function runRepl(
     if (line === "/quit" || line === "/exit") break;
     if (line === "/help") {
       console.log(
-        "/help  /new  /resume [session-id]  /history  /status  /changes  /verify <command>  /compact  /cancel  /model  /quit",
+        "/help  /new  /resume [session-id]  /history  /status  /trace [task-id]  /changes  /verify <command>  /compact  /cancel  /model  /quit",
       );
       continue;
     }
@@ -55,15 +56,26 @@ export async function runRepl(
       console.log("Model is configured with `kairo config get model`.");
       continue;
     }
+    if (line === "/trace" || line.startsWith("/trace ")) {
+      const task = line === "/trace" ? agent.status(active.id) : store.task(line.slice(7).trim());
+      console.log(
+        task && task.sessionId === active.id
+          ? formatTrace(task, store.taskEvents(task.id))
+          : "Task not found in this session.",
+      );
+      continue;
+    }
     if (line === "/status" || line === "/changes") {
       const task = agent.status(active.id);
       if (!task) console.log("No task has run in this session.");
       else if (line === "/changes")
         console.log(task.changedFiles.length ? task.changedFiles.join("\n") : "No files changed.");
-      else
+      else {
         console.log(
           `${task.status}: ${task.prompt}${task.error ? `\nError: ${task.error}` : ""}${task.verificationCommand ? `\nVerification: ${task.verificationCommand}` : ""}`,
         );
+        console.log(formatMetrics(store.taskEvents(task.id)));
+      }
       continue;
     }
     if (line === "/compact") {

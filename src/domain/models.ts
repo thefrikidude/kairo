@@ -1,5 +1,27 @@
 export type Role = "user" | "model" | "tool";
 
+/** Metadata-only events avoid copying source code, credentials, or command output into traces. */
+export interface TaskEvent {
+  id?: number;
+  taskId: string;
+  kind:
+    | "status"
+    | "model_started"
+    | "model_finished"
+    | "tool_requested"
+    | "tool_started"
+    | "tool_finished"
+    | "approval"
+    | "repair"
+    | "verification";
+  createdAt: number;
+  operationId?: string;
+  name?: string;
+  outcome?: string;
+  durationMs?: number;
+  exitCode?: number | null;
+}
+
 export interface Message {
   role: Role;
   content: string;

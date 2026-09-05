@@ -6,6 +6,7 @@ import type {
   ToolCall,
   ToolResult,
   RepairAttempt,
+  TaskEvent,
 } from "./models.js";
 
 export interface ModelProvider {
@@ -26,6 +27,10 @@ export interface ToolExecutor {
 }
 
 export interface TaskStore {
+  /** Appends metadata for one observable task operation. */
+  recordTaskEvent(event: TaskEvent): void;
+  /** Returns events in durable insertion order, including earlier resumed runs. */
+  taskEvents(taskId: string): TaskEvent[];
   messages(sessionId: string): Message[];
   recentMessages(sessionId: string, limit: number): Message[];
   addMessage(sessionId: string, message: Message): void;

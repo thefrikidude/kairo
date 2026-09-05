@@ -20,6 +20,8 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 
 ## Current capabilities
 
+- Persisted task traces: use `/trace [task-id]` for chronological events and `/status` for model/tool timing, approval counts, repairs, and command outcomes. Traces contain operation metadata, not prompts, file contents, or raw command output.
+
 - Interactive Gemini coding-agent REPL for one local workspace.
 - A bounded JavaScript/TypeScript repository profile on session start: package manager, scripts, config files, source/test roots, ignored paths, and a compact file index.
 - Task-aware file ranking and line-range reads, so Gemini receives likely relevant files without flooding its context. Ranking combines task/error terms, declared symbols, local imports, and test-to-source relationships.
@@ -94,6 +96,8 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 5. **Build an evaluation system** — run repeatable coding tasks and compare models, routing rules, agent profiles, cost, latency, and verified success.
 
 ## Development
+
+Trace durations separate model streaming, tool execution, and approval waiting; they are measured operation time, not total task wall time. Unfinished operations remain visible after interruption. Older tasks have no historical trace backfill. Command-check counts currently follow Kairo's existing verification behavior (all executed shell commands); a passing command is not proof of task correctness. Token usage and cost are not measured yet.
 
 ```bash
 pnpm check

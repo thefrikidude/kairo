@@ -3,6 +3,7 @@ import { databasePath, ensureStateDir } from "../filesystem/platform-paths.js";
 import type {
   ContextCheckpoint,
   Message,
+  TaskEvent,
   RepairAttempt,
   RepositoryProfile,
   Task,
@@ -45,12 +46,29 @@ export class SqliteSessionStore {
     if (!columns.some((column) => column.name === "verification_discovered"))
       db.exec("ALTER TABLE tasks ADD COLUMN verification_discovered INTEGER");
     const store = new SqliteSessionStore(db);
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS task_events (id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, event_json TEXT NOT NULL); CREATE INDEX IF NOT EXISTS task_events_task ON task_events(task_id, id)",
+    );
     store.recoverInterruptedTasks();
     return store;
   }
   /** Closes the SQLite handle after the CLI session exits. */
   close(): void {
     this.db.close();
+  }
+  /** Stores bounded operation metadata separately from model context and raw tool history. */
+  recordTaskEvent(event: TaskEvent): void {
+    this.db
+      .prepare("INSERT INTO task_events(task_id, event_json) VALUES (?, ?)")
+      .run(event.taskId, JSON.stringify(event));
+  }
+  /** Uses insertion ids rather than timestamps to preserve ordering within the same millisecond. */
+  taskEvents(taskId: string): TaskEvent[] {
+    return (
+      this.db
+        .prepare("SELECT id, event_json FROM task_events WHERE task_id=? ORDER BY id")
+        .all(taskId) as { id: number; event_json: string }[]
+    ).map((row) => ({ ...(JSON.parse(row.event_json) as TaskEvent), id: row.id }));
   }
   /** Creates a durable session associated with one resolved workspace. */
   create(workspace: string): Session {
@@ -168,6 +186,7 @@ export class SqliteSessionStore {
         "INSERT INTO tasks(id, session_id, prompt, status, changed_files_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .run(id, sessionId, prompt, "planning", "[]", now, now);
+    this.recordTaskEvent({ taskId: id, kind: "status", outcome: "planning", createdAt: now });
     return this.task(id)!;
   }
   /** Loads one task by id and maps database columns to domain names. */
@@ -223,6 +242,13 @@ export class SqliteSessionStore {
         next.updatedAt,
         id,
       );
+    if (next.status !== task.status)
+      this.recordTaskEvent({
+        taskId: id,
+        kind: "status",
+        outcome: next.status,
+        createdAt: next.updatedAt,
+      });
     return next;
   }
   /** Persists a summary that replaces older conversation detail in future context. */
@@ -307,6 +333,7 @@ export class SqliteSessionStore {
   }
   /** Persists one verification failure that started an agent repair cycle. */
   recordRepairAttempt(attempt: RepairAttempt): void {
+    this.recordTaskEvent({ taskId: attempt.taskId, kind: "repair", createdAt: attempt.createdAt });
     this.db
       .prepare(
         "INSERT INTO repair_attempts(id, task_id, command, evidence_json, selected_files_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -337,6 +364,16 @@ export class SqliteSessionStore {
   }
   /** Marks tasks left active by a process exit so the user can explicitly resume them. */
   private recoverInterruptedTasks(): void {
+    const active = this.db
+      .prepare("SELECT id FROM tasks WHERE status IN ('planning', 'acting', 'verifying')")
+      .all() as { id: string }[];
+    for (const task of active)
+      this.recordTaskEvent({
+        taskId: task.id,
+        kind: "status",
+        outcome: "interrupted",
+        createdAt: Date.now(),
+      });
     this.db
       .prepare(
         "UPDATE tasks SET status='interrupted', updated_at=? WHERE status IN ('planning', 'acting', 'verifying')",
