@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runEvaluationSuite } from "./evaluation-harness.js";
-import { formatEvaluationReport } from "../interface/cli/evaluation-report.js";
+import {
+  formatEvaluationReport,
+  formatLiveEvaluationReport,
+} from "../interface/cli/evaluation-report.js";
 
 test("scripted evaluation verifies fixture state and repair evidence", async () => {
   const results = await runEvaluationSuite();
@@ -12,4 +15,31 @@ test("scripted evaluation verifies fixture state and repair evidence", async () 
   assert.equal(repair?.verified, true);
   assert.ok((repair?.metrics.toolExecutions ?? 0) >= 3);
   assert.match(formatEvaluationReport(results), /2\/2 passed/);
+});
+
+test("live evaluation report exposes the independent fixture and DeepEval verdict", () => {
+  const report = formatLiveEvaluationReport([
+    {
+      id: "create-file",
+      passed: true,
+      taskStatus: "completed",
+      verified: true,
+      expectationPassed: true,
+      judge: { passed: true, score: 0.9, reason: "Task completed." },
+      metrics: {
+        modelTurns: 3,
+        toolExecutions: 2,
+        toolFailures: 0,
+        approvals: 2,
+        repairs: 0,
+        verificationPasses: 1,
+        verificationFailures: 0,
+        modelMs: 20,
+        toolMs: 10,
+      },
+    },
+  ]);
+  assert.match(report, /1\/1 passed/);
+  assert.match(report, /judge=passed/);
+  assert.match(report, /score=0.90/);
 });

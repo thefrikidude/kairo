@@ -9,7 +9,7 @@ import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-t
 import { CodingAgent } from "./coding-agent.js";
 import { taskMetrics } from "./task-metrics.js";
 
-type Scenario = {
+export type EvaluationScenario = {
   id: string;
   prompt: string;
   steps: ModelTurn[];
@@ -39,7 +39,7 @@ class FixtureApproval implements ApprovalPolicy {
   }
 }
 
-const scenarios: Scenario[] = [
+export const evaluationScenarios: EvaluationScenario[] = [
   {
     id: "create-file",
     prompt: "Create result.txt containing done and verify the project tests.",
@@ -107,12 +107,12 @@ const scenarios: Scenario[] = [
 /** Runs all fixture cases in disposable copies and returns only the final aggregate evidence. */
 export async function runEvaluationSuite(): Promise<EvaluationResult[]> {
   const results: EvaluationResult[] = [];
-  for (const scenario of scenarios) results.push(await runScenario(scenario));
+  for (const scenario of evaluationScenarios) results.push(await runScenario(scenario));
   return results;
 }
 
 /** Runs one scenario with isolated storage so benchmark state cannot affect the user workspace. */
-async function runScenario(scenario: Scenario): Promise<EvaluationResult> {
+export async function runScenario(scenario: EvaluationScenario): Promise<EvaluationResult> {
   const root = await mkdtemp(join(tmpdir(), `kairo-eval-${scenario.id}-`));
   try {
     await cp(join(fixtures, scenario.id), root, { recursive: true });

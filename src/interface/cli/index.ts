@@ -12,12 +12,13 @@ import { RepositoryProfiler } from "../../infrastructure/repository/repository-p
 import { CodingAgent } from "../../application/coding-agent.js";
 import { runRepl } from "./repl.js";
 import { runEvaluationSuite } from "../../application/evaluation-harness.js";
-import { formatEvaluationReport } from "./evaluation-report.js";
+import { runLiveEvaluationSuite } from "../../application/live-evaluation.js";
+import { formatEvaluationReport, formatLiveEvaluationReport } from "./evaluation-report.js";
 
 /** Prints the supported command-line shapes when arguments are invalid. */
 function usage(): void {
   console.log(
-    "Usage: kairo [workspace] | kairo eval [--json] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
+    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval live [--json] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
   );
 }
 /** Asks for a one-line credential before sending it to the Keychain adapter. */
@@ -30,7 +31,24 @@ async function prompt(question: string): Promise<string> {
 /** Parses CLI commands, wires concrete adapters, and starts the workspace REPL. */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  const credentials = new MacOSKeychainStore();
   if (args[0] === "eval") {
+    if (args[1] === "live") {
+      const key = await credentials.get();
+      if (!key)
+        throw new Error("No Gemini credential. Run `kairo auth login` or set GEMINI_API_KEY.");
+      const results = await runLiveEvaluationSuite({
+        apiKey: key,
+        model: (await loadConfig()).model,
+      });
+      console.log(
+        args[2] === "--json"
+          ? JSON.stringify(results, null, 2)
+          : formatLiveEvaluationReport(results),
+      );
+      process.exitCode = results.every((result) => result.passed) ? 0 : 1;
+      return;
+    }
     const results = await runEvaluationSuite();
     console.log(
       args[1] === "--json" ? JSON.stringify(results, null, 2) : formatEvaluationReport(results),
@@ -38,7 +56,6 @@ async function main(): Promise<void> {
     process.exitCode = results.every((result) => result.passed) ? 0 : 1;
     return;
   }
-  const credentials = new MacOSKeychainStore();
   if (args[0] === "auth") {
     if (args[1] === "login") {
       const key = await prompt("Gemini API key (saved in macOS Keychain): ");

@@ -145,3 +145,16 @@ export interface EvaluationResult {
     toolMs: number;
   };
 }
+
+/** A DeepEval verdict is advisory model-quality evidence, alongside deterministic task checks. */
+export interface DeepEvalVerdict {
+  passed: boolean;
+  score?: number;
+  reason?: string;
+  error?: string;
+}
+
+/** A live evaluation combines isolated workspace assertions with an LLM-judged agent trace. */
+export interface LiveEvaluationResult extends EvaluationResult {
+  judge: DeepEvalVerdict;
+}
