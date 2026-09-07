@@ -120,6 +120,7 @@ async function main(): Promise<void> {
       if (!key)
         throw new Error("No Gemini credential. Run `kairo auth login` or set GEMINI_API_KEY.");
       const results = await runLiveEvaluationSuite({
+        onProgress: (text) => process.stderr.write(text),
         apiKey: key,
         model: (await loadConfig()).model,
       });
@@ -143,6 +144,7 @@ async function main(): Promise<void> {
           apiKey: key,
           model: (await loadConfig()).model,
           evaluationStore: store,
+          onProgress: (text) => process.stderr.write(text),
           trials,
         });
         const comparison = compareWithBaseline(store, evaluation.run.id);

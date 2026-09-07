@@ -66,6 +66,8 @@ export function formatSelfEvaluationReport(
       [
         `${result.passed ? "PASS" : "FAIL"} ${result.id}`,
         `trial=${result.trial}`,
+        `retries=${result.metrics.providerRetries ?? "N/A"} waitMs=${result.metrics.providerWaitMs ?? "N/A"}`,
+        result.failureCategory ? `failure=${result.failureCategory}` : "",
         `status=${result.taskStatus}`,
         `verified=${result.verified}`,
         `expectation=${result.expectationPassed}`,
@@ -105,6 +107,7 @@ export function formatEvaluationRun(run: EvaluationRun, attempts: EvaluationAtte
       [
         `${attempt.passed ? "PASS" : "FAIL"} ${attempt.scenarioId}`,
         `trial=${attempt.trial}`,
+        `retries=${attempt.metrics.providerRetries ?? "N/A"} waitMs=${attempt.metrics.providerWaitMs ?? "N/A"}`,
         `status=${attempt.taskStatus}`,
         `verified=${attempt.verified}`,
         `expectation=${attempt.expectationPassed}`,

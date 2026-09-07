@@ -12,7 +12,11 @@ import type {
 } from "./models.js";
 
 export interface ModelProvider {
-  stream(messages: Message[], onText: (chunk: string) => void): Promise<ModelTurn>;
+  stream(
+    messages: Message[],
+    onText: (chunk: string) => void,
+    onProgress?: (event: import("./provider-error.js").ProviderProgress) => void,
+  ): Promise<ModelTurn>;
 }
 
 export interface ToolDefinition {

@@ -20,6 +20,8 @@ export function taskMetrics(events: TaskEvent[]) {
       ),
   );
   return {
+    providerRetries: count("provider_retry"),
+    providerWaitMs: duration("provider_retry_wait"),
     modelTurns: count("model_started"),
     modelFailures: count("model_finished", "failed"),
     modelMs: duration("model_finished"),

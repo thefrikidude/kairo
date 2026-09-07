@@ -13,10 +13,12 @@ import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-t
 import { CodingAgent } from "./coding-agent.js";
 import { evaluationScenarios, type EvaluationScenario } from "./evaluation-harness.js";
 import { taskMetrics } from "./task-metrics.js";
+import { runEvaluatedAgent } from "./evaluated-agent.js";
 
 const fixtures = join(process.cwd(), "evals", "fixtures");
 
 export type LiveEvaluationOptions = {
+  onProgress?: (text: string) => void;
   apiKey: string;
   model: string;
 };
@@ -91,12 +93,13 @@ async function runObservedScenario(
         new FixtureApproval(),
         definitions,
       );
+      let failure: Awaited<ReturnType<typeof runEvaluatedAgent>> = {};
       const runAgent = observe({
         type: SpanType.AGENT,
         name: "kairo-coding-agent",
         availableTools: definitions.map((definition) => definition.name),
         fn: async (input: string): Promise<string> => {
-          await agent.run(session.id, input, () => {});
+          failure = await runEvaluatedAgent(agent, session.id, input, options.onProgress);
           const task = agent.status(session.id)!;
           const output = finalResponse(store.messages(session.id), task.error);
           const events = store.taskEvents(task.id);
@@ -117,7 +120,7 @@ async function runObservedScenario(
       });
       await runAgent(prompt);
       const task = agent.status(session.id)!;
-      const expectationPassed = await scenario.expect(root);
+      const expectationPassed = failure.error ? false : await scenario.expect(root);
       const metrics = taskMetrics(store.taskEvents(task.id));
       const verified = task.verificationPassed === true;
       return {
@@ -126,9 +129,12 @@ async function runObservedScenario(
         taskStatus: task.status,
         verified,
         expectationPassed,
-        error: task.error,
+        error: failure.error ?? task.error,
+        failureCategory: failure.category,
         judge: { passed: false },
         metrics: {
+          providerRetries: metrics.providerRetries,
+          providerWaitMs: metrics.providerWaitMs,
           modelTurns: metrics.modelTurns,
           toolExecutions: metrics.toolExecutions,
           toolFailures: metrics.toolFailures,

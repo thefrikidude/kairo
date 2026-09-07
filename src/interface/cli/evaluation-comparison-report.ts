@@ -25,6 +25,7 @@ function delta(value: number | null, higherIsBetter: boolean, suffix = ""): stri
 function changeLines(label: string, change: ReliabilityChange): string[] {
   const { baseline: b, current: c, delta: d } = change;
   return [
+    `Infrastructure failures: ${b.infrastructureFailures} -> ${c.infrastructureFailures}; coding attempts: ${b.codingAttempts} -> ${c.codingAttempts}; coding-outcome pass rate: ${rate(b.codingPassRate)} -> ${rate(c.codingPassRate)}${d ? ` | ${delta(d.codingPassRate === null ? null : d.codingPassRate * 100, true, " pp")}` : ""}`,
     `${label}: ${b.passed}/${b.attempts} (${rate(b.passRate)}) -> ${c.passed}/${c.attempts} (${rate(c.passRate)})${d ? ` | ${delta(d.passRate === null ? null : d.passRate * 100, true, " pp")}; passed-attempt change ${d.passed > 0 ? "+" : ""}${d.passed}` : ""}`,
     ...comparisonMetrics.map(
       (metric) =>
@@ -48,6 +49,7 @@ export function formatComparison(comparison: EvaluationComparison): string {
       ? ["Model mismatch: runs are not directly comparable; deltas are omitted."]
       : []),
     "Rates and averages use observed attempts; absent attempts are not counted as failures. Lower resource averages do not establish better correctness.",
+    "Coding-outcome rates exclude classified infrastructure failures. Historical misclassifications cannot be reconstructed from saved metadata.",
     ...changeLines("Overall", comparison.overall),
     ...comparison.scenarios.flatMap((scenario) => changeLines(scenario.scenarioId, scenario)),
   ].join("\n");

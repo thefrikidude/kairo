@@ -7,6 +7,9 @@ export interface TaskEvent {
   kind:
     | "status"
     | "model_started"
+    | "provider_retry"
+    | "provider_retry_wait"
+    | "provider_exhausted"
     | "model_finished"
     | "tool_requested"
     | "tool_started"
@@ -141,6 +144,7 @@ export interface ContextCheckpoint {
 
 /** One benchmark result combines the task outcome, an independent verifier, and agent metrics. */
 export interface EvaluationResult {
+  failureCategory?: EvaluationAttempt["failureCategory"];
   id: string;
   passed: boolean;
   taskStatus: TaskStatus;
@@ -148,6 +152,8 @@ export interface EvaluationResult {
   expectationPassed: boolean;
   error?: string;
   metrics: {
+    providerRetries?: number;
+    providerWaitMs?: number;
     modelTurns: number;
     toolExecutions: number;
     toolFailures: number;
@@ -204,7 +210,13 @@ export interface EvaluationAttempt {
   taskStatus: TaskStatus;
   verified: boolean;
   expectationPassed: boolean;
-  failureCategory?: "agent" | "verification" | "grader" | "setup" | "unknown";
+  failureCategory?:
+    | "agent"
+    | "verification"
+    | "grader"
+    | "setup"
+    | "unknown"
+    | import("./provider-error.js").ProviderFailure;
   metrics: EvaluationResult["metrics"];
   durationMs: number;
   createdAt: number;

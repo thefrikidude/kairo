@@ -7,6 +7,7 @@ export function formatMetrics(events: TaskEvent[]): string {
     return "No trace recorded for this task (created before tracing was enabled).";
   const m = taskMetrics(events);
   return [
+    `Provider retries: ${m.providerRetries}; retry waiting: ${Math.round(m.providerWaitMs)} ms`,
     `Model: ${m.modelTurns} turns, ${m.modelFailures} failures, ${Math.round(m.modelMs)} ms`,
     `Tools: ${m.toolRequests} requests, ${m.toolExecutions} executed, ${m.toolFailures} failures, ${Math.round(m.toolMs)} ms`,
     `Approvals: ${m.approvals} allowed, ${m.denials} denied, ${Math.round(m.approvalMs)} ms waiting`,

@@ -10,6 +10,9 @@ export const comparisonMetrics = [
 ] as const;
 type Metric = (typeof comparisonMetrics)[number];
 export interface ReliabilitySummary {
+  infrastructureFailures: number;
+  codingAttempts: number;
+  codingPassRate: number | null;
   attempts: number;
   passed: number;
   passRate: number | null;
@@ -30,6 +33,15 @@ export interface EvaluationComparison {
 
 /** Averages observed attempts; missing data stays unavailable rather than becoming zero. */
 export function summarizeAttempts(attempts: EvaluationAttempt[]): ReliabilitySummary {
+  const infrastructure = new Set([
+    "quota",
+    "authentication",
+    "network",
+    "service",
+    "request",
+    "setup",
+  ]);
+  const coding = attempts.filter((attempt) => !infrastructure.has(attempt.failureCategory ?? ""));
   const passed = attempts.filter((attempt) => attempt.passed).length;
   const averages = Object.fromEntries(
     comparisonMetrics.map((metric) => {
@@ -43,6 +55,11 @@ export function summarizeAttempts(attempts: EvaluationAttempt[]): ReliabilitySum
     }),
   ) as ReliabilitySummary["averages"];
   return {
+    infrastructureFailures: attempts.length - coding.length,
+    codingAttempts: coding.length,
+    codingPassRate: coding.length
+      ? coding.filter((attempt) => attempt.passed).length / coding.length
+      : null,
     attempts: attempts.length,
     passed,
     passRate: attempts.length ? passed / attempts.length : null,
@@ -68,6 +85,10 @@ export function compareEvaluations(
       current,
       delta: comparable
         ? {
+            infrastructureFailures:
+              current.infrastructureFailures - baseline.infrastructureFailures,
+            codingAttempts: current.codingAttempts - baseline.codingAttempts,
+            codingPassRate: difference(baseline.codingPassRate, current.codingPassRate),
             attempts: current.attempts - baseline.attempts,
             passed: current.passed - baseline.passed,
             passRate: difference(baseline.passRate, current.passRate),

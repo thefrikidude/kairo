@@ -16,6 +16,7 @@ import { RepositoryProfiler } from "../infrastructure/repository/repository-prof
 import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-tools.js";
 import { CodingAgent } from "./coding-agent.js";
 import { taskMetrics } from "./task-metrics.js";
+import { runEvaluatedAgent } from "./evaluated-agent.js";
 
 export type SelfEvaluationScenario = {
   id: string;
@@ -31,6 +32,7 @@ export type SelfEvaluationOptions = {
   evaluationStore: EvaluationStore;
   trials?: number;
   sourceRoot?: string;
+  onProgress?: (text: string) => void;
 };
 
 export type SelfEvaluationRun = { run: EvaluationRun; results: SelfEvaluationResult[] };
@@ -360,14 +362,22 @@ async function runScenario(
         new FixtureApproval(),
         definitions,
       );
-      await agent.run(session.id, scenario.prompt, () => {});
+      const failure = await runEvaluatedAgent(
+        agent,
+        session.id,
+        scenario.prompt,
+        options.onProgress,
+      );
+      const agentError = failure.error;
       const task = agent.status(session.id)!;
       let expectationPassed = false;
-      let error = task.error;
+      let error = agentError ?? task.error;
       try {
-        await assertCommand(workspace, ["test"]);
-        await scenario.verify(workspace);
-        expectationPassed = true;
+        if (!agentError) {
+          await assertCommand(workspace, ["test"]);
+          await scenario.verify(workspace);
+          expectationPassed = true;
+        }
       } catch (gradingError) {
         error = `Grading failed: ${(gradingError as Error).message}`;
       }
@@ -381,6 +391,7 @@ async function runScenario(
         verified,
         expectationPassed,
         error,
+        failureCategory: failure.category,
         metrics: { ...metrics },
       };
     } finally {
@@ -395,6 +406,7 @@ async function runScenario(
       verified: false,
       expectationPassed: false,
       error: (error as Error).message,
+      failureCategory: "setup",
       metrics: emptyMetrics(),
     };
   } finally {
@@ -422,6 +434,7 @@ function toAttempt(
   };
 }
 function classifyFailure(result: SelfEvaluationResult): EvaluationAttempt["failureCategory"] {
+  if (result.failureCategory) return result.failureCategory;
   if (result.error?.startsWith("Grading failed:")) return "grader";
   if (result.error?.includes("Self-eval seed") || result.error?.includes("pnpm install"))
     return "setup";

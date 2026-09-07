@@ -234,7 +234,27 @@ export class CodingAgent {
     this.event(task, { kind: "model_started", operationId });
     const started = performance.now();
     try {
-      const result = await this.provider.stream(messages, onText);
+      const result = await this.provider.stream(messages, onText, (progress) => {
+        this.event(task, {
+          kind:
+            progress.kind === "retry"
+              ? "provider_retry"
+              : progress.kind === "retry_wait"
+                ? "provider_retry_wait"
+                : "provider_exhausted",
+          operationId,
+          outcome: progress.category,
+          durationMs: progress.kind === "retry_wait" ? progress.delayMs : undefined,
+        });
+        if (progress.kind === "retry")
+          onText(
+            `\n[Gemini ${progress.category}: retry ${progress.retry}/3 in ${(progress.delayMs / 1000).toFixed(1)}s]\n`,
+          );
+        if (progress.kind === "exhausted")
+          onText(
+            `\n[Gemini ${progress.category}: stopped retrying after ${progress.retry} retries]\n`,
+          );
+      });
       this.event(task, {
         kind: "model_finished",
         operationId,

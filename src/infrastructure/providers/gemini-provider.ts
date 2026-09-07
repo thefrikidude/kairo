@@ -1,4 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
+import { recoverProvider } from "./provider-recovery.js";
+import type { ProviderProgress } from "../../domain/provider-error.js";
 import type { Message, ModelTurn } from "../../domain/models.js";
 import type { ModelProvider, ToolDefinition } from "../../domain/ports.js";
 
@@ -13,10 +15,35 @@ export class GeminiProvider implements ModelProvider {
     private readonly model: string,
     private readonly tools: ToolDefinition[],
   ) {
+    // This SDK version uses a single fetch when retryOptions is absent.
+    // Enabling its retry wrapper discards HTTP status and structured retry hints.
     this.client = new GoogleGenAI({ apiKey });
   }
   /** Streams Gemini text and normalizes function calls into the provider-neutral model turn. */
-  async stream(messages: Message[], onText: (chunk: string) => void): Promise<ModelTurn> {
+  async stream(
+    messages: Message[],
+    onText: (chunk: string) => void,
+    onProgress?: (event: ProviderProgress) => void,
+  ): Promise<ModelTurn> {
+    return recoverProvider(
+      (markContent) =>
+        this.streamOnce(
+          messages,
+          (text) => {
+            markContent();
+            onText(text);
+          },
+          markContent,
+        ),
+      onProgress,
+    );
+  }
+  /** Performs one stream; received calls prevent automatic replay even before execution. */
+  private async streamOnce(
+    messages: Message[],
+    onText: (chunk: string) => void,
+    markContent: () => void,
+  ): Promise<ModelTurn> {
     const contents = messages.map((message) => {
       if (message.role === "tool")
         return {
@@ -62,16 +89,20 @@ export class GeminiProvider implements ModelProvider {
     let text = "";
     const calls: ModelTurn["toolCalls"] = [];
     for await (const chunk of stream) {
-      if (chunk.text) {
-        text += chunk.text;
-        onText(chunk.text);
+      const chunkText =
+        chunk.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
+      if (chunkText) {
+        text += chunkText;
+        onText(chunkText);
       }
-      for (const call of chunk.functionCalls ?? [])
+      for (const call of chunk.functionCalls ?? []) {
+        markContent();
         calls.push({
           id: call.id || crypto.randomUUID(),
           name: String(call.name),
           args: (call.args || {}) as Record<string, unknown>,
         });
+      }
     }
     return { text, toolCalls: calls };
   }
