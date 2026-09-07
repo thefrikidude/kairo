@@ -82,12 +82,37 @@ export class SqliteSessionStore {
         FOREIGN KEY(run_id) REFERENCES evaluation_runs(id)
       );
       CREATE INDEX IF NOT EXISTS evaluation_attempts_run ON evaluation_attempts(run_id, id);`);
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS evaluation_baselines (suite TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES evaluation_runs(id))",
+    );
     store.recoverInterruptedTasks();
     return store;
   }
   /** Closes the SQLite handle after the CLI session exits. */
   close(): void {
     this.db.close();
+  }
+  /** Atomically replaces the local self baseline after validating the selected run. */
+  setEvaluationBaseline(runId: string): EvaluationRun {
+    const run = this.evaluationRun(runId);
+    if (!run) throw new Error(`Evaluation run not found: ${runId}`);
+    if (run.suite !== "self" || run.completedAt === undefined || run.trialCount < 3)
+      throw new Error(
+        "Baseline must be a completed self-evaluation run with at least three trials.",
+      );
+    this.db
+      .prepare(
+        "INSERT INTO evaluation_baselines(suite, run_id) VALUES ('self', ?) ON CONFLICT(suite) DO UPDATE SET run_id=excluded.run_id",
+      )
+      .run(runId);
+    return run;
+  }
+  /** Resolves the baseline pointer without duplicating evaluation metadata. */
+  evaluationBaseline(): EvaluationRun | undefined {
+    const row = this.db
+      .prepare("SELECT run_id FROM evaluation_baselines WHERE suite='self'")
+      .get() as { run_id: string } | undefined;
+    return row ? this.evaluationRun(row.run_id) : undefined;
   }
   /** Starts a metadata-only real-model evaluation run. */
   createEvaluationRun(

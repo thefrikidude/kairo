@@ -91,6 +91,8 @@ export interface CredentialStore {
 
 /** Stores metadata-only reliability evidence separately from raw task history. */
 export interface EvaluationStore {
+  setEvaluationBaseline(runId: string): EvaluationRun;
+  evaluationBaseline(): EvaluationRun | undefined;
   createEvaluationRun(
     input: Omit<EvaluationRun, "id" | "attemptCount" | "passedCount">,
   ): EvaluationRun;

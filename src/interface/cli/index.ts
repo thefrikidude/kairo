@@ -22,10 +22,13 @@ import {
   formatSelfEvaluationReport,
 } from "./evaluation-report.js";
 
+import { compareWithBaseline } from "../../application/evaluation-comparison.js";
+import { formatBaseline, formatComparison } from "./evaluation-comparison-report.js";
+
 /** Prints the supported command-line shapes when arguments are invalid. */
 function usage(): void {
   console.log(
-    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval live [--json] | kairo eval self [--trials <1-5>] [--json] | kairo eval history [--json] | kairo eval show <run-id> [--json] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
+    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval live [--json] | kairo eval self [--trials <1-5>] [--json] | kairo eval history [--json] | kairo eval show <run-id> [--json] | kairo eval baseline set <run-id> [--json] | kairo eval baseline show [--json] | kairo eval compare <run-id> [--json] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
   );
 }
 /** Asks for a one-line credential before sending it to the Keychain adapter. */
@@ -40,6 +43,48 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const credentials = new MacOSKeychainStore();
   if (args[0] === "eval") {
+    if (args[1] === "baseline" || args[1] === "compare") {
+      const positional = args.filter((arg) => arg !== "--json");
+      const isSet =
+        positional[1] === "baseline" && positional[2] === "set" && positional.length === 4;
+      const isShow =
+        positional[1] === "baseline" && positional[2] === "show" && positional.length === 3;
+      const isCompare = positional[1] === "compare" && positional.length === 3;
+      if (!isSet && !isShow && !isCompare)
+        throw new Error(
+          "Usage: kairo eval baseline set <run-id> | kairo eval baseline show | kairo eval compare <run-id> [--json]",
+        );
+      const store = await SqliteSessionStore.open();
+      try {
+        if (isCompare) {
+          const comparison = compareWithBaseline(store, positional[2]!);
+          if (!comparison)
+            throw new Error(
+              "No self-evaluation baseline selected. Use kairo eval baseline set <run-id>.",
+            );
+          console.log(
+            args.includes("--json")
+              ? JSON.stringify(comparison, null, 2)
+              : formatComparison(comparison),
+          );
+        } else {
+          const run = isSet
+            ? store.setEvaluationBaseline(positional[3]!)
+            : store.evaluationBaseline();
+          const result = run ? { run, attempts: store.evaluationAttempts(run.id) } : null;
+          console.log(
+            args.includes("--json")
+              ? JSON.stringify(result, null, 2)
+              : result
+                ? formatBaseline(result.run, result.attempts)
+                : "No self-evaluation baseline selected.",
+          );
+        }
+      } finally {
+        store.close();
+      }
+      return;
+    }
     if (args[1] === "history") {
       const store = await SqliteSessionStore.open();
       try {
@@ -100,10 +145,16 @@ async function main(): Promise<void> {
           evaluationStore: store,
           trials,
         });
+        const comparison = compareWithBaseline(store, evaluation.run.id);
         console.log(
           args.includes("--json")
-            ? JSON.stringify(evaluation, null, 2)
-            : formatSelfEvaluationReport(evaluation.results, evaluation.run.id),
+            ? JSON.stringify({ ...evaluation, ...(comparison ? { comparison } : {}) }, null, 2)
+            : [
+                formatSelfEvaluationReport(evaluation.results, evaluation.run.id),
+                comparison ? formatComparison(comparison) : "",
+              ]
+                .filter(Boolean)
+                .join("\n"),
         );
         process.exitCode = evaluation.results.every((result) => result.passed) ? 0 : 1;
       } finally {

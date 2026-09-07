@@ -91,6 +91,11 @@ node dist/interface/cli/index.js eval self
 node dist/interface/cli/index.js eval self --trials 3 --json
 node dist/interface/cli/index.js eval history
 node dist/interface/cli/index.js eval show <run-id>
+
+# Select a local completed baseline with at least three trials
+node dist/interface/cli/index.js eval baseline set <run-id>
+node dist/interface/cli/index.js eval baseline show
+node dist/interface/cli/index.js eval compare <run-id>
 ```
 
 Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, and `/quit`.
@@ -110,6 +115,8 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 5. **Build an evaluation system** — run repeatable coding tasks and compare models, routing rules, agent profiles, cost, latency, and verified success.
 
 ## Development
+
+Self-evaluation baselines are selected manually and stored locally as a pointer to an existing completed run with at least three trials. Later self runs automatically report aggregate and per-scenario changes against the selected baseline. Reports compare observed pass rates, passed-attempt counts, and average model turns, tool executions, repairs, verification failures, and duration. Missing observations show N/A; unequal trial counts retain their actual denominators. Model mismatches show both summaries without deltas. Comparisons are informational: self-evaluation exit codes still depend only on the current run's result, and a successful `eval compare` command exits zero even for regressions. Baseline and compare commands also accept `--json`; self JSON adds a `comparison` field when a baseline exists.
 
 Trace durations separate model streaming, tool execution, and approval waiting; they are measured operation time, not total task wall time. Unfinished operations remain visible after interruption. Older tasks have no historical trace backfill. Only discovered checks, explicit model checks (`run_command` with `verification: true`), and manual `/verify` commands count as verification. Every successful file-tool edit invalidates prior verification. Project-wide scripts report broad scope even when chosen for a particular source file. Repair convergence requires a completed task whose latest check passed. A passing command is not proof of task correctness. Token usage and cost are not measured yet.
 
