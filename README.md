@@ -85,6 +85,10 @@ node dist/interface/cli/index.js eval --json
 # Run live Gemini tasks in disposable fixtures and score their traces with DeepEval
 node dist/interface/cli/index.js eval live
 node dist/interface/cli/index.js eval live --json
+
+# Run real Gemini tasks against isolated, Git-free Kairo source snapshots
+node dist/interface/cli/index.js eval self
+node dist/interface/cli/index.js eval self --trials 3 --json
 ```
 
 Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, and `/quit`.
@@ -110,6 +114,8 @@ Trace durations separate model streaming, tool execution, and approval waiting; 
 `kairo eval` runs deterministic scripted model decisions against disposable fixture copies. It measures the agent loop, tool safety, repair flow, verification, and tracing without calling Gemini. It is the reproducible baseline for later live Gemini evaluations; it does not measure Gemini reasoning quality yet.
 
 `kairo eval live` runs the same tasks with Gemini in disposable fixture copies and asks DeepEval's `TaskCompletionMetric` to judge each recorded agent trajectory. It requires a Gemini credential, consumes Gemini API usage for both the agent and judge, and is intentionally separate from the deterministic test gate. The final result requires both the fixture's independent filesystem/test assertion and the DeepEval verdict to pass. DeepEval receives only the task, final response, tool names, status, and verification metadata; it does not receive source files or command output.
+
+`kairo eval self` is the first capability suite: it copies the current Kairo repository into a fresh temporary directory without `.git` or build artifacts, installs the locked dependencies offline, seeds a realistic defect, and gives Gemini the same normal coding-agent tools. Kairo passes only when its own task reaches a completed, verified state and hidden graders confirm the fix plus the full test suite. Use `--trials 1` through `--trials 5` to measure repeated-run reliability. It consumes Gemini API usage and must be run from the Kairo repository root.
 
 ```bash
 pnpm check

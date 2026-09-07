@@ -4,6 +4,7 @@ import { runEvaluationSuite } from "./evaluation-harness.js";
 import {
   formatEvaluationReport,
   formatLiveEvaluationReport,
+  formatSelfEvaluationReport,
 } from "../interface/cli/evaluation-report.js";
 
 test("scripted evaluation verifies fixture state and repair evidence", async () => {
@@ -42,4 +43,30 @@ test("live evaluation report exposes the independent fixture and DeepEval verdic
   assert.match(report, /1\/1 passed/);
   assert.match(report, /judge=passed/);
   assert.match(report, /score=0.90/);
+});
+
+test("self evaluation report distinguishes repeated live trials", () => {
+  const report = formatSelfEvaluationReport([
+    {
+      id: "verification-check-script",
+      trial: 2,
+      passed: true,
+      taskStatus: "completed",
+      verified: true,
+      expectationPassed: true,
+      metrics: {
+        modelTurns: 4,
+        toolExecutions: 3,
+        toolFailures: 0,
+        approvals: 3,
+        repairs: 0,
+        verificationPasses: 1,
+        verificationFailures: 0,
+        modelMs: 20,
+        toolMs: 10,
+      },
+    },
+  ]);
+  assert.match(report, /Kairo self evaluation: 1\/1 passed/);
+  assert.match(report, /trial=2/);
 });

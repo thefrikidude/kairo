@@ -158,3 +158,8 @@ export interface DeepEvalVerdict {
 export interface LiveEvaluationResult extends EvaluationResult {
   judge: DeepEvalVerdict;
 }
+
+/** One live run of a Kairo-on-Kairo benchmark task. */
+export interface SelfEvaluationResult extends EvaluationResult {
+  trial: number;
+}

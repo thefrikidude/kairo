@@ -13,12 +13,17 @@ import { CodingAgent } from "../../application/coding-agent.js";
 import { runRepl } from "./repl.js";
 import { runEvaluationSuite } from "../../application/evaluation-harness.js";
 import { runLiveEvaluationSuite } from "../../application/live-evaluation.js";
-import { formatEvaluationReport, formatLiveEvaluationReport } from "./evaluation-report.js";
+import { runSelfEvaluationSuite } from "../../application/self-evaluation.js";
+import {
+  formatEvaluationReport,
+  formatLiveEvaluationReport,
+  formatSelfEvaluationReport,
+} from "./evaluation-report.js";
 
 /** Prints the supported command-line shapes when arguments are invalid. */
 function usage(): void {
   console.log(
-    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval live [--json] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
+    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval live [--json] | kairo eval self [--trials <1-5>] [--json] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
   );
 }
 /** Asks for a one-line credential before sending it to the Keychain adapter. */
@@ -45,6 +50,25 @@ async function main(): Promise<void> {
         args[2] === "--json"
           ? JSON.stringify(results, null, 2)
           : formatLiveEvaluationReport(results),
+      );
+      process.exitCode = results.every((result) => result.passed) ? 0 : 1;
+      return;
+    }
+    if (args[1] === "self") {
+      const key = await credentials.get();
+      if (!key)
+        throw new Error("No Gemini credential. Run `kairo auth login` or set GEMINI_API_KEY.");
+      const trialIndex = args.indexOf("--trials");
+      const trials = trialIndex === -1 ? 1 : Number(args[trialIndex + 1]);
+      const results = await runSelfEvaluationSuite({
+        apiKey: key,
+        model: (await loadConfig()).model,
+        trials,
+      });
+      console.log(
+        args.includes("--json")
+          ? JSON.stringify(results, null, 2)
+          : formatSelfEvaluationReport(results),
       );
       process.exitCode = results.every((result) => result.passed) ? 0 : 1;
       return;
