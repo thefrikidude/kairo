@@ -80,7 +80,14 @@ export const definitions: ToolDefinition[] = [
     mutating: true,
     parameters: {
       type: "object",
-      properties: { command: { type: "string" } },
+      properties: {
+        command: { type: "string" },
+        verification: {
+          type: "boolean",
+          description:
+            "Set true only for an actual test, typecheck, lint, build, or explicit task assertion. Ordinary inspection commands are not verification.",
+        },
+      },
       required: ["command"],
     },
   },

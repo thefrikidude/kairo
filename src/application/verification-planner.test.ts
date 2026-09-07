@@ -18,21 +18,21 @@ const profile: Pick<
   ],
 };
 
-test("verification planner selects a focused test command for test changes", () => {
+test("verification planner reports project tests as broad for test changes", () => {
   assert.deepEqual(planner.select(profile, ["test/login.test.ts"]), {
     command: "pnpm test",
     label: "test",
-    scope: "focused",
+    scope: "broad",
     reason: "Changed or failing test file is covered by the test script.",
     source: "recommended",
   });
 });
 
-test("verification planner selects focused typechecking for source changes", () => {
+test("verification planner reports project typechecking as broad for source changes", () => {
   assert.deepEqual(planner.select(profile, ["src/login.ts"]), {
     command: "pnpm check",
     label: "typecheck",
-    scope: "focused",
+    scope: "broad",
     reason: "Changed source file is covered by typechecking.",
     source: "recommended",
   });

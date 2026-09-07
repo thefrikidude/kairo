@@ -94,7 +94,7 @@ export const selfEvaluationScenarios: SelfEvaluationScenario[] = [
         },
         ["src/login.ts"],
       );
-      if (selection?.command !== "pnpm check" || selection.scope !== "focused")
+      if (selection?.command !== "pnpm check" || selection.scope !== "broad")
         throw new Error("A changed source file did not select focused typechecking.");
     },
   },

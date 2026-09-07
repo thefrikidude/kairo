@@ -111,7 +111,7 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 
 ## Development
 
-Trace durations separate model streaming, tool execution, and approval waiting; they are measured operation time, not total task wall time. Unfinished operations remain visible after interruption. Older tasks have no historical trace backfill. Command-check counts currently follow Kairo's existing verification behavior (all executed shell commands); a passing command is not proof of task correctness. Token usage and cost are not measured yet.
+Trace durations separate model streaming, tool execution, and approval waiting; they are measured operation time, not total task wall time. Unfinished operations remain visible after interruption. Older tasks have no historical trace backfill. Only discovered checks, explicit model checks (`run_command` with `verification: true`), and manual `/verify` commands count as verification. Every successful file-tool edit invalidates prior verification. Project-wide scripts report broad scope even when chosen for a particular source file. Repair convergence requires a completed task whose latest check passed. A passing command is not proof of task correctness. Token usage and cost are not measured yet.
 
 `kairo eval` runs deterministic scripted model decisions against disposable fixture copies. It measures the agent loop, tool safety, repair flow, verification, and tracing without calling Gemini. It is the reproducible baseline for later live Gemini evaluations; it does not measure Gemini reasoning quality yet.
 

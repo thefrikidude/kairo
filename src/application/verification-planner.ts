@@ -71,7 +71,7 @@ export class VerificationPlanner {
     if (isTest)
       return selection(
         byLabel("test"),
-        "focused",
+        "broad",
         "Changed or failing test file is covered by the test script.",
       );
     const isSource = changed.some((path) =>
@@ -80,7 +80,7 @@ export class VerificationPlanner {
     if (isSource && byLabel("typecheck"))
       return selection(
         byLabel("typecheck"),
-        "focused",
+        "broad",
         "Changed source file is covered by typechecking.",
       );
     const isConfig = changed.some(
@@ -129,7 +129,7 @@ export class VerificationPlanner {
       command: candidate.command,
       label: candidate.label,
       scope: "broad",
-      reason: "Focused verification passed; run the broader project test check.",
+      reason: "Typechecking passed; run the project tests for behavioral coverage.",
       source: "recommended",
     };
   }

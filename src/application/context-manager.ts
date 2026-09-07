@@ -93,7 +93,7 @@ export class ContextManager {
       `Test roots: ${profile.testRoots.join(", ") || "none detected"}`,
       `Available verification: ${profile.verificationCandidates.map((candidate) => `${candidate.label} = ${candidate.command}`).join("; ") || "none detected"}`,
       `Relevant files for this task: ${relevantFiles.join(", ") || "use search_files to locate files"}`,
-      "Use the profile as a guide, inspect files before edits, and choose an appropriate verification command after changes.",
+      "Use the profile as a guide, inspect files before edits, and choose an appropriate verification command after changes. For custom checks use run_command with verification=true; ordinary inspection commands do not verify a task. Every edit invalidates earlier verification.",
     ].join("\n");
   }
   /** Combines the request and latest failure evidence for relevance ranking. */

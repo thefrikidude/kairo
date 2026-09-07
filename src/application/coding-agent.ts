@@ -106,7 +106,7 @@ export class CodingAgent {
     const call: ToolCall = {
       id: crypto.randomUUID(),
       name: "run_command",
-      args: { command },
+      args: { command, verification: true },
     };
     const result = await this.executeTool(task, call, onText);
     task = this.store.updateTask(task.id, {
@@ -265,6 +265,10 @@ export class CodingAgent {
     onText: (text: string) => void,
   ): Promise<ToolResult> {
     const definition = this.toolDefinitions.find((item) => item.name === call.name);
+    const isVerification =
+      call.name === "run_command" &&
+      (call.args.verification === true ||
+        this.isDiscoveredVerification(task.sessionId, String(call.args.command ?? "")));
     this.save(task.sessionId, {
       role: "model",
       content: JSON.stringify(call.args),
@@ -312,10 +316,7 @@ export class CodingAgent {
       durationMs: performance.now() - started,
       exitCode: result.exitCode,
     });
-    if (
-      call.name === "run_command" &&
-      task.verificationSelection?.command !== String(call.args.command ?? "")
-    ) {
+    if (isVerification && task.verificationSelection?.command !== String(call.args.command ?? "")) {
       const selection = this.verificationPlanner.selectionForCommand(
         this.store.repositoryProfile(task.sessionId),
         String(call.args.command ?? ""),
@@ -324,7 +325,7 @@ export class CodingAgent {
       task = this.store.updateTask(task.id, { verificationSelection: selection });
       this.recordVerificationSelection(task, selection);
     }
-    if (call.name === "run_command")
+    if (isVerification)
       this.event(task, {
         kind: "verification",
         operationId: call.id,
@@ -337,10 +338,15 @@ export class CodingAgent {
       typeof call.args.path === "string"
     ) {
       const changedFiles = [...new Set([...task.changedFiles, call.args.path])];
-      this.store.updateTask(task.id, { changedFiles });
+      this.store.updateTask(task.id, {
+        changedFiles,
+        verificationPassed: undefined,
+        verificationExitCode: undefined,
+        verificationOutput: undefined,
+      });
       task = this.store.task(task.id)!;
     }
-    if (call.name === "run_command")
+    if (isVerification)
       this.store.updateTask(task.id, {
         verificationCommand: String(call.args.command ?? ""),
         verificationOutput: result.output,
@@ -351,7 +357,7 @@ export class CodingAgent {
           String(call.args.command ?? ""),
         ),
       });
-    if (call.name === "run_command" && !result.ok && task.changedFiles.length) {
+    if (isVerification && !result.ok && task.changedFiles.length) {
       const attempts = this.store.repairAttempts(task.id);
       if (attempts.length >= MAX_REPAIR_ATTEMPTS) {
         this.store.updateTask(task.id, {
@@ -428,13 +434,15 @@ export class CodingAgent {
     const latestRepair = this.store.repairAttempts(task.id).at(-1);
     const profile = this.store.repositoryProfile(task.sessionId);
     const selection: VerificationSelection | undefined =
-      task.verificationPassed === true && task.verificationSelection?.scope === "focused" && profile
+      task.verificationPassed === true &&
+      task.verificationSelection?.label === "typecheck" &&
+      profile
         ? this.verificationPlanner.broader(profile, task.verificationSelection)
         : latestRepair && task.verificationPassed !== true
           ? {
               command: latestRepair.command,
               label: "custom",
-              scope: "focused",
+              scope: task.verificationSelection?.scope ?? "broad",
               reason: "Rerun the failed verification after a focused repair.",
               source: "repair",
             }
@@ -457,7 +465,11 @@ export class CodingAgent {
     );
     const result = await this.executeTool(
       task,
-      { id: crypto.randomUUID(), name: "run_command", args: { command: selection.command } },
+      {
+        id: crypto.randomUUID(),
+        name: "run_command",
+        args: { command: selection.command, verification: true },
+      },
       onText,
     );
     if (result.output === "User denied this action.") {

@@ -34,6 +34,57 @@ class Deny implements ApprovalPolicy {
     return false;
   }
 }
+
+test("later edits invalidate a passing check and ordinary commands cannot verify changes", async () => {
+  for (const command of ["true", "false"]) {
+    const store = await SqliteSessionStore.open(":memory:");
+    try {
+      const session = store.create("/workspace");
+      const turns: ModelTurn[] = [
+        {
+          text: "",
+          toolCalls: [
+            { id: "write", name: "write_file", args: { path: "a.ts", content: "first" } },
+            { id: "check", name: "run_command", args: { command: "test", verification: true } },
+            { id: "edit", name: "write_file", args: { path: "a.ts", content: "second" } },
+            { id: "inspect", name: "run_command", args: { command } },
+          ],
+        },
+        { text: "done", toolCalls: [] },
+      ];
+      const agent = new CodingAgent(
+        {
+          async stream() {
+            return turns.shift()!;
+          },
+        },
+        store,
+        {
+          root: "/workspace",
+          description: () => "test action",
+          async execute(call) {
+            return {
+              ok: call.args.command !== "false",
+              output: "",
+              exitCode: call.args.command === "false" ? 1 : 0,
+            };
+          },
+        },
+        new Allow(),
+        definitions,
+      );
+      await agent.run(session.id, "edit", () => {});
+      const task = agent.status(session.id)!;
+      assert.equal(task.status, "verification_required");
+      assert.equal(task.verificationPassed, undefined);
+      assert.equal(store.repairAttempts(task.id).length, 0);
+      assert.equal(taskMetrics(store.taskEvents(task.id)).verificationPasses, 1);
+      assert.equal(taskMetrics(store.taskEvents(task.id)).verificationFailures, 0);
+    } finally {
+      store.close();
+    }
+  }
+});
 class Allow implements ApprovalPolicy {
   async approve(_call: ToolCall, _description: string): Promise<boolean> {
     return true;
@@ -155,7 +206,7 @@ test("declining a recommended verification leaves the task awaiting verification
   store.close();
 });
 
-test("a passing focused check escalates once to the broader discovered test", async () => {
+test("a passing project typecheck is followed once by project tests", async () => {
   const root = await mkdtemp(join(tmpdir(), "kairo-escalated-verify-"));
   await mkdir(join(root, "src"));
   const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
@@ -201,8 +252,8 @@ test("a passing focused check escalates once to the broader discovered test", as
   const metrics = taskMetrics(store.taskEvents(task.id));
   assert.equal(task.status, "completed");
   assert.equal(task.verificationSelection?.scope, "broad");
-  assert.equal(metrics.focusedVerifications, 1);
-  assert.equal(metrics.broadVerifications, 1);
+  assert.equal(metrics.focusedVerifications, 0);
+  assert.equal(metrics.broadVerifications, 2);
   store.close();
 });
 
@@ -252,7 +303,9 @@ class RepairingProvider implements ModelProvider {
     if (this.turn === 2)
       return {
         text: "",
-        toolCalls: [{ id: "fail", name: "run_command", args: { command: "false" } }],
+        toolCalls: [
+          { id: "fail", name: "run_command", args: { command: "false", verification: true } },
+        ],
       };
     if (this.turn === 3) {
       assert.ok(messages.some((message) => message.content.includes("Repair attempt 1/2")));
@@ -266,7 +319,13 @@ class RepairingProvider implements ModelProvider {
     if (this.turn === 4)
       return {
         text: "",
-        toolCalls: [{ id: "verify", name: "run_command", args: { command: "test -f a.txt" } }],
+        toolCalls: [
+          {
+            id: "verify",
+            name: "run_command",
+            args: { command: "test -f a.txt", verification: true },
+          },
+        ],
       };
     return { text: "repaired", toolCalls: [] };
   }
@@ -317,7 +376,7 @@ class ExhaustedRepairProvider implements ModelProvider {
         {
           id: `failure-${this.turn}`,
           name: "run_command",
-          args: { command: `false # ${this.turn}` },
+          args: { command: `false # ${this.turn}`, verification: true },
         },
       ],
     };

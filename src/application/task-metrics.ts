@@ -38,7 +38,8 @@ export function taskMetrics(events: TaskEvent[]) {
     broadVerifications: count("verification_selected", "broad"),
     repairConverged:
       events.some((event) => event.kind === "repair") &&
-      events.some((event) => event.kind === "verification" && event.outcome === "passed"),
+      events.findLast((event) => event.kind === "verification")?.outcome === "passed" &&
+      events.findLast((event) => event.kind === "status")?.outcome === "completed",
     unfinishedOperations: unfinished.length,
   };
 }

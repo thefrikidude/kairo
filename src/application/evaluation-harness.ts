@@ -52,7 +52,13 @@ export const evaluationScenarios: EvaluationScenario[] = [
       },
       {
         text: "",
-        toolCalls: [{ id: "test", name: "run_command", args: { command: "node --test test.mjs" } }],
+        toolCalls: [
+          {
+            id: "test",
+            name: "run_command",
+            args: { command: "node --test test.mjs", verification: true },
+          },
+        ],
       },
       { text: "Created and verified.", toolCalls: [] },
     ],
@@ -77,7 +83,11 @@ export const evaluationScenarios: EvaluationScenario[] = [
       {
         text: "",
         toolCalls: [
-          { id: "first-test", name: "run_command", args: { command: "node --test test.mjs" } },
+          {
+            id: "first-test",
+            name: "run_command",
+            args: { command: "node --test test.mjs", verification: true },
+          },
         ],
       },
       {
@@ -93,7 +103,11 @@ export const evaluationScenarios: EvaluationScenario[] = [
       {
         text: "",
         toolCalls: [
-          { id: "second-test", name: "run_command", args: { command: "node --test test.mjs" } },
+          {
+            id: "second-test",
+            name: "run_command",
+            args: { command: "node --test test.mjs", verification: true },
+          },
         ],
       },
       { text: "Fixed and verified.", toolCalls: [] },
