@@ -21,6 +21,8 @@ export function formatEvaluationReport(results: EvaluationResult[]): string {
         `tools=${result.metrics.toolExecutions}`,
         `repairs=${result.metrics.repairs}`,
         `checks=${result.metrics.verificationPasses}/${result.metrics.verificationFailures}`,
+        `verification=${result.metrics.focusedVerifications} focused/${result.metrics.broadVerifications} broad`,
+        `repairConverged=${result.metrics.repairConverged}`,
         result.error ? `error=${result.error}` : "",
       ]
         .filter(Boolean)
@@ -70,6 +72,8 @@ export function formatSelfEvaluationReport(
         `turns=${result.metrics.modelTurns}`,
         `tools=${result.metrics.toolExecutions}`,
         `repairs=${result.metrics.repairs}`,
+        `verification=${result.metrics.focusedVerifications} focused/${result.metrics.broadVerifications} broad`,
+        `repairConverged=${result.metrics.repairConverged}`,
         result.error ? `error=${result.error}` : "",
       ]
         .filter(Boolean)
@@ -107,6 +111,8 @@ export function formatEvaluationRun(run: EvaluationRun, attempts: EvaluationAtte
         `turns=${attempt.metrics.modelTurns}`,
         `tools=${attempt.metrics.toolExecutions}`,
         `repairs=${attempt.metrics.repairs}`,
+        `verification=${attempt.metrics.focusedVerifications} focused/${attempt.metrics.broadVerifications} broad`,
+        `repairConverged=${attempt.metrics.repairConverged}`,
         `durationMs=${attempt.durationMs}`,
         attempt.failureCategory ? `failure=${attempt.failureCategory}` : "",
       ]

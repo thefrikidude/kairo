@@ -10,7 +10,8 @@ export function formatMetrics(events: TaskEvent[]): string {
     `Model: ${m.modelTurns} turns, ${m.modelFailures} failures, ${Math.round(m.modelMs)} ms`,
     `Tools: ${m.toolRequests} requests, ${m.toolExecutions} executed, ${m.toolFailures} failures, ${Math.round(m.toolMs)} ms`,
     `Approvals: ${m.approvals} allowed, ${m.denials} denied, ${Math.round(m.approvalMs)} ms waiting`,
-    `Repairs: ${m.repairs}; command checks: ${m.verificationPasses} passed, ${m.verificationFailures} failed`,
+    `Repairs: ${m.repairs}${m.repairConverged ? " (converged)" : ""}; command checks: ${m.verificationPasses} passed, ${m.verificationFailures} failed`,
+    `Verification selection: ${m.focusedVerifications} focused, ${m.broadVerifications} broad (${m.verificationSelections} total)`,
     `Unfinished operations: ${m.unfinishedOperations}`,
   ].join("\n");
 }

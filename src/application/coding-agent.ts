@@ -1,5 +1,6 @@
 import { ContextManager } from "./context-manager.js";
 import { FailureAnalyzer } from "./failure-analyzer.js";
+import { VerificationPlanner } from "./verification-planner.js";
 import type {
   Message,
   Task,
@@ -7,6 +8,7 @@ import type {
   ToolResult,
   TaskEvent,
   ModelTurn,
+  VerificationSelection,
 } from "../domain/models.js";
 import type {
   ApprovalPolicy,
@@ -26,6 +28,7 @@ const MAX_REPAIR_ATTEMPTS = 2;
 export class CodingAgent {
   private readonly context: ContextManager;
   private readonly failureAnalyzer = new FailureAnalyzer();
+  private readonly verificationPlanner = new VerificationPlanner();
   /** Creates the coordinator with its model, durable state, tools, and approval boundary. */
   constructor(
     private readonly provider: ModelProvider,
@@ -93,7 +96,13 @@ export class CodingAgent {
       verificationPassed: undefined,
       verificationExitCode: undefined,
       verificationDiscovered: this.isDiscoveredVerification(task.sessionId, command),
+      verificationSelection: this.verificationPlanner.selectionForCommand(
+        this.store.repositoryProfile(task.sessionId),
+        command,
+        "manual",
+      ),
     });
+    this.recordVerificationSelection(task, task.verificationSelection!);
     const call: ToolCall = {
       id: crypto.randomUUID(),
       name: "run_command",
@@ -140,6 +149,17 @@ export class CodingAgent {
             createdAt: Date.now(),
           });
         if (!result.toolCalls.length) {
+          const verification = await this.runRecommendedVerification(task, onText);
+          task = this.store.task(task.id)!;
+          if (verification === "ran") {
+            if (task.status === "failed") {
+              onText(`\nKairo stopped: ${task.error}\n`);
+              return;
+            }
+            failures = 0;
+            continue;
+          }
+          if (verification === "denied") return;
           task = this.finish(task);
           if (task.status === "verification_required")
             onText(
@@ -292,6 +312,18 @@ export class CodingAgent {
       durationMs: performance.now() - started,
       exitCode: result.exitCode,
     });
+    if (
+      call.name === "run_command" &&
+      task.verificationSelection?.command !== String(call.args.command ?? "")
+    ) {
+      const selection = this.verificationPlanner.selectionForCommand(
+        this.store.repositoryProfile(task.sessionId),
+        String(call.args.command ?? ""),
+        "model",
+      );
+      task = this.store.updateTask(task.id, { verificationSelection: selection });
+      this.recordVerificationSelection(task, selection);
+    }
     if (call.name === "run_command")
       this.event(task, {
         kind: "verification",
@@ -385,5 +417,63 @@ export class CodingAgent {
         .repositoryProfile(sessionId)
         ?.verificationCandidates.some((candidate) => candidate.command === command) ?? false
     );
+  }
+
+  /** Recommends and runs one post-edit check through the ordinary approval gate. */
+  private async runRecommendedVerification(
+    task: Task,
+    onText: (text: string) => void,
+  ): Promise<"none" | "ran" | "denied"> {
+    if (!task.changedFiles.length) return "none";
+    const latestRepair = this.store.repairAttempts(task.id).at(-1);
+    const profile = this.store.repositoryProfile(task.sessionId);
+    const selection: VerificationSelection | undefined =
+      task.verificationPassed === true && task.verificationSelection?.scope === "focused" && profile
+        ? this.verificationPlanner.broader(profile, task.verificationSelection)
+        : latestRepair && task.verificationPassed !== true
+          ? {
+              command: latestRepair.command,
+              label: "custom",
+              scope: "focused",
+              reason: "Rerun the failed verification after a focused repair.",
+              source: "repair",
+            }
+          : task.verificationPassed !== true && profile
+            ? this.verificationPlanner.select(profile, task.changedFiles)
+            : undefined;
+    if (!selection) return "none";
+    task = this.store.updateTask(task.id, {
+      status: "verifying",
+      verificationSelection: selection,
+      verificationCommand: selection.command,
+      verificationOutput: undefined,
+      verificationPassed: undefined,
+      verificationExitCode: undefined,
+      verificationDiscovered: this.isDiscoveredVerification(task.sessionId, selection.command),
+    });
+    this.recordVerificationSelection(task, selection);
+    onText(
+      `\n[Recommended ${selection.scope} verification: ${selection.command} — ${selection.reason}]\n`,
+    );
+    const result = await this.executeTool(
+      task,
+      { id: crypto.randomUUID(), name: "run_command", args: { command: selection.command } },
+      onText,
+    );
+    if (result.output === "User denied this action.") {
+      this.store.updateTask(task.id, { status: "verification_required" });
+      onText("\n[Verification recommendation declined. Use /verify <command> when ready.]\n");
+      return "denied";
+    }
+    return "ran";
+  }
+
+  /** Stores selection metadata in the trace without command arguments or output. */
+  private recordVerificationSelection(task: Task, selection: VerificationSelection): void {
+    this.event(task, {
+      kind: "verification_selected",
+      name: selection.label,
+      outcome: selection.scope,
+    });
   }
 }

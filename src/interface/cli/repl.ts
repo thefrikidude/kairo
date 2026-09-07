@@ -72,7 +72,7 @@ export async function runRepl(
         console.log(task.changedFiles.length ? task.changedFiles.join("\n") : "No files changed.");
       else {
         console.log(
-          `${task.status}: ${task.prompt}${task.error ? `\nError: ${task.error}` : ""}${task.verificationCommand ? `\nVerification: ${task.verificationCommand}` : ""}`,
+          `${task.status}: ${task.prompt}${task.error ? `\nError: ${task.error}` : ""}${task.verificationCommand ? `\nVerification: ${task.verificationCommand}` : ""}${task.verificationSelection ? `\nSelection: ${task.verificationSelection.scope} (${task.verificationSelection.source}) — ${task.verificationSelection.reason}` : ""}`,
         );
         console.log(formatMetrics(store.taskEvents(task.id)));
       }

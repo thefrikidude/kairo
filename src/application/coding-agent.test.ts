@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodingAgent } from "./coding-agent.js";
@@ -38,6 +38,27 @@ class Allow implements ApprovalPolicy {
   async approve(_call: ToolCall, _description: string): Promise<boolean> {
     return true;
   }
+}
+class DenyCommands implements ApprovalPolicy {
+  async approve(call: ToolCall, _description: string): Promise<boolean> {
+    return call.name !== "run_command";
+  }
+}
+
+function saveVerificationProfile(store: SqliteSessionStore, sessionId: string, root: string): void {
+  store.saveRepositoryProfile(sessionId, {
+    root,
+    packageManager: "pnpm",
+    scripts: { test: "test -f a.txt" },
+    configFiles: [],
+    sourceRoots: ["src"],
+    testRoots: ["test"],
+    ignoredPaths: [],
+    indexedFiles: [],
+    files: [],
+    verificationCandidates: [{ label: "test", command: "test -f a.txt" }],
+    createdAt: Date.now(),
+  });
 }
 test("agent records denied mutating calls and continues", async () => {
   const root = await mkdtemp(join(tmpdir(), "kairo-agent-"));
@@ -89,6 +110,99 @@ test("agent requires verification after a successful edit and records manual ver
   assert.equal(agent.status(session.id)?.status, "completed");
   assert.equal(agent.status(session.id)?.verificationExitCode, 0);
   assert.equal(agent.status(session.id)?.verificationDiscovered, false);
+  store.close();
+});
+
+test("agent recommends verification and runs it only through approval", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-recommended-verify-"));
+  const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
+  const session = store.create(root);
+  saveVerificationProfile(store, session.id, root);
+  let output = "";
+  await new CodingAgent(
+    new FakeProvider(),
+    store,
+    await WorkspaceTools.create(root),
+    new Allow(),
+    definitions,
+  ).run(session.id, "create a file", (text) => {
+    output += text;
+  });
+  const task = store.latestTask(session.id)!;
+  assert.equal(task.status, "completed");
+  assert.equal(task.verificationCommand, "test -f a.txt");
+  assert.equal(task.verificationSelection?.source, "recommended");
+  assert.equal(task.verificationSelection?.scope, "broad");
+  assert.match(output, /Recommended broad verification/);
+  assert.equal(taskMetrics(store.taskEvents(task.id)).verificationSelections, 1);
+  store.close();
+});
+
+test("declining a recommended verification leaves the task awaiting verification", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-declined-verify-"));
+  const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
+  const session = store.create(root);
+  saveVerificationProfile(store, session.id, root);
+  await new CodingAgent(
+    new FakeProvider(),
+    store,
+    await WorkspaceTools.create(root),
+    new DenyCommands(),
+    definitions,
+  ).run(session.id, "create a file", () => {});
+  assert.equal(store.latestTask(session.id)?.status, "verification_required");
+  assert.equal(store.latestTask(session.id)?.verificationPassed, undefined);
+  store.close();
+});
+
+test("a passing focused check escalates once to the broader discovered test", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-escalated-verify-"));
+  await mkdir(join(root, "src"));
+  const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
+  const session = store.create(root);
+  store.saveRepositoryProfile(session.id, {
+    root,
+    packageManager: "pnpm",
+    scripts: {},
+    configFiles: [],
+    sourceRoots: ["src"],
+    testRoots: ["test"],
+    ignoredPaths: [],
+    indexedFiles: [],
+    files: [],
+    verificationCandidates: [
+      { label: "typecheck", command: "test -f src/a.ts" },
+      { label: "test", command: "test -f src/a.ts && true" },
+    ],
+    createdAt: Date.now(),
+  });
+  class SourceProvider implements ModelProvider {
+    private turn = 0;
+    async stream(_messages: Message[], _onText: (chunk: string) => void): Promise<ModelTurn> {
+      this.turn += 1;
+      return this.turn === 1
+        ? {
+            text: "",
+            toolCalls: [
+              { id: "write-source", name: "write_file", args: { path: "src/a.ts", content: "x" } },
+            ],
+          }
+        : { text: "done", toolCalls: [] };
+    }
+  }
+  await new CodingAgent(
+    new SourceProvider(),
+    store,
+    await WorkspaceTools.create(root),
+    new Allow(),
+    definitions,
+  ).run(session.id, "change source", () => {});
+  const task = store.latestTask(session.id)!;
+  const metrics = taskMetrics(store.taskEvents(task.id));
+  assert.equal(task.status, "completed");
+  assert.equal(task.verificationSelection?.scope, "broad");
+  assert.equal(metrics.focusedVerifications, 1);
+  assert.equal(metrics.broadVerifications, 1);
   store.close();
 });
 

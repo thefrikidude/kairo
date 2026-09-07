@@ -44,7 +44,7 @@ test("context begins with the persisted repository profile and verification guid
   });
   const messages = new ContextManager(store).prepare(session.id, task);
   assert.match(messages[0]!.content, /Package manager: pnpm/);
-  assert.match(messages[0]!.content, /Recommended verification: test = pnpm test/);
+  assert.match(messages[0]!.content, /Available verification: test = pnpm test/);
   assert.match(messages[0]!.content, /src\/login.ts/);
   store.close();
 });

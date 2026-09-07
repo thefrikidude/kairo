@@ -8,6 +8,7 @@ import type {
   RepositoryProfile,
   Task,
   TaskStatus,
+  VerificationSelection,
   EvaluationAttempt,
   EvaluationRun,
 } from "../../domain/models.js";
@@ -31,7 +32,7 @@ export class SqliteSessionStore {
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_call_id TEXT, tool_name TEXT, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE TABLE IF NOT EXISTS tool_events (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, call_id TEXT NOT NULL, name TEXT NOT NULL, args_json TEXT NOT NULL, approved INTEGER, output TEXT, created_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, changed_files_json TEXT NOT NULL DEFAULT '[]', verification_command TEXT, verification_output TEXT, verification_ok INTEGER, verification_exit_code INTEGER, verification_discovered INTEGER, summary TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
+      CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, changed_files_json TEXT NOT NULL DEFAULT '[]', verification_command TEXT, verification_output TEXT, verification_ok INTEGER, verification_exit_code INTEGER, verification_discovered INTEGER, verification_selection_json TEXT, summary TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE INDEX IF NOT EXISTS tasks_session_updated ON tasks(session_id, updated_at DESC);
       CREATE TABLE IF NOT EXISTS context_checkpoints (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT, summary TEXT NOT NULL, through_message_id INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE INDEX IF NOT EXISTS checkpoints_session_created ON context_checkpoints(session_id, created_at DESC);
@@ -47,6 +48,8 @@ export class SqliteSessionStore {
       db.exec("ALTER TABLE tasks ADD COLUMN verification_exit_code INTEGER");
     if (!columns.some((column) => column.name === "verification_discovered"))
       db.exec("ALTER TABLE tasks ADD COLUMN verification_discovered INTEGER");
+    if (!columns.some((column) => column.name === "verification_selection_json"))
+      db.exec("ALTER TABLE tasks ADD COLUMN verification_selection_json TEXT");
     const store = new SqliteSessionStore(db);
     db.exec(
       "CREATE TABLE IF NOT EXISTS task_events (id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, event_json TEXT NOT NULL); CREATE INDEX IF NOT EXISTS task_events_task ON task_events(task_id, id)",
@@ -344,6 +347,7 @@ export class SqliteSessionStore {
         | "verificationPassed"
         | "verificationExitCode"
         | "verificationDiscovered"
+        | "verificationSelection"
         | "summary"
         | "error"
       >
@@ -354,7 +358,7 @@ export class SqliteSessionStore {
     const next = { ...task, ...patch, updatedAt: Date.now() };
     this.db
       .prepare(
-        "UPDATE tasks SET status=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, verification_exit_code=?, verification_discovered=?, summary=?, error=?, updated_at=? WHERE id=?",
+        "UPDATE tasks SET status=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, verification_exit_code=?, verification_discovered=?, verification_selection_json=?, summary=?, error=?, updated_at=? WHERE id=?",
       )
       .run(
         next.status,
@@ -364,6 +368,7 @@ export class SqliteSessionStore {
         next.verificationPassed === undefined ? null : Number(next.verificationPassed),
         next.verificationExitCode ?? null,
         next.verificationDiscovered === undefined ? null : Number(next.verificationDiscovered),
+        next.verificationSelection ? JSON.stringify(next.verificationSelection) : null,
         next.summary ?? null,
         next.error ?? null,
         next.updatedAt,
@@ -530,6 +535,9 @@ export class SqliteSessionStore {
         row.verification_discovered === null || row.verification_discovered === undefined
           ? undefined
           : Boolean(row.verification_discovered),
+      verificationSelection: row.verification_selection_json
+        ? (JSON.parse(String(row.verification_selection_json)) as VerificationSelection)
+        : undefined,
       summary: row.summary ? String(row.summary) : undefined,
       error: row.error ? String(row.error) : undefined,
       createdAt: Number(row.created_at),

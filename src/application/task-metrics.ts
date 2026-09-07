@@ -33,6 +33,12 @@ export function taskMetrics(events: TaskEvent[]) {
     repairs: count("repair"),
     verificationPasses: count("verification", "passed"),
     verificationFailures: count("verification", "failed"),
+    verificationSelections: count("verification_selected"),
+    focusedVerifications: count("verification_selected", "focused"),
+    broadVerifications: count("verification_selected", "broad"),
+    repairConverged:
+      events.some((event) => event.kind === "repair") &&
+      events.some((event) => event.kind === "verification" && event.outcome === "passed"),
     unfinishedOperations: unfinished.length,
   };
 }

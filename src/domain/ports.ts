@@ -59,6 +59,7 @@ export interface TaskStore {
         | "verificationPassed"
         | "verificationExitCode"
         | "verificationDiscovered"
+        | "verificationSelection"
         | "summary"
         | "error"
       >

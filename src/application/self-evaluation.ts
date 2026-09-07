@@ -42,7 +42,7 @@ const replacement = async (workspace: string, path: string, before: string, afte
   await writeFile(target, source.replace(before, after), "utf8");
 };
 
-/** Six real Kairo safeguards, deliberately removed from isolated source copies. */
+/** Seven real Kairo safeguards, deliberately removed from isolated source copies. */
 export const selfEvaluationScenarios: SelfEvaluationScenario[] = [
   {
     id: "verification-check-script",
@@ -63,11 +63,39 @@ export const selfEvaluationScenarios: SelfEvaluationScenario[] = [
         packageManager: "pnpm",
         scripts: { check: "tsc --noEmit" },
       });
-      if (
-        JSON.stringify(candidates) !==
-        JSON.stringify([{ label: "typecheck", command: "pnpm check" }])
-      )
+      if (candidates[0]?.label !== "typecheck" || candidates[0]?.command !== "pnpm check")
         throw new Error("A pnpm check script was not exposed as typecheck.");
+    },
+  },
+  {
+    id: "focused-verification-selection",
+    prompt:
+      "Kairo no longer recommends the focused typecheck for a changed TypeScript source file. Restore changed-file-aware verification selection, add or update a focused test, and run relevant verification.",
+    seed: (workspace) =>
+      replacement(
+        workspace,
+        "src/application/verification-planner.ts",
+        'if (isSource && byLabel("typecheck"))',
+        "if (false)",
+      ),
+    async verify(workspace) {
+      const module = await import(
+        pathToFileURL(join(workspace, "dist/application/verification-planner.js")).href
+      );
+      const selection = new module.VerificationPlanner().select(
+        {
+          sourceRoots: ["src"],
+          testRoots: ["test"],
+          configFiles: [],
+          verificationCandidates: [
+            { label: "test", command: "pnpm test" },
+            { label: "typecheck", command: "pnpm check" },
+          ],
+        },
+        ["src/login.ts"],
+      );
+      if (selection?.command !== "pnpm check" || selection.scope !== "focused")
+        throw new Error("A changed source file did not select focused typechecking.");
     },
   },
   {
@@ -460,6 +488,10 @@ function emptyMetrics(): SelfEvaluationResult["metrics"] {
     repairs: 0,
     verificationPasses: 0,
     verificationFailures: 0,
+    verificationSelections: 0,
+    focusedVerifications: 0,
+    broadVerifications: 0,
+    repairConverged: false,
     modelMs: 0,
     toolMs: 0,
   };

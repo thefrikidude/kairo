@@ -13,7 +13,8 @@ export interface TaskEvent {
     | "tool_finished"
     | "approval"
     | "repair"
-    | "verification";
+    | "verification"
+    | "verification_selected";
   createdAt: number;
   operationId?: string;
   name?: string;
@@ -49,6 +50,18 @@ export interface ToolResult {
 export interface VerificationCandidate {
   label: "test" | "typecheck" | "lint" | "build";
   command: string;
+  /** Discovery metadata explains a recommendation without retaining source or output. */
+  scope?: "focused" | "broad";
+  reason?: string;
+}
+
+/** Records why one safe verification command was selected for a task. */
+export interface VerificationSelection {
+  command: string;
+  label: VerificationCandidate["label"] | "custom";
+  scope: "focused" | "broad";
+  reason: string;
+  source: "recommended" | "model" | "manual" | "repair";
 }
 
 export interface RepositoryFile {
@@ -110,6 +123,7 @@ export interface Task {
   verificationPassed?: boolean;
   verificationExitCode?: number | null;
   verificationDiscovered?: boolean;
+  verificationSelection?: VerificationSelection;
   summary?: string;
   error?: string;
   createdAt: number;
@@ -141,6 +155,10 @@ export interface EvaluationResult {
     repairs: number;
     verificationPasses: number;
     verificationFailures: number;
+    verificationSelections: number;
+    focusedVerifications: number;
+    broadVerifications: number;
+    repairConverged: boolean;
     modelMs: number;
     toolMs: number;
   };

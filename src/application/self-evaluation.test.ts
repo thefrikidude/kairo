@@ -12,6 +12,10 @@ const seededMarkers: Record<string, { path: string; missing: string }> = {
     path: "src/application/verification-planner.ts",
     missing: '"check"]]',
   },
+  "focused-verification-selection": {
+    path: "src/application/verification-planner.ts",
+    missing: 'if (isSource && byLabel("typecheck"))',
+  },
   "bun-lockfile-discovery": {
     path: "src/infrastructure/repository/repository-profiler.ts",
     missing: '|| names.has("bun.lock")',

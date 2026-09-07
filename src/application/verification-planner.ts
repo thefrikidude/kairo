@@ -1,4 +1,9 @@
-import type { RepositoryProfile, VerificationCandidate } from "../domain/models.js";
+import type {
+  FailureEvidence,
+  RepositoryProfile,
+  VerificationCandidate,
+  VerificationSelection,
+} from "../domain/models.js";
 
 const labels: Array<[VerificationCandidate["label"], string[]]> = [
   ["test", ["test", "test:unit", "test:run"]],
@@ -20,8 +25,112 @@ export class VerificationPlanner {
         candidate.push({
           label,
           command: runner === "npm run" ? `npm run ${script}` : `${runner} ${script}`,
+          scope: "broad",
+          reason: `Discovered ${script} package script.`,
         });
     }
     return candidate;
+  }
+
+  /** Selects the narrowest known check that plausibly covers changed or failing files. */
+  select(
+    profile: Pick<
+      RepositoryProfile,
+      "sourceRoots" | "testRoots" | "configFiles" | "verificationCandidates"
+    >,
+    changedFiles: string[],
+    failure?: FailureEvidence,
+  ): VerificationSelection | undefined {
+    const candidates = profile.verificationCandidates;
+    if (!candidates.length) return undefined;
+    const changed = [
+      ...new Set([
+        ...changedFiles,
+        ...(failure ? failure.fileLocations.map((item) => item.path) : []),
+      ]),
+    ];
+    const byLabel = (label: VerificationCandidate["label"]) =>
+      candidates.find((candidate) => candidate.label === label);
+    const selection = (
+      candidate: VerificationCandidate | undefined,
+      scope: VerificationSelection["scope"],
+      reason: string,
+    ): VerificationSelection | undefined =>
+      candidate && {
+        command: candidate.command,
+        label: candidate.label,
+        scope,
+        reason,
+        source: "recommended",
+      };
+    const isTest = changed.some(
+      (path) =>
+        profile.testRoots.some((root) => path === root || path.startsWith(`${root}/`)) ||
+        /(?:^|[./_-])(test|spec)(?:[._-]|$)/i.test(path),
+    );
+    if (isTest)
+      return selection(
+        byLabel("test"),
+        "focused",
+        "Changed or failing test file is covered by the test script.",
+      );
+    const isSource = changed.some((path) =>
+      profile.sourceRoots.some((root) => path === root || path.startsWith(`${root}/`)),
+    );
+    if (isSource && byLabel("typecheck"))
+      return selection(
+        byLabel("typecheck"),
+        "focused",
+        "Changed source file is covered by typechecking.",
+      );
+    const isConfig = changed.some(
+      (path) =>
+        profile.configFiles.includes(path) || /(?:^|\/)(?:package|tsconfig)\.json$/.test(path),
+    );
+    if (isConfig)
+      return selection(
+        byLabel("test") ?? byLabel("typecheck"),
+        "broad",
+        "Configuration change needs a project-level check.",
+      );
+    return selection(
+      byLabel("test") ?? byLabel("typecheck") ?? candidates[0],
+      "broad",
+      "No narrower coverage could be established.",
+    );
+  }
+
+  /** Labels a command chosen outside the recommender without rejecting manual or model fallback. */
+  selectionForCommand(
+    profile: Pick<RepositoryProfile, "verificationCandidates"> | undefined,
+    command: string,
+    source: Exclude<VerificationSelection["source"], "recommended">,
+  ): VerificationSelection {
+    const candidate = profile?.verificationCandidates.find((item) => item.command === command);
+    return {
+      command,
+      label: candidate?.label ?? "custom",
+      scope: candidate?.scope ?? "broad",
+      reason: candidate?.reason ?? "Command selected outside automatic recommendation.",
+      source,
+    };
+  }
+
+  /** Returns a broader project check only after a focused recommendation has passed. */
+  broader(
+    profile: Pick<RepositoryProfile, "verificationCandidates">,
+    completed: VerificationSelection,
+  ): VerificationSelection | undefined {
+    const candidate = profile.verificationCandidates.find(
+      (item) => item.label === "test" && item.command !== completed.command,
+    );
+    if (!candidate) return undefined;
+    return {
+      command: candidate.command,
+      label: candidate.label,
+      scope: "broad",
+      reason: "Focused verification passed; run the broader project test check.",
+      source: "recommended",
+    };
   }
 }

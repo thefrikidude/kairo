@@ -29,8 +29,8 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 - Explicit approval before every edit, write, or shell command.
 - Bounded model/tool loops, repeated-call protection, failure tracking, and explicit verification status after edits.
 - Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume. Repository profiles are persisted with sessions, so resuming does not rediscover from zero.
-- Discovered test, typecheck, lint, and build scripts are included in the task context. A successful approved command records its command, output, exit status, and verification result.
-- Failed post-edit verification creates a bounded repair brief from stack traces and test failures. Gemini can continue repairing in the same task, but every edit and retry still requires approval.
+- Discovered test, typecheck, lint, and build scripts are included in the task context. After edits, Kairo recommends the narrowest plausible check, explains its focused/broad scope, and runs it only through the normal approval prompt. A successful approved command records its command, exit status, selection reason, and verification result.
+- Failed post-edit verification creates a bounded repair brief from stack traces and test failures, including affected files, excerpts, and remaining retry budget. Gemini can continue repairing in the same task; retries rerun the focused failed check before Kairo proposes a broader discovered check, and every edit and command still requires approval.
 - Gemini credentials from the macOS Keychain, with `GEMINI_API_KEY` as a temporary or CI override.
 
 Kairo does not currently implement model routing, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
@@ -103,7 +103,7 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 
 ## Roadmap
 
-1. **Make one agent dependable** — in progress: bounded tool loops, failure recovery, deterministic context checkpoints, repository profiling and relevance ranking, interrupted-task recovery, and post-change verification are implemented. Next is richer automated repair after failed tests.
+1. **Make one agent dependable** — in progress: bounded tool loops, failure recovery, deterministic context checkpoints, repository profiling and relevance ranking, interrupted-task recovery, approval-gated focused verification, and bounded repair are implemented. Next is measuring and improving repair reliability across more realistic tasks.
 2. **Add provider abstraction** — make Gemini only the first `ModelProvider`, then add other cloud and local models without changing the agent loop.
 3. **Route tasks to models** — select fast, cheap, or stronger models based on task class, measured cost, latency, and reliability.
 4. **Add specialized subagents** — research, coding, and testing child sessions coordinated by a main agent.

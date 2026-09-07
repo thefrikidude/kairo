@@ -91,7 +91,7 @@ export class ContextManager {
       `Scripts: ${Object.keys(profile.scripts).length ? Object.keys(profile.scripts).sort().join(", ") : "none detected"}`,
       `Source roots: ${profile.sourceRoots.join(", ") || "none detected"}`,
       `Test roots: ${profile.testRoots.join(", ") || "none detected"}`,
-      `Recommended verification: ${profile.verificationCandidates.map((candidate) => `${candidate.label} = ${candidate.command}`).join("; ") || "none detected"}`,
+      `Available verification: ${profile.verificationCandidates.map((candidate) => `${candidate.label} = ${candidate.command}`).join("; ") || "none detected"}`,
       `Relevant files for this task: ${relevantFiles.join(", ") || "use search_files to locate files"}`,
       "Use the profile as a guide, inspect files before edits, and choose an appropriate verification command after changes.",
     ].join("\n");
@@ -116,7 +116,9 @@ export class ContextManager {
       `Failure: ${latest.evidence.summary}`,
       `Locations: ${locations || "none extracted"}`,
       `Evidence: ${latest.evidence.excerpts.join(" | ") || "inspect the command output"}`,
-      "Inspect the evidence and relevant files, make a materially different repair, then rerun verification.",
+      `Changed files: ${task.changedFiles.join(", ") || "none recorded"}`,
+      `Repair budget remaining: ${Math.max(0, 2 - attempts.length)}.`,
+      "Prioritize the affected files, make a materially different repair, then rerun the same focused verification.",
     ].join("\n");
   }
 }
