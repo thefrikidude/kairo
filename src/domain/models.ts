@@ -163,3 +163,31 @@ export interface LiveEvaluationResult extends EvaluationResult {
 export interface SelfEvaluationResult extends EvaluationResult {
   trial: number;
 }
+
+/** Durable metadata for one real-model reliability-suite run. */
+export interface EvaluationRun {
+  id: string;
+  suite: "self";
+  model: string;
+  sourceRevision: string;
+  trialCount: number;
+  attemptCount: number;
+  passedCount: number;
+  startedAt: number;
+  completedAt?: number;
+}
+
+/** Sanitized attempt data retained for reliability comparisons, never raw agent content. */
+export interface EvaluationAttempt {
+  runId: string;
+  scenarioId: string;
+  trial: number;
+  passed: boolean;
+  taskStatus: TaskStatus;
+  verified: boolean;
+  expectationPassed: boolean;
+  failureCategory?: "agent" | "verification" | "grader" | "setup" | "unknown";
+  metrics: EvaluationResult["metrics"];
+  durationMs: number;
+  createdAt: number;
+}

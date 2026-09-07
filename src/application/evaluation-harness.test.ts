@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { runEvaluationSuite } from "./evaluation-harness.js";
 import {
   formatEvaluationReport,
+  formatEvaluationHistory,
+  formatEvaluationRun,
   formatLiveEvaluationReport,
   formatSelfEvaluationReport,
 } from "../interface/cli/evaluation-report.js";
@@ -69,4 +71,43 @@ test("self evaluation report distinguishes repeated live trials", () => {
   ]);
   assert.match(report, /Kairo self evaluation: 1\/1 passed/);
   assert.match(report, /trial=2/);
+});
+
+test("saved self-evaluation reports show aggregate metadata and per-task outcomes", () => {
+  const run = {
+    id: "eval-1",
+    suite: "self" as const,
+    model: "gemini",
+    sourceRevision: "abc",
+    trialCount: 1,
+    attemptCount: 1,
+    passedCount: 1,
+    startedAt: 0,
+    completedAt: 1,
+  };
+  const attempt = {
+    runId: run.id,
+    scenarioId: "safe-read",
+    trial: 1,
+    passed: true,
+    taskStatus: "completed" as const,
+    verified: true,
+    expectationPassed: true,
+    metrics: {
+      modelTurns: 1,
+      toolExecutions: 2,
+      toolFailures: 0,
+      approvals: 1,
+      repairs: 0,
+      verificationPasses: 1,
+      verificationFailures: 0,
+      modelMs: 3,
+      toolMs: 4,
+    },
+    durationMs: 7,
+    createdAt: 1,
+  };
+  assert.match(formatEvaluationHistory([run]), /eval-1/);
+  assert.match(formatEvaluationRun(run, [attempt]), /Reliability: 1\/1 passed/);
+  assert.match(formatEvaluationRun(run, [attempt]), /safe-read/);
 });

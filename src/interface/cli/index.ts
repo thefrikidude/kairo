@@ -16,6 +16,8 @@ import { runLiveEvaluationSuite } from "../../application/live-evaluation.js";
 import { runSelfEvaluationSuite } from "../../application/self-evaluation.js";
 import {
   formatEvaluationReport,
+  formatEvaluationHistory,
+  formatEvaluationRun,
   formatLiveEvaluationReport,
   formatSelfEvaluationReport,
 } from "./evaluation-report.js";
@@ -23,7 +25,7 @@ import {
 /** Prints the supported command-line shapes when arguments are invalid. */
 function usage(): void {
   console.log(
-    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval live [--json] | kairo eval self [--trials <1-5>] [--json] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
+    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval live [--json] | kairo eval self [--trials <1-5>] [--json] | kairo eval history [--json] | kairo eval show <run-id> [--json] | kairo auth login|logout|status | kairo config get|set model [value] | kairo sessions list | kairo resume <id>",
   );
 }
 /** Asks for a one-line credential before sending it to the Keychain adapter. */
@@ -38,6 +40,36 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const credentials = new MacOSKeychainStore();
   if (args[0] === "eval") {
+    if (args[1] === "history") {
+      const store = await SqliteSessionStore.open();
+      try {
+        const runs = store.evaluationRuns();
+        console.log(
+          args.includes("--json") ? JSON.stringify(runs, null, 2) : formatEvaluationHistory(runs),
+        );
+      } finally {
+        store.close();
+      }
+      return;
+    }
+    if (args[1] === "show") {
+      const runId = args[2];
+      if (!runId) throw new Error("Provide a run ID: `kairo eval show <run-id>`.");
+      const store = await SqliteSessionStore.open();
+      try {
+        const run = store.evaluationRun(runId);
+        if (!run) throw new Error(`Evaluation run not found: ${runId}`);
+        const attempts = store.evaluationAttempts(run.id);
+        console.log(
+          args.includes("--json")
+            ? JSON.stringify({ run, attempts }, null, 2)
+            : formatEvaluationRun(run, attempts),
+        );
+      } finally {
+        store.close();
+      }
+      return;
+    }
     if (args[1] === "live") {
       const key = await credentials.get();
       if (!key)
@@ -60,17 +92,23 @@ async function main(): Promise<void> {
         throw new Error("No Gemini credential. Run `kairo auth login` or set GEMINI_API_KEY.");
       const trialIndex = args.indexOf("--trials");
       const trials = trialIndex === -1 ? 1 : Number(args[trialIndex + 1]);
-      const results = await runSelfEvaluationSuite({
-        apiKey: key,
-        model: (await loadConfig()).model,
-        trials,
-      });
-      console.log(
-        args.includes("--json")
-          ? JSON.stringify(results, null, 2)
-          : formatSelfEvaluationReport(results),
-      );
-      process.exitCode = results.every((result) => result.passed) ? 0 : 1;
+      const store = await SqliteSessionStore.open();
+      try {
+        const evaluation = await runSelfEvaluationSuite({
+          apiKey: key,
+          model: (await loadConfig()).model,
+          evaluationStore: store,
+          trials,
+        });
+        console.log(
+          args.includes("--json")
+            ? JSON.stringify(evaluation, null, 2)
+            : formatSelfEvaluationReport(evaluation.results, evaluation.run.id),
+        );
+        process.exitCode = evaluation.results.every((result) => result.passed) ? 0 : 1;
+      } finally {
+        store.close();
+      }
       return;
     }
     const results = await runEvaluationSuite();

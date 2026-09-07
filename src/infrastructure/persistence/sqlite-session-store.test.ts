@@ -78,3 +78,76 @@ test("repair attempts persist failure evidence for an interrupted task", async (
   assert.deepEqual(store.repairAttempts(task.id)[0]?.selectedFiles, ["tests/login.test.ts"]);
   store.close();
 });
+
+test("evaluation history persists sanitized attempts and calculates aggregates", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-evaluation-store-"));
+  const path = join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(path);
+  const run = store.createEvaluationRun({
+    suite: "self",
+    model: "gemini-test",
+    sourceRevision: "abc123",
+    trialCount: 1,
+    startedAt: 10,
+    completedAt: undefined,
+  });
+  store.saveEvaluationAttempt({
+    runId: run.id,
+    scenarioId: "safe-read",
+    trial: 1,
+    passed: true,
+    taskStatus: "completed",
+    verified: true,
+    expectationPassed: true,
+    metrics: {
+      modelTurns: 2,
+      toolExecutions: 3,
+      toolFailures: 0,
+      approvals: 2,
+      repairs: 0,
+      verificationPasses: 1,
+      verificationFailures: 0,
+      modelMs: 4,
+      toolMs: 5,
+    },
+    durationMs: 20,
+    createdAt: 11,
+  });
+  store.saveEvaluationAttempt({
+    runId: run.id,
+    scenarioId: "repair-brief",
+    trial: 1,
+    passed: false,
+    taskStatus: "failed",
+    verified: false,
+    expectationPassed: false,
+    failureCategory: "verification",
+    metrics: {
+      modelTurns: 1,
+      toolExecutions: 1,
+      toolFailures: 1,
+      approvals: 1,
+      repairs: 0,
+      verificationPasses: 0,
+      verificationFailures: 1,
+      modelMs: 2,
+      toolMs: 3,
+    },
+    durationMs: 21,
+    createdAt: 12,
+  });
+  assert.equal(store.completeEvaluationRun(run.id).passedCount, 1);
+  assert.equal(store.evaluationRun(run.id)?.attemptCount, 2);
+  assert.deepEqual(
+    store.evaluationAttempts(run.id).map((attempt) => attempt.scenarioId),
+    ["safe-read", "repair-brief"],
+  );
+  assert.equal(
+    JSON.stringify(store.evaluationAttempts(run.id)).includes("raw secret output"),
+    false,
+  );
+  store.close();
+  const reopened = await SqliteSessionStore.open(path);
+  assert.equal(reopened.evaluationRuns()[0]?.id, run.id);
+  reopened.close();
+});

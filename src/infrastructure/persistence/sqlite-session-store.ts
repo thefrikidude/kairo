@@ -8,6 +8,8 @@ import type {
   RepositoryProfile,
   Task,
   TaskStatus,
+  EvaluationAttempt,
+  EvaluationRun,
 } from "../../domain/models.js";
 
 export interface Session {
@@ -49,12 +51,137 @@ export class SqliteSessionStore {
     db.exec(
       "CREATE TABLE IF NOT EXISTS task_events (id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, event_json TEXT NOT NULL); CREATE INDEX IF NOT EXISTS task_events_task ON task_events(task_id, id)",
     );
+    db.exec(`CREATE TABLE IF NOT EXISTS evaluation_runs (
+        id TEXT PRIMARY KEY,
+        suite TEXT NOT NULL,
+        model TEXT NOT NULL,
+        source_revision TEXT NOT NULL,
+        trial_count INTEGER NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        passed_count INTEGER NOT NULL DEFAULT 0,
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS evaluation_runs_started ON evaluation_runs(started_at DESC);
+      CREATE TABLE IF NOT EXISTS evaluation_attempts (
+        id INTEGER PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        scenario_id TEXT NOT NULL,
+        trial INTEGER NOT NULL,
+        passed INTEGER NOT NULL,
+        task_status TEXT NOT NULL,
+        verified INTEGER NOT NULL,
+        expectation_passed INTEGER NOT NULL,
+        failure_category TEXT,
+        metrics_json TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES evaluation_runs(id)
+      );
+      CREATE INDEX IF NOT EXISTS evaluation_attempts_run ON evaluation_attempts(run_id, id);`);
     store.recoverInterruptedTasks();
     return store;
   }
   /** Closes the SQLite handle after the CLI session exits. */
   close(): void {
     this.db.close();
+  }
+  /** Starts a metadata-only real-model evaluation run. */
+  createEvaluationRun(
+    input: Omit<EvaluationRun, "id" | "attemptCount" | "passedCount">,
+  ): EvaluationRun {
+    const run: EvaluationRun = {
+      ...input,
+      id: `eval-${input.startedAt.toString(36)}-${crypto.randomUUID().slice(0, 8)}`,
+      attemptCount: 0,
+      passedCount: 0,
+    };
+    this.db
+      .prepare(
+        "INSERT INTO evaluation_runs(id, suite, model, source_revision, trial_count, attempt_count, passed_count, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        run.id,
+        run.suite,
+        run.model,
+        run.sourceRevision,
+        run.trialCount,
+        0,
+        0,
+        run.startedAt,
+        null,
+      );
+    return run;
+  }
+  /** Saves counters and a sanitized outcome without raw prompts, source, or tool output. */
+  saveEvaluationAttempt(attempt: EvaluationAttempt): void {
+    this.db
+      .prepare(
+        "INSERT INTO evaluation_attempts(run_id, scenario_id, trial, passed, task_status, verified, expectation_passed, failure_category, metrics_json, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        attempt.runId,
+        attempt.scenarioId,
+        attempt.trial,
+        Number(attempt.passed),
+        attempt.taskStatus,
+        Number(attempt.verified),
+        Number(attempt.expectationPassed),
+        attempt.failureCategory ?? null,
+        JSON.stringify(attempt.metrics),
+        attempt.durationMs,
+        attempt.createdAt,
+      );
+  }
+  /** Computes aggregate counts from attempts so historical reports cannot drift. */
+  completeEvaluationRun(id: string): EvaluationRun {
+    const aggregate = this.db
+      .prepare(
+        "SELECT count(*) AS attempts, coalesce(sum(passed), 0) AS passed FROM evaluation_attempts WHERE run_id=?",
+      )
+      .get(id) as { attempts: number; passed: number };
+    this.db
+      .prepare(
+        "UPDATE evaluation_runs SET attempt_count=?, passed_count=?, completed_at=? WHERE id=?",
+      )
+      .run(aggregate.attempts, aggregate.passed, Date.now(), id);
+    const run = this.evaluationRun(id);
+    if (!run) throw new Error(`Evaluation run not found: ${id}`);
+    return run;
+  }
+  /** Lists recent evaluation runs, newest first. */
+  evaluationRuns(limit = 20): EvaluationRun[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM evaluation_runs ORDER BY started_at DESC LIMIT ?")
+        .all(limit) as Record<string, unknown>[]
+    ).map((row) => this.toEvaluationRun(row));
+  }
+  /** Reads one saved evaluation run. */
+  evaluationRun(id: string): EvaluationRun | undefined {
+    const row = this.db.prepare("SELECT * FROM evaluation_runs WHERE id=?").get(id) as
+      Record<string, unknown> | undefined;
+    return row ? this.toEvaluationRun(row) : undefined;
+  }
+  /** Reads attempts in stable execution order. */
+  evaluationAttempts(runId: string): EvaluationAttempt[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM evaluation_attempts WHERE run_id=? ORDER BY id")
+        .all(runId) as Record<string, unknown>[]
+    ).map((row) => ({
+      runId: String(row.run_id),
+      scenarioId: String(row.scenario_id),
+      trial: Number(row.trial),
+      passed: Boolean(row.passed),
+      taskStatus: row.task_status as TaskStatus,
+      verified: Boolean(row.verified),
+      expectationPassed: Boolean(row.expectation_passed),
+      failureCategory: row.failure_category as EvaluationAttempt["failureCategory"],
+      metrics: JSON.parse(String(row.metrics_json)) as EvaluationAttempt["metrics"],
+      durationMs: Number(row.duration_ms),
+      createdAt: Number(row.created_at),
+    }));
   }
   /** Stores bounded operation metadata separately from model context and raw tool history. */
   recordTaskEvent(event: TaskEvent): void {
@@ -407,6 +534,20 @@ export class SqliteSessionStore {
       error: row.error ? String(row.error) : undefined,
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
+    };
+  }
+  /** Converts one evaluation run row while keeping persistence column names private. */
+  private toEvaluationRun(row: Record<string, unknown>): EvaluationRun {
+    return {
+      id: String(row.id),
+      suite: row.suite as "self",
+      model: String(row.model),
+      sourceRevision: String(row.source_revision),
+      trialCount: Number(row.trial_count),
+      attemptCount: Number(row.attempt_count),
+      passedCount: Number(row.passed_count),
+      startedAt: Number(row.started_at),
+      completedAt: row.completed_at === null ? undefined : Number(row.completed_at),
     };
   }
 }

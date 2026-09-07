@@ -89,6 +89,8 @@ node dist/interface/cli/index.js eval live --json
 # Run real Gemini tasks against isolated, Git-free Kairo source snapshots
 node dist/interface/cli/index.js eval self
 node dist/interface/cli/index.js eval self --trials 3 --json
+node dist/interface/cli/index.js eval history
+node dist/interface/cli/index.js eval show <run-id>
 ```
 
 Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, and `/quit`.
@@ -115,7 +117,7 @@ Trace durations separate model streaming, tool execution, and approval waiting; 
 
 `kairo eval live` runs the same tasks with Gemini in disposable fixture copies and asks DeepEval's `TaskCompletionMetric` to judge each recorded agent trajectory. It requires a Gemini credential, consumes Gemini API usage for both the agent and judge, and is intentionally separate from the deterministic test gate. The final result requires both the fixture's independent filesystem/test assertion and the DeepEval verdict to pass. DeepEval receives only the task, final response, tool names, status, and verification metadata; it does not receive source files or command output.
 
-`kairo eval self` is the first capability suite: it copies the current Kairo repository into a fresh temporary directory without `.git` or build artifacts, installs the locked dependencies offline, seeds a realistic defect, and gives Gemini the same normal coding-agent tools. Kairo passes only when its own task reaches a completed, verified state and hidden graders confirm the fix plus the full test suite. Use `--trials 1` through `--trials 5` to measure repeated-run reliability. It consumes Gemini API usage and must be run from the Kairo repository root.
+`kairo eval self` is the first capability suite: it copies the current Kairo repository into a fresh temporary directory without `.git` or build artifacts, installs locked dependencies offline, seeds one of six realistic defects, and gives Gemini the normal coding-agent tools. Kairo passes only when its own task reaches a completed, verified state and hidden graders confirm the fix plus the full test suite. Use `--trials 1` through `--trials 5` to measure repeated-run reliability. Each run saves a local SQLite record containing only model/revision identifiers, counters, timing, pass state, and a sanitized failure category—never prompts, model responses, source, or command output. Use `kairo eval history` and `kairo eval show <run-id>` to compare runs. It consumes Gemini API usage and must be run from the Kairo repository root.
 
 ```bash
 pnpm check

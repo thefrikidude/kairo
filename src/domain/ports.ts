@@ -7,6 +7,8 @@ import type {
   ToolResult,
   RepairAttempt,
   TaskEvent,
+  EvaluationAttempt,
+  EvaluationRun,
 } from "./models.js";
 
 export interface ModelProvider {
@@ -84,4 +86,16 @@ export interface CredentialStore {
   get(): Promise<string | undefined>;
   save(value: string): Promise<void>;
   clear(): Promise<void>;
+}
+
+/** Stores metadata-only reliability evidence separately from raw task history. */
+export interface EvaluationStore {
+  createEvaluationRun(
+    input: Omit<EvaluationRun, "id" | "attemptCount" | "passedCount">,
+  ): EvaluationRun;
+  saveEvaluationAttempt(attempt: EvaluationAttempt): void;
+  completeEvaluationRun(id: string): EvaluationRun;
+  evaluationRuns(limit?: number): EvaluationRun[];
+  evaluationRun(id: string): EvaluationRun | undefined;
+  evaluationAttempts(runId: string): EvaluationAttempt[];
 }
