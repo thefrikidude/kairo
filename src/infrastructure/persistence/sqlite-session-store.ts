@@ -57,6 +57,7 @@ export class SqliteSessionStore {
     db.exec(`CREATE TABLE IF NOT EXISTS evaluation_runs (
         id TEXT PRIMARY KEY,
         suite TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'gemini',
         model TEXT NOT NULL,
         source_revision TEXT NOT NULL,
         trial_count INTEGER NOT NULL,
@@ -82,6 +83,11 @@ export class SqliteSessionStore {
         FOREIGN KEY(run_id) REFERENCES evaluation_runs(id)
       );
       CREATE INDEX IF NOT EXISTS evaluation_attempts_run ON evaluation_attempts(run_id, id);`);
+    const evaluationColumns = db
+      .prepare("SELECT name FROM pragma_table_info('evaluation_runs')")
+      .all() as { name: string }[];
+    if (!evaluationColumns.some((column) => column.name === "provider"))
+      db.exec("ALTER TABLE evaluation_runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'gemini'");
     db.exec(
       "CREATE TABLE IF NOT EXISTS evaluation_baselines (suite TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES evaluation_runs(id))",
     );
@@ -126,11 +132,12 @@ export class SqliteSessionStore {
     };
     this.db
       .prepare(
-        "INSERT INTO evaluation_runs(id, suite, model, source_revision, trial_count, attempt_count, passed_count, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO evaluation_runs(id, suite, provider, model, source_revision, trial_count, attempt_count, passed_count, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         run.id,
         run.suite,
+        run.provider,
         run.model,
         run.sourceRevision,
         run.trialCount,
@@ -574,6 +581,7 @@ export class SqliteSessionStore {
     return {
       id: String(row.id),
       suite: row.suite as "self",
+      provider: (row.provider ? String(row.provider) : "gemini") as EvaluationRun["provider"],
       model: String(row.model),
       sourceRevision: String(row.source_revision),
       trialCount: Number(row.trial_count),

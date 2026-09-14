@@ -18,6 +18,7 @@ import type { EvaluationAttempt, EvaluationRun } from "../domain/models.js";
 const run: EvaluationRun = {
   id: "base",
   suite: "self",
+  provider: "gemini",
   model: "gemini",
   sourceRevision: "abc",
   trialCount: 3,
@@ -93,6 +94,12 @@ test("reports improvements, regressions, no change, and model mismatch without d
   assert.equal(mismatch.scenarios[0]?.delta, null);
   assert.match(formatComparison(mismatch), /not directly comparable/);
   assert.doesNotMatch(formatComparison(mismatch), /IMPROVEMENT|REGRESSION/);
+  assert.equal(
+    compareEvaluations(run, [attempt("a", false)], { ...run, provider: "groq" }, [
+      attempt("a", true),
+    ]).comparable,
+    false,
+  );
 });
 
 test("baseline validates, persists, replaces, and CLI commands resolve local state", async () => {

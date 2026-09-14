@@ -91,7 +91,7 @@ export function formatEvaluationHistory(runs: EvaluationRun[]): string {
     "Kairo self-evaluation history:",
     ...runs.map(
       (run) =>
-        `${run.id}  ${run.passedCount}/${run.attemptCount} passed  trials=${run.trialCount}  model=${run.model}  revision=${run.sourceRevision}  ${new Date(run.startedAt).toISOString()}`,
+        `${run.id}  ${run.passedCount}/${run.attemptCount} passed  trials=${run.trialCount}  model=${run.provider}/${run.model}  revision=${run.sourceRevision}  ${new Date(run.startedAt).toISOString()}`,
     ),
   ].join("\n");
 }
@@ -101,7 +101,7 @@ export function formatEvaluationRun(run: EvaluationRun, attempts: EvaluationAtte
   return [
     `Kairo self evaluation: ${run.id}`,
     `Reliability: ${run.passedCount}/${run.attemptCount} passed`,
-    `Model: ${run.model}  Revision: ${run.sourceRevision}  Trials: ${run.trialCount}`,
+    `Model: ${run.provider}/${run.model}  Revision: ${run.sourceRevision}  Trials: ${run.trialCount}`,
     `Started: ${new Date(run.startedAt).toISOString()}${run.completedAt ? `  Completed: ${new Date(run.completedAt).toISOString()}` : ""}`,
     ...attempts.map((attempt) =>
       [

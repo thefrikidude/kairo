@@ -74,7 +74,8 @@ export function compareEvaluations(
   currentRun: EvaluationRun,
   currentAttempts: EvaluationAttempt[],
 ): EvaluationComparison {
-  const comparable = baselineRun.model === currentRun.model;
+  const comparable =
+    baselineRun.provider === currentRun.provider && baselineRun.model === currentRun.model;
   const difference = (before: number | null, after: number | null) =>
     before === null || after === null ? null : after - before;
   const change = (before: EvaluationAttempt[], after: EvaluationAttempt[]): ReliabilityChange => {

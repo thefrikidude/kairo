@@ -307,6 +307,7 @@ export async function runSelfEvaluationSuite(
     throw new Error("Self-evaluation trials must be an integer from 1 to 5.");
   let run = options.evaluationStore.createEvaluationRun({
     suite: "self",
+    provider: options.provider,
     model: options.model,
     sourceRevision: await sourceRevision(sourceRoot),
     trialCount: trials,

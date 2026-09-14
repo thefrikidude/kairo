@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { SqliteSessionStore } from "./sqlite-session-store.js";
 import type { RepositoryProfile } from "../../domain/models.js";
 
@@ -85,6 +86,7 @@ test("evaluation history persists sanitized attempts and calculates aggregates",
   const store = await SqliteSessionStore.open(path);
   const run = store.createEvaluationRun({
     suite: "self",
+    provider: "gemini",
     model: "gemini-test",
     sourceRevision: "abc123",
     trialCount: 1,
@@ -158,4 +160,26 @@ test("evaluation history persists sanitized attempts and calculates aggregates",
   const reopened = await SqliteSessionStore.open(path);
   assert.equal(reopened.evaluationRuns()[0]?.id, run.id);
   reopened.close();
+});
+
+test("legacy evaluation runs migrate to the Gemini provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-evaluation-migration-"));
+  const path = join(dir, "sessions.sqlite");
+  const legacy = new Database(path);
+  legacy.exec(`CREATE TABLE evaluation_runs (
+    id TEXT PRIMARY KEY, suite TEXT NOT NULL, model TEXT NOT NULL,
+    source_revision TEXT NOT NULL, trial_count INTEGER NOT NULL,
+    attempt_count INTEGER NOT NULL, passed_count INTEGER NOT NULL,
+    started_at INTEGER NOT NULL, completed_at INTEGER
+  )`);
+  legacy
+    .prepare("INSERT INTO evaluation_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run("legacy", "self", "gemini-old", "abc", 1, 0, 0, 1, 2);
+  legacy.close();
+  const store = await SqliteSessionStore.open(path);
+  try {
+    assert.equal(store.evaluationRun("legacy")?.provider, "gemini");
+  } finally {
+    store.close();
+  }
 });

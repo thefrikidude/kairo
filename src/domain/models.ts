@@ -198,6 +198,7 @@ export interface SelfEvaluationResult extends EvaluationResult {
 export interface EvaluationRun {
   id: string;
   suite: "self";
+  provider: ProviderId;
   model: string;
   sourceRevision: string;
   trialCount: number;

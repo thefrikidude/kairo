@@ -85,6 +85,7 @@ test("saved self-evaluation reports show aggregate metadata and per-task outcome
   const run = {
     id: "eval-1",
     suite: "self" as const,
+    provider: "gemini" as const,
     model: "gemini",
     sourceRevision: "abc",
     trialCount: 1,
