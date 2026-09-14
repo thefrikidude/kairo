@@ -21,7 +21,8 @@
     "@google/genai": "^1.0.0",
     "@sentry/node": "10.37.0",
     "better-sqlite3": "^12.0.0",
-    "deepeval": "0.9.14"
+    "deepeval": "0.9.14",
+    "groq-sdk": "1.6.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

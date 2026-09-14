@@ -19,6 +19,9 @@ importers:
       deepeval:
         specifier: 0.9.14
         version: 0.9.14(@google/genai@1.52.0)(ws@8.21.3)
+      groq-sdk:
+        specifier: 1.6.0
+        version: 1.6.0
     devDependencies:
       "@types/better-sqlite3":
         specifier: ^7.6.0
@@ -1657,6 +1660,13 @@ packages:
         integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==,
       }
     engines: { node: ">= 0.4" }
+
+  groq-sdk@1.6.0:
+    resolution:
+      {
+        integrity: sha512-ggMgo6n84aZdNObgkSbSxWrdAq4wABsViIRb5e4N15bMUtDLZVhqlgZOI7X4TeqdBMdaVUOuUdZxAZIp06u0vw==,
+      }
+    hasBin: true
 
   has-symbols@1.1.0:
     resolution:
@@ -3668,6 +3678,8 @@ snapshots:
   google-logging-utils@1.1.3: {}
 
   gopd@1.2.0: {}
+
+  groq-sdk@1.6.0: {}
 
   has-symbols@1.1.0: {}
 
