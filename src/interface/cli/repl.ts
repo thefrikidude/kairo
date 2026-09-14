@@ -38,7 +38,7 @@ export async function runRepl(
   let selection = initialSelection;
   let key = await credentials.get(selection.provider);
   if (!key) throw new Error(`No ${selection.provider} credential is configured.`);
-  let agent = createAgent(approval, selection, key);
+  let agent: CodingAgent | undefined = createAgent(approval, selection, key);
   let active = session;
   for (;;) {
     const line = (await rl.question("\nkairo> ")).trim();
@@ -82,13 +82,28 @@ export async function runRepl(
     if (line === "/logout") {
       try {
         await credentials.clear(selection.provider);
+        agent = undefined;
         console.log(
-          `${selection.provider} Keychain credential removed. This session has been signed out. Environment credentials are unchanged.`,
+          `${selection.provider} Keychain credential removed. Environment credentials are unchanged.`,
         );
-        break;
+        console.log("Choose a model provider for this Kairo session.");
+        const next = await configureProvider(terminalSetupIO(rl), credentials, selection, {
+          allowCancel: false,
+        });
+        if (!next) throw new Error("Provider setup was cancelled.");
+        key = await credentials.get(next.provider);
+        if (!key) throw new Error(`No ${next.provider} credential is configured.`);
+        await setModelSelection(next);
+        selection = next;
+        agent = createAgent(approval, selection, key);
+        console.log(`Using ${selection.provider}/${selection.model}.`);
       } catch (error) {
         console.error(`Kairo: ${(error as Error).message}`);
       }
+      continue;
+    }
+    if (!agent) {
+      console.log("No active model. Use /model to select one or /quit to exit.");
       continue;
     }
     if (line === "/trace" || line.startsWith("/trace ")) {
