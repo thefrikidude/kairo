@@ -115,7 +115,7 @@ node dist/interface/cli/index.js eval baseline show
 node dist/interface/cli/index.js eval compare <run-id>
 ```
 
-Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, and `/quit`. `/model` switches the global provider/model selection and reuses a saved provider credential when available.
+Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, `/logout`, and `/quit`. `/model` switches the global provider/model selection and reuses a saved provider credential when available. `/logout` removes the active provider's saved Keychain credential and closes the session.
 
 ## Safety model
 
