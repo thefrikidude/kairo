@@ -12,7 +12,7 @@ Kairo follows a dependency-inverted, SOLID-oriented layout:
 src/
 ├── domain/          # Task, message, tool models and dependency ports
 ├── application/     # Coding-agent and context-management use cases
-├── infrastructure/  # SQLite, Gemini, filesystem tools, Keychain, configuration
+├── infrastructure/  # SQLite, model providers, filesystem tools, Keychain, configuration
 └── interface/cli/   # Terminal command parsing and interactive REPL
 ```
 
@@ -22,7 +22,7 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 
 - Persisted task traces: use `/trace [task-id]` for chronological events and `/status` for model/tool timing, approval counts, repairs, and command outcomes. Traces contain operation metadata, not prompts, file contents, or raw command output.
 
-- Interactive Gemini coding-agent REPL for one local workspace.
+- Interactive Gemini or Groq coding-agent REPL for one local workspace, with first-run setup and in-session model switching.
 - A bounded JavaScript/TypeScript repository profile on session start: package manager, scripts, config files, source/test roots, ignored paths, and a compact file index.
 - Task-aware file ranking and line-range reads, so Gemini receives likely relevant files without flooding its context. Ranking combines task/error terms, declared symbols, local imports, and test-to-source relationships.
 - Workspace-confined file listing, code search, file reading, exact text edits, file writes, and shell commands.
@@ -31,25 +31,26 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 - Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume. Repository profiles are persisted with sessions, so resuming does not rediscover from zero.
 - Discovered test, typecheck, lint, and build scripts are included in the task context. After edits, Kairo recommends the narrowest plausible check, explains its focused/broad scope, and runs it only through the normal approval prompt. A successful approved command records its command, exit status, selection reason, and verification result.
 - Failed post-edit verification creates a bounded repair brief from stack traces and test failures, including affected files, excerpts, and remaining retry budget. Gemini can continue repairing in the same task; retries rerun the focused failed check before Kairo proposes a broader discovered check, and every edit and command still requires approval.
-- Gemini credentials from the macOS Keychain, with `GEMINI_API_KEY` as a temporary or CI override.
+- Provider-scoped credentials from the macOS Keychain, with `GEMINI_API_KEY` and `GROQ_API_KEY` as temporary or CI overrides.
 
-Kairo does not currently implement model routing, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
+Kairo does not currently implement automatic model routing or failover, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
 
 ## Requirements
 
 - Node.js 20 or newer
 - pnpm
-- A Gemini API key for the current provider implementation
-- macOS for `kairo auth login`; on other systems, set `GEMINI_API_KEY` instead
+- A Gemini or Groq API key
+- macOS for `kairo auth login`; on other systems, use the provider environment variable instead
 
 ## Quick start
 
 ```bash
 pnpm install
 pnpm build
-node dist/interface/cli/index.js auth login
 node dist/interface/cli/index.js .
 ```
+
+The first launch asks you to choose Gemini or Groq, select a recommended or custom model, and securely enter the matching API key.
 
 To avoid saving a key to the Keychain, provide it only for the current command:
 
@@ -67,11 +68,14 @@ node dist/interface/cli/index.js [workspace]
 
 # Credentials
 node dist/interface/cli/index.js auth login
+node dist/interface/cli/index.js auth login groq
 node dist/interface/cli/index.js auth logout
+node dist/interface/cli/index.js auth logout groq
 node dist/interface/cli/index.js auth status
 
 # Model configuration
 node dist/interface/cli/index.js config get model
+node dist/interface/cli/index.js config get provider
 node dist/interface/cli/index.js config set model <model-name>
 
 # Session history
@@ -98,7 +102,7 @@ node dist/interface/cli/index.js eval baseline show
 node dist/interface/cli/index.js eval compare <run-id>
 ```
 
-Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, and `/quit`.
+Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, and `/quit`. `/model` switches the global provider/model selection and reuses a saved provider credential when available.
 
 ## Safety model
 
