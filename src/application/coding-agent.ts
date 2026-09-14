@@ -9,6 +9,7 @@ import type {
   TaskEvent,
   ModelTurn,
   VerificationSelection,
+  ModelSelection,
 } from "../domain/models.js";
 import type {
   ApprovalPolicy,
@@ -36,6 +37,7 @@ export class CodingAgent {
     private readonly tools: ToolExecutor,
     private readonly approval: ApprovalPolicy,
     private readonly toolDefinitions: ToolDefinition[],
+    private readonly modelSelection?: ModelSelection,
   ) {
     this.context = new ContextManager(store);
   }
@@ -231,7 +233,10 @@ export class CodingAgent {
   private async modelTurn(task: Task, onText: (text: string) => void): Promise<ModelTurn> {
     const messages = this.context.prepare(task.sessionId, task);
     const operationId = crypto.randomUUID();
-    this.event(task, { kind: "model_started", operationId });
+    const modelName = this.modelSelection
+      ? `${this.modelSelection.provider}/${this.modelSelection.model}`
+      : undefined;
+    this.event(task, { kind: "model_started", operationId, name: modelName });
     const started = performance.now();
     try {
       const result = await this.provider.stream(messages, onText, (progress) => {
@@ -248,16 +253,17 @@ export class CodingAgent {
         });
         if (progress.kind === "retry")
           onText(
-            `\n[Gemini ${progress.category}: retry ${progress.retry}/3 in ${(progress.delayMs / 1000).toFixed(1)}s]\n`,
+            `\n[${this.modelSelection?.provider ?? "provider"} ${progress.category}: retry ${progress.retry}/3 in ${(progress.delayMs / 1000).toFixed(1)}s]\n`,
           );
         if (progress.kind === "exhausted")
           onText(
-            `\n[Gemini ${progress.category}: stopped retrying after ${progress.retry} retries]\n`,
+            `\n[${this.modelSelection?.provider ?? "provider"} ${progress.category}: stopped retrying after ${progress.retry} retries]\n`,
           );
       });
       this.event(task, {
         kind: "model_finished",
         operationId,
+        name: modelName,
         outcome: "succeeded",
         durationMs: performance.now() - started,
       });
@@ -266,6 +272,7 @@ export class CodingAgent {
       this.event(task, {
         kind: "model_finished",
         operationId,
+        name: modelName,
         outcome: "failed",
         durationMs: performance.now() - started,
       });

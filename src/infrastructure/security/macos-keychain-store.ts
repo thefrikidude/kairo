@@ -1,32 +1,54 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { ProviderId } from "../../domain/models.js";
 import type { CredentialStore } from "../../domain/ports.js";
 const run = promisify(execFile);
-const service = "dev.kairo.gemini";
 const account = "default";
+const services: Record<ProviderId, string> = {
+  gemini: "dev.kairo.gemini",
+  groq: "dev.kairo.groq",
+};
+const environment: Record<ProviderId, string> = {
+  gemini: "GEMINI_API_KEY",
+  groq: "GROQ_API_KEY",
+};
+type KeychainCommand = (file: string, args: string[]) => Promise<{ stdout: string }>;
 
 export class MacOSKeychainStore implements CredentialStore {
+  constructor(
+    private readonly command: KeychainCommand = run as unknown as KeychainCommand,
+    private readonly env: NodeJS.ProcessEnv = process.env,
+  ) {}
+
   /** Reads an environment override first, then the macOS Keychain credential. */
-  async get(): Promise<string | undefined> {
-    if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
+  async get(provider: ProviderId): Promise<string | undefined> {
+    const override = this.env[environment[provider]];
+    if (override) return override;
     try {
       return (
         (
-          await run("security", ["find-generic-password", "-s", service, "-a", account, "-w"])
+          await this.command("security", [
+            "find-generic-password",
+            "-s",
+            services[provider],
+            "-a",
+            account,
+            "-w",
+          ])
         ).stdout.trim() || undefined
       );
     } catch {
       return undefined;
     }
   }
-  /** Saves a non-empty Gemini key in the macOS Keychain rather than local config. */
-  async save(value: string): Promise<void> {
+  /** Saves a non-empty provider key in the macOS Keychain rather than local config. */
+  async save(provider: ProviderId, value: string): Promise<void> {
     if (!value.trim()) throw new Error("API key cannot be empty.");
-    await run("security", [
+    await this.command("security", [
       "add-generic-password",
       "-U",
       "-s",
-      service,
+      services[provider],
       "-a",
       account,
       "-w",
@@ -34,9 +56,15 @@ export class MacOSKeychainStore implements CredentialStore {
     ]);
   }
   /** Removes Kairo's saved Keychain entry during logout. */
-  async clear(): Promise<void> {
+  async clear(provider: ProviderId): Promise<void> {
     try {
-      await run("security", ["delete-generic-password", "-s", service, "-a", account]);
+      await this.command("security", [
+        "delete-generic-password",
+        "-s",
+        services[provider],
+        "-a",
+        account,
+      ]);
     } catch {
       /* missing credential is already logged out */
     }

@@ -1,13 +1,16 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import type { ToolCall } from "../../domain/models.js";
-import type { ApprovalPolicy } from "../../domain/ports.js";
+import type { ModelSelection } from "../../domain/models.js";
+import type { ApprovalPolicy, CredentialStore } from "../../domain/ports.js";
 import { CodingAgent } from "../../application/coding-agent.js";
+import { setModelSelection } from "../../infrastructure/configuration/config.js";
 import { formatMetrics, formatTrace } from "./task-trace.js";
 import {
   SqliteSessionStore,
   type Session,
 } from "../../infrastructure/persistence/sqlite-session-store.js";
+import { configureProvider, terminalSetupIO } from "./provider-setup.js";
 
 export class TerminalApproval implements ApprovalPolicy {
   /** Keeps the shared readline interface used for approval questions. */
@@ -21,16 +24,21 @@ export class TerminalApproval implements ApprovalPolicy {
 
 /** Runs the interactive command loop for one active workspace session. */
 export async function runRepl(
-  createAgent: (approval: ApprovalPolicy) => CodingAgent,
+  createAgent: (approval: ApprovalPolicy, selection: ModelSelection, apiKey: string) => CodingAgent,
   store: SqliteSessionStore,
   session: Session,
+  initialSelection: ModelSelection,
+  credentials: CredentialStore,
 ): Promise<void> {
   const rl = createInterface({ input: stdin, output: stdout });
   console.log(
     `Kairo session ${session.id}\nWorkspace: ${session.workspace}\nType /help for commands.`,
   );
   const approval = new TerminalApproval(rl);
-  const agent = createAgent(approval);
+  let selection = initialSelection;
+  let key = await credentials.get(selection.provider);
+  if (!key) throw new Error(`No ${selection.provider} credential is configured.`);
+  let agent = createAgent(approval, selection, key);
   let active = session;
   for (;;) {
     const line = (await rl.question("\nkairo> ")).trim();
@@ -53,7 +61,22 @@ export async function runRepl(
       continue;
     }
     if (line === "/model") {
-      console.log("Model is configured with `kairo config get model`.");
+      console.log(`Current model: ${selection.provider}/${selection.model}`);
+      try {
+        const next = await configureProvider(terminalSetupIO(rl), credentials, selection);
+        if (!next) {
+          console.log("Model unchanged.");
+          continue;
+        }
+        key = await credentials.get(next.provider);
+        if (!key) throw new Error(`No ${next.provider} credential is configured.`);
+        await setModelSelection(next);
+        selection = next;
+        agent = createAgent(approval, selection, key);
+        console.log(`Using ${selection.provider}/${selection.model}.`);
+      } catch (error) {
+        console.error(`Kairo: ${(error as Error).message}`);
+      }
       continue;
     }
     if (line === "/trace" || line.startsWith("/trace ")) {

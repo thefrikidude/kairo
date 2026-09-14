@@ -96,6 +96,42 @@ class DenyCommands implements ApprovalPolicy {
   }
 }
 
+test("model operations record provider and model attribution", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    const agent = new CodingAgent(
+      {
+        async stream() {
+          return { text: "done", toolCalls: [] };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "",
+        async execute() {
+          return { ok: true, output: "" };
+        },
+      },
+      new Allow(),
+      definitions,
+      { provider: "groq", model: "openai/gpt-oss-120b" },
+    );
+    await agent.run(session.id, "inspect", () => {});
+    const task = agent.status(session.id)!;
+    assert.deepEqual(
+      store
+        .taskEvents(task.id)
+        .filter((event) => event.kind === "model_started" || event.kind === "model_finished")
+        .map((event) => event.name),
+      ["groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-120b"],
+    );
+  } finally {
+    store.close();
+  }
+});
+
 function saveVerificationProfile(store: SqliteSessionStore, sessionId: string, root: string): void {
   store.saveRepositoryProfile(sessionId, {
     root,

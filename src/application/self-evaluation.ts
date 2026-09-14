@@ -8,10 +8,11 @@ import type {
   EvaluationRun,
   SelfEvaluationResult,
   ToolCall,
+  ProviderId,
 } from "../domain/models.js";
 import type { ApprovalPolicy, EvaluationStore } from "../domain/ports.js";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
-import { GeminiProvider } from "../infrastructure/providers/gemini-provider.js";
+import { createProvider } from "../infrastructure/providers/provider-registry.js";
 import { RepositoryProfiler } from "../infrastructure/repository/repository-profiler.js";
 import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-tools.js";
 import { CodingAgent } from "./coding-agent.js";
@@ -28,6 +29,7 @@ export type SelfEvaluationScenario = {
 
 export type SelfEvaluationOptions = {
   apiKey: string;
+  provider: ProviderId;
   model: string;
   evaluationStore: EvaluationStore;
   trials?: number;
@@ -294,7 +296,7 @@ export const selfEvaluationScenarios: SelfEvaluationScenario[] = [
   },
 ];
 
-/** Runs real Gemini tasks against clean Git-free snapshots and persists metadata-only outcome evidence. */
+/** Runs real provider-backed tasks against clean Git-free snapshots and persists metadata-only evidence. */
 export async function runSelfEvaluationSuite(
   options: SelfEvaluationOptions,
 ): Promise<SelfEvaluationRun> {
@@ -356,11 +358,16 @@ async function runScenario(
       const tools = await WorkspaceTools.create(workspace);
       store.saveRepositoryProfile(session.id, await new RepositoryProfiler().profile(workspace));
       const agent = new CodingAgent(
-        new GeminiProvider(options.apiKey, options.model, definitions),
+        createProvider(
+          { provider: options.provider, model: options.model },
+          options.apiKey,
+          definitions,
+        ),
         store,
         tools,
         new FixtureApproval(),
         definitions,
+        { provider: options.provider, model: options.model },
       );
       const failure = await runEvaluatedAgent(
         agent,

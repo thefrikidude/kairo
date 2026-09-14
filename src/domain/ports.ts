@@ -9,6 +9,7 @@ import type {
   TaskEvent,
   EvaluationAttempt,
   EvaluationRun,
+  ProviderId,
 } from "./models.js";
 
 export interface ModelProvider {
@@ -88,9 +89,9 @@ export interface ApprovalPolicy {
   approve(call: ToolCall, description: string): Promise<boolean>;
 }
 export interface CredentialStore {
-  get(): Promise<string | undefined>;
-  save(value: string): Promise<void>;
-  clear(): Promise<void>;
+  get(provider: ProviderId): Promise<string | undefined>;
+  save(provider: ProviderId, value: string): Promise<void>;
+  clear(provider: ProviderId): Promise<void>;
 }
 
 /** Stores metadata-only reliability evidence separately from raw task history. */

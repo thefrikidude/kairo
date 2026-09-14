@@ -92,6 +92,7 @@ async function runObservedScenario(
         tools,
         new FixtureApproval(),
         definitions,
+        { provider: "gemini", model: options.model },
       );
       let failure: Awaited<ReturnType<typeof runEvaluatedAgent>> = {};
       const runAgent = observe({
