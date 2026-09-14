@@ -46,7 +46,7 @@ export async function runRepl(
     if (line === "/quit" || line === "/exit") break;
     if (line === "/help") {
       console.log(
-        "/help  /new  /resume [session-id]  /history  /status  /trace [task-id]  /changes  /verify <command>  /compact  /cancel  /model  /quit",
+        "/help  /new  /resume [session-id]  /history  /status  /trace [task-id]  /changes  /verify <command>  /compact  /cancel  /model  /logout  /quit",
       );
       continue;
     }
@@ -74,6 +74,18 @@ export async function runRepl(
         selection = next;
         agent = createAgent(approval, selection, key);
         console.log(`Using ${selection.provider}/${selection.model}.`);
+      } catch (error) {
+        console.error(`Kairo: ${(error as Error).message}`);
+      }
+      continue;
+    }
+    if (line === "/logout") {
+      try {
+        await credentials.clear(selection.provider);
+        console.log(
+          `${selection.provider} Keychain credential removed. This session has been signed out. Environment credentials are unchanged.`,
+        );
+        break;
       } catch (error) {
         console.error(`Kairo: ${(error as Error).message}`);
       }
