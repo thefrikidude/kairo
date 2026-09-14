@@ -113,7 +113,7 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 ## Roadmap
 
 1. **Make one agent dependable** — in progress: bounded tool loops, failure recovery, deterministic context checkpoints, repository profiling and relevance ranking, interrupted-task recovery, approval-gated focused verification, and bounded repair are implemented. Next is measuring and improving repair reliability across more realistic tasks.
-2. **Add provider abstraction** — make Gemini only the first `ModelProvider`, then add other cloud and local models without changing the agent loop.
+2. **Add provider abstraction** — implemented for Gemini and Groq through a shared provider registry; local providers remain future work.
 3. **Route tasks to models** — select fast, cheap, or stronger models based on task class, measured cost, latency, and reliability.
 4. **Add specialized subagents** — research, coding, and testing child sessions coordinated by a main agent.
 5. **Build an evaluation system** — run repeatable coding tasks and compare models, routing rules, agent profiles, cost, latency, and verified success.
@@ -132,7 +132,7 @@ Trace durations separate model streaming, tool execution, and approval waiting; 
 
 `kairo eval live` runs the same tasks with Gemini in disposable fixture copies and asks DeepEval's `TaskCompletionMetric` to judge each recorded agent trajectory. It requires a Gemini credential, consumes Gemini API usage for both the agent and judge, and is intentionally separate from the deterministic test gate. The final result requires both the fixture's independent filesystem/test assertion and the DeepEval verdict to pass. DeepEval receives only the task, final response, tool names, status, and verification metadata; it does not receive source files or command output.
 
-`kairo eval self` is the first capability suite: it copies the current Kairo repository into a fresh temporary directory without `.git` or build artifacts, installs locked dependencies offline, seeds one of six realistic defects, and gives Gemini the normal coding-agent tools. Kairo passes only when its own task reaches a completed, verified state and hidden graders confirm the fix plus the full test suite. Use `--trials 1` through `--trials 5` to measure repeated-run reliability. Each run saves a local SQLite record containing only model/revision identifiers, counters, timing, pass state, and a sanitized failure category—never prompts, model responses, source, or command output. Use `kairo eval history` and `kairo eval show <run-id>` to compare runs. It consumes Gemini API usage and must be run from the Kairo repository root.
+`kairo eval self` is the first capability suite: it copies the current Kairo repository into a fresh temporary directory without `.git` or build artifacts, installs locked dependencies offline, seeds realistic defects, and gives the selected provider the normal coding-agent tools. Kairo passes only when its own task reaches a completed, verified state and hidden graders confirm the fix plus the full test suite. Use `--trials 1` through `--trials 5` to measure repeated-run reliability. Each run saves a local SQLite record containing only provider/model/revision identifiers, counters, timing, pass state, and a sanitized failure category—never prompts, model responses, source, or command output. Use `kairo eval history` and `kairo eval show <run-id>` to compare runs. It consumes the selected provider's API usage and must be run from the Kairo repository root.
 
 ```bash
 pnpm check
