@@ -113,7 +113,7 @@ export async function configureProvider(
   const descriptor = providerById(provider);
   let key = await credentials.get(provider);
   if (!key) {
-    key = (await io.secret(`${descriptor.name} API key (saved in macOS Keychain): `)).trim();
+    key = (await io.secret(`Enter ${descriptor.name} API key (saved in macOS Keychain): `)).trim();
     if (!key) throw new Error("API key cannot be empty.");
     await descriptor.validate(key);
     await credentials.save(provider, key);

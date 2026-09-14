@@ -18,10 +18,17 @@ class MemoryCredentials implements CredentialStore {
 }
 
 /** Supplies deterministic menu and secret answers without a real terminal. */
-function setupIO(answers: string[], secrets: string[] = []): ProviderSetupIO {
+function setupIO(
+  answers: string[],
+  secrets: string[] = [],
+  secretPrompts: string[] = [],
+): ProviderSetupIO {
   return {
     question: async () => answers.shift() ?? "",
-    secret: async () => secrets.shift() ?? "",
+    secret: async (prompt) => {
+      secretPrompts.push(prompt);
+      return secrets.shift() ?? "";
+    },
     write: () => {},
   };
 }
@@ -31,10 +38,15 @@ test("first-run setup validates and saves a missing provider credential", async 
   globalThis.fetch = async () => new Response("{}", { status: 200 });
   try {
     const credentials = new MemoryCredentials();
-    const selection = await configureProvider(setupIO(["2", "1"], ["gsk_secret"]), credentials);
+    const secretPrompts: string[] = [];
+    const selection = await configureProvider(
+      setupIO(["2", "1"], ["gsk_secret"], secretPrompts),
+      credentials,
+    );
     assert.deepEqual(selection, { provider: "groq", model: "openai/gpt-oss-120b" });
     assert.equal(await credentials.get("groq"), "gsk_secret");
     assert.equal(await credentials.get("gemini"), undefined);
+    assert.deepEqual(secretPrompts, ["Enter Groq API key (saved in macOS Keychain): "]);
   } finally {
     globalThis.fetch = original;
   }
