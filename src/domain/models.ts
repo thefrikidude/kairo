@@ -1,4 +1,10 @@
 export type Role = "user" | "model" | "tool";
+export type ProviderId = "gemini" | "groq";
+
+export interface ModelSelection {
+  provider: ProviderId;
+  model: string;
+}
 
 /** Metadata-only events avoid copying source code, credentials, or command output into traces. */
 export interface TaskEvent {

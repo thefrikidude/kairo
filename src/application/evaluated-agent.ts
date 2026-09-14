@@ -10,7 +10,7 @@ export async function runEvaluatedAgent(
 ): Promise<{ error?: string; category?: "agent" | ProviderError["category"] }> {
   try {
     await agent.run(sessionId, prompt, (text) => {
-      if (text.startsWith("\n[Gemini ")) onProgress?.(text);
+      if (text.startsWith("\n[") && /: (?:retry|stopped retrying)/.test(text)) onProgress?.(text);
     });
     return {};
   } catch (error) {

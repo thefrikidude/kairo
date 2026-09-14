@@ -12,8 +12,9 @@ export class ProviderError extends Error {
     readonly category: ProviderFailure,
     readonly retryable: boolean,
     readonly retryAfterMs?: number,
+    provider = "Model provider",
   ) {
-    super(`Gemini request failed (${category}).`);
+    super(`${provider} request failed (${category}).`);
     this.name = "ProviderError";
   }
 }

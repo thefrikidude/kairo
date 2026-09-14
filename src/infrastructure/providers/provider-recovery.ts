@@ -1,7 +1,7 @@
 import { ProviderError, type ProviderProgress } from "../../domain/provider-error.js";
 
 /** Reads bounded nested SDK/HTTP error metadata without persisting any raw values. */
-export function normalizeProviderError(error: unknown): ProviderError {
+export function normalizeProviderError(error: unknown, provider = "Model provider"): ProviderError {
   if (error instanceof ProviderError) return error;
   const texts: string[] = [];
   const codes: string[] = [];
@@ -52,21 +52,21 @@ export function normalizeProviderError(error: unknown): ProviderError {
   const text = texts.join(" ");
   const code = codes.join(" ");
   if (/\b(401|403|UNAUTHENTICATED|PERMISSION_DENIED)\b/.test(code))
-    return new ProviderError("authentication", false);
+    return new ProviderError("authentication", false, undefined, provider);
   if (/\b(429|RESOURCE_EXHAUSTED)\b/.test(code)) {
     const permanent = /per.?day|daily|billing|credit/i.test(
       text.replace(/check your plan and billing details/gi, ""),
     );
-    return new ProviderError("quota", !permanent, retryAfterMs);
+    return new ProviderError("quota", !permanent, retryAfterMs, provider);
   }
   if (/\b(500|502|503|504|UNAVAILABLE|INTERNAL)\b/.test(code))
-    return new ProviderError("service", true, retryAfterMs);
+    return new ProviderError("service", true, retryAfterMs, provider);
   if (
     /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|TimeoutError|AbortError/.test(code) ||
     /fetch failed|network error|timed out/i.test(text)
   )
-    return new ProviderError("network", true, retryAfterMs);
-  return new ProviderError("request", false);
+    return new ProviderError("network", true, retryAfterMs, provider);
+  return new ProviderError("request", false, undefined, provider);
 }
 
 export interface RecoveryClock {
@@ -85,6 +85,7 @@ export async function recoverProvider<T>(
   request: (markContent: () => void) => Promise<T>,
   progress: (event: ProviderProgress) => void = () => {},
   timer: RecoveryClock = clock,
+  provider = "Model provider",
 ): Promise<T> {
   let retries = 0;
   let waited = 0;
@@ -95,7 +96,7 @@ export async function recoverProvider<T>(
         hasContent = true;
       });
     } catch (raw) {
-      const error = normalizeProviderError(raw);
+      const error = normalizeProviderError(raw, provider);
       const delay = error.retryAfterMs ?? 1000 * 2 ** retries + timer.random() * 250;
       if (!error.retryable || hasContent || retries >= 3 || delay > 30000 - waited) {
         progress({ kind: "exhausted", category: error.category, retry: retries, delayMs: 0 });

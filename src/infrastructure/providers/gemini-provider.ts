@@ -3,9 +3,7 @@ import { recoverProvider } from "./provider-recovery.js";
 import type { ProviderProgress } from "../../domain/provider-error.js";
 import type { Message, ModelTurn } from "../../domain/models.js";
 import type { ModelProvider, ToolDefinition } from "../../domain/ports.js";
-
-const systemInstruction =
-  "You are Kairo, a careful coding agent. Work only through the provided tools. Inspect relevant files before changing code. After any edit, run an appropriate verification command before declaring success. When a tool fails, inspect its error and try a materially different repair; do not repeat the same call. Keep tool use focused because outputs may be truncated and execution is bounded. Explain the completed work, verification evidence, and remaining limitations concisely.";
+import { modelSystemInstruction } from "../../application/model-system-instruction.js";
 
 export class GeminiProvider implements ModelProvider {
   private readonly client: GoogleGenAI;
@@ -36,6 +34,8 @@ export class GeminiProvider implements ModelProvider {
           markContent,
         ),
       onProgress,
+      undefined,
+      "Gemini",
     );
   }
   /** Performs one stream; received calls prevent automatic replay even before execution. */
@@ -74,7 +74,7 @@ export class GeminiProvider implements ModelProvider {
       model: this.model,
       contents: contents as never,
       config: {
-        systemInstruction,
+        systemInstruction: modelSystemInstruction,
         tools: [
           {
             functionDeclarations: this.tools.map(({ name, description, parameters }) => ({
