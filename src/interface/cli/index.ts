@@ -54,18 +54,15 @@ async function promptSecret(question: string): Promise<string> {
   }
 }
 
-/** Preserves existing Gemini installs and otherwise launches first-run provider setup. */
+/** Shows model choice for every workspace launch while keeping saved selections as defaults. */
 async function resolveStartupSelection(credentials: MacOSKeychainStore): Promise<ModelSelection> {
-  const stored = await loadStoredConfig();
-  if (stored && (await credentials.get(stored.provider))) return stored;
-  if (!stored && (await credentials.get("gemini"))) {
-    await setModelSelection(defaultConfig);
-    return defaultConfig;
-  }
+  const current = (await loadStoredConfig()) ?? defaultConfig;
   const rl = createInterface({ input: stdin, output: stdout });
   try {
-    console.log("Welcome to Kairo. Choose a model provider to get started.");
-    const selection = await configureProvider(terminalSetupIO(rl), credentials, stored);
+    console.log("Choose a model provider for this Kairo session.");
+    const selection = await configureProvider(terminalSetupIO(rl), credentials, current, {
+      allowCancel: false,
+    });
     if (!selection) throw new Error("Provider setup was cancelled.");
     await setModelSelection(selection);
     return selection;

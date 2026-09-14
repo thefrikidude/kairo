@@ -61,6 +61,18 @@ test("an existing selection can cancel provider switching", async () => {
   );
 });
 
+test("startup keeps a saved provider and model when the user presses Enter", async () => {
+  const credentials = new MemoryCredentials();
+  await credentials.save("gemini", "saved-key");
+  const selection = await configureProvider(
+    setupIO(["", ""]),
+    credentials,
+    { provider: "gemini", model: "gemini-2.5-flash" },
+    { allowCancel: false },
+  );
+  assert.deepEqual(selection, { provider: "gemini", model: "gemini-2.5-flash" });
+});
+
 test("invalid new credentials are not saved", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response("unauthorized", { status: 401 });

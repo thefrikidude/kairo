@@ -13,6 +13,11 @@ export interface ProviderSetupIO {
   write(message: string): void;
 }
 
+export interface ProviderSetupOptions {
+  /** Startup retains the displayed selection; in-session switching permits cancellation. */
+  allowCancel?: boolean;
+}
+
 /** Wraps the shared REPL readline interface and disables terminal echo for secrets. */
 export function terminalSetupIO(
   rl: ReturnType<typeof createInterface>,
@@ -39,6 +44,7 @@ export function terminalSetupIO(
 async function chooseProvider(
   io: ProviderSetupIO,
   current?: ModelSelection,
+  allowCancel = true,
 ): Promise<ProviderId | undefined> {
   io.write(
     `\nProviders:\n${providerRegistry
@@ -46,10 +52,13 @@ async function chooseProvider(
       .join("\n")}\n`,
   );
   for (;;) {
-    const answer = (
-      await io.question(current ? "Provider (blank to cancel): " : "Provider: ")
-    ).trim();
-    if (!answer && current) return undefined;
+    const prompt = current
+      ? allowCancel
+        ? `Provider [${current.provider}] (blank to cancel): `
+        : `Provider [${current.provider}] (blank to keep): `
+      : "Provider: ";
+    const answer = (await io.question(prompt)).trim();
+    if (!answer && current) return allowCancel ? undefined : current.provider;
     const byNumber = providerRegistry[Number(answer) - 1];
     const byId = providerRegistry.find((provider) => provider.id === answer.toLowerCase());
     const selected = byNumber ?? byId;
@@ -59,7 +68,11 @@ async function chooseProvider(
 }
 
 /** Offers tested models first while retaining a custom-model escape hatch. */
-async function chooseModel(io: ProviderSetupIO, providerId: ProviderId): Promise<string> {
+async function chooseModel(
+  io: ProviderSetupIO,
+  providerId: ProviderId,
+  current?: ModelSelection,
+): Promise<string> {
   const provider = providerById(providerId);
   io.write(
     `\n${provider.name} models:\n${provider.models
@@ -70,7 +83,10 @@ async function chooseModel(io: ProviderSetupIO, providerId: ProviderId): Promise
       .join("\n")}\n  ${provider.models.length + 1}. Custom model ID\n`,
   );
   for (;;) {
-    const answer = (await io.question("Model: ")).trim();
+    const currentModel = current?.provider === providerId ? current.model : undefined;
+    const prompt = currentModel ? `Model [${currentModel}] (blank to keep): ` : "Model: ";
+    const answer = (await io.question(prompt)).trim();
+    if (!answer && currentModel) return currentModel;
     const index = Number(answer) - 1;
     if (provider.models[index]) return provider.models[index]!.id;
     if (index === provider.models.length) {
@@ -88,10 +104,12 @@ export async function configureProvider(
   io: ProviderSetupIO,
   credentials: CredentialStore,
   current?: ModelSelection,
+  options: ProviderSetupOptions = {},
 ): Promise<ModelSelection | undefined> {
-  const provider = await chooseProvider(io, current);
+  const allowCancel = options.allowCancel ?? true;
+  const provider = await chooseProvider(io, current, allowCancel);
   if (!provider) return undefined;
-  const model = await chooseModel(io, provider);
+  const model = await chooseModel(io, provider, current);
   const descriptor = providerById(provider);
   let key = await credentials.get(provider);
   if (!key) {
