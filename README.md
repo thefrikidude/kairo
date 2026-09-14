@@ -16,7 +16,7 @@ src/
 └── interface/cli/   # Terminal command parsing and interactive REPL
 ```
 
-The application layer depends only on `domain/` interfaces. Gemini, SQLite, and terminal tools are adapters, so they can be replaced without rewriting the coding-agent workflow.
+The application layer depends only on `domain/` interfaces. Gemini and Groq providers, SQLite, and terminal tools are adapters, so they can be replaced without rewriting the coding-agent workflow.
 
 ## Current capabilities
 
@@ -24,13 +24,13 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 
 - Interactive Gemini or Groq coding-agent REPL for one local workspace, with model selection at every startup and in-session switching.
 - A bounded JavaScript/TypeScript repository profile on session start: package manager, scripts, config files, source/test roots, ignored paths, and a compact file index.
-- Task-aware file ranking and line-range reads, so Gemini receives likely relevant files without flooding its context. Ranking combines task/error terms, declared symbols, local imports, and test-to-source relationships.
+- Task-aware file ranking and line-range reads, so the selected model receives likely relevant files without flooding its context. Ranking combines task/error terms, declared symbols, local imports, and test-to-source relationships.
 - Workspace-confined file listing, code search, file reading, exact text edits, file writes, and shell commands.
 - Explicit approval before every edit, write, or shell command.
 - Bounded model/tool loops, repeated-call protection, failure tracking, and explicit verification status after edits.
 - Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume. Repository profiles are persisted with sessions, so resuming does not rediscover from zero.
 - Discovered test, typecheck, lint, and build scripts are included in the task context. After edits, Kairo recommends the narrowest plausible check, explains its focused/broad scope, and runs it only through the normal approval prompt. A successful approved command records its command, exit status, selection reason, and verification result.
-- Failed post-edit verification creates a bounded repair brief from stack traces and test failures, including affected files, excerpts, and remaining retry budget. Gemini can continue repairing in the same task; retries rerun the focused failed check before Kairo proposes a broader discovered check, and every edit and command still requires approval.
+- Failed post-edit verification creates a bounded repair brief from stack traces and test failures, including affected files, excerpts, and remaining retry budget. The selected model can continue repairing in the same task; retries rerun the focused failed check before Kairo proposes a broader discovered check, and every edit and command still requires approval.
 - Provider-scoped credentials from the macOS Keychain, with `GEMINI_API_KEY` and `GROQ_API_KEY` as temporary or CI overrides.
 
 Kairo does not currently implement automatic model routing or failover, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
@@ -103,7 +103,7 @@ node dist/interface/cli/index.js eval --json
 node dist/interface/cli/index.js eval live
 node dist/interface/cli/index.js eval live --json
 
-# Run real Gemini tasks against isolated, Git-free Kairo source snapshots
+# Run real tasks with the selected provider against isolated, Git-free Kairo source snapshots
 node dist/interface/cli/index.js eval self
 node dist/interface/cli/index.js eval self --trials 3 --json
 node dist/interface/cli/index.js eval history
@@ -115,7 +115,7 @@ node dist/interface/cli/index.js eval baseline show
 node dist/interface/cli/index.js eval compare <run-id>
 ```
 
-Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, `/logout`, and `/quit`. `/model` switches the global provider/model selection and reuses a saved provider credential when available. `/logout` removes the active provider's saved Keychain credential, then returns to the provider/model chooser without closing Kairo.
+Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/trace [task-id]`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, `/logout`, and `/quit`. `/model` switches the global provider/model selection and reuses a saved provider credential when available. `/logout` removes the active provider's saved Keychain credential, then returns to the provider/model chooser without closing Kairo. It does not unset `GEMINI_API_KEY` or `GROQ_API_KEY` from your shell.
 
 ## Safety model
 
@@ -133,7 +133,7 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 
 ## Development
 
-Gemini retries temporary rate limits, network failures, and service errors at most three times per model turn, with a total retry-wait budget of 30 seconds. Provider retry delays take precedence over exponential backoff. Authentication, invalid requests, explicitly exhausted daily quotas, and streams that have already delivered content are not replayed. The wait budget does not limit total generation time. Retry progress goes to stderr during self evaluations so JSON stdout remains valid.
+Kairo retries temporary rate limits, network failures, and service errors at most three times per model turn, with a total retry-wait budget of 30 seconds. Provider retry delays take precedence over exponential backoff. Authentication, invalid requests, explicitly exhausted daily quotas, and streams that have already delivered content are not replayed. The wait budget does not limit total generation time. Retry progress goes to stderr during self evaluations so JSON stdout remains valid.
 
 Self evaluations preserve task metrics when a provider fails, and save sanitized failure categories plus retry counts and wait time. Comparisons retain the all-attempt pass rate and additionally show infrastructure failures and the coding-outcome pass rate excluding them. Older retry metrics remain unavailable; historical failures incorrectly classified as verification cannot be reconstructed from saved metadata.
 
@@ -141,7 +141,7 @@ Self-evaluation baselines are selected manually and stored locally as a pointer 
 
 Trace durations separate model streaming, tool execution, and approval waiting; they are measured operation time, not total task wall time. Unfinished operations remain visible after interruption. Older tasks have no historical trace backfill. Only discovered checks, explicit model checks (`run_command` with `verification: true`), and manual `/verify` commands count as verification. Every successful file-tool edit invalidates prior verification. Project-wide scripts report broad scope even when chosen for a particular source file. Repair convergence requires a completed task whose latest check passed. A passing command is not proof of task correctness. Token usage and cost are not measured yet.
 
-`kairo eval` runs deterministic scripted model decisions against disposable fixture copies. It measures the agent loop, tool safety, repair flow, verification, and tracing without calling Gemini. It is the reproducible baseline for later live Gemini evaluations; it does not measure Gemini reasoning quality yet.
+`kairo eval` runs deterministic scripted model decisions against disposable fixture copies. It measures the agent loop, tool safety, repair flow, verification, and tracing without calling any model provider. It is the reproducible baseline for later live-provider evaluations; it does not measure model reasoning quality.
 
 `kairo eval live` runs the same tasks with Gemini in disposable fixture copies and asks DeepEval's `TaskCompletionMetric` to judge each recorded agent trajectory. It requires a Gemini credential, consumes Gemini API usage for both the agent and judge, and is intentionally separate from the deterministic test gate. The final result requires both the fixture's independent filesystem/test assertion and the DeepEval verdict to pass. DeepEval receives only the task, final response, tool names, status, and verification metadata; it does not receive source files or command output.
 
