@@ -27,10 +27,9 @@ export function terminalSetupIO(
     question: (prompt) => rl.question(prompt),
     async secret(prompt) {
       if (!process.stdin.isTTY) return rl.question(prompt);
-      write(prompt);
       execFileSync("/bin/stty", ["-echo"], { stdio: ["inherit", "ignore", "ignore"] });
       try {
-        return await rl.question("");
+        return await rl.question(prompt);
       } finally {
         execFileSync("/bin/stty", ["echo"], { stdio: ["inherit", "ignore", "ignore"] });
         write("\n");
