@@ -22,7 +22,7 @@ The application layer depends only on `domain/` interfaces. Gemini, SQLite, and 
 
 - Persisted task traces: use `/trace [task-id]` for chronological events and `/status` for model/tool timing, approval counts, repairs, and command outcomes. Traces contain operation metadata, not prompts, file contents, or raw command output.
 
-- Interactive Gemini or Groq coding-agent REPL for one local workspace, with first-run setup and in-session model switching.
+- Interactive Gemini or Groq coding-agent REPL for one local workspace, with model selection at every startup and in-session switching.
 - A bounded JavaScript/TypeScript repository profile on session start: package manager, scripts, config files, source/test roots, ignored paths, and a compact file index.
 - Task-aware file ranking and line-range reads, so Gemini receives likely relevant files without flooding its context. Ranking combines task/error terms, declared symbols, local imports, and test-to-source relationships.
 - Workspace-confined file listing, code search, file reading, exact text edits, file writes, and shell commands.
@@ -42,7 +42,7 @@ Kairo does not currently implement automatic model routing or failover, a full-s
 - A Gemini or Groq API key
 - macOS for `kairo auth login`; on other systems, use the provider environment variable instead
 
-## Quick start
+## Development
 
 ```bash
 pnpm install
@@ -50,7 +50,17 @@ pnpm build
 node dist/interface/cli/index.js .
 ```
 
-The first launch asks you to choose Gemini or Groq, select a recommended or custom model, and securely enter the matching API key.
+Every workspace launch asks you to choose Gemini or Groq, then select a recommended or custom model. Kairo reuses a saved credential for that provider; otherwise it securely asks for and saves the matching API key.
+
+## Production
+
+After installing Kairo, start it with its package executable:
+
+```bash
+kairo [workspace]
+```
+
+Use `node dist/interface/cli/index.js .` only for local development of this repository.
 
 To avoid saving a key to the Keychain, provide it only for the current command:
 
@@ -63,8 +73,11 @@ Kairo never stores API keys in its config file, session database, or Git reposit
 ## Commands
 
 ```bash
-# Start a new workspace session
+# Development: start a new workspace session from this checkout
 node dist/interface/cli/index.js [workspace]
+
+# Production: start a new workspace session through the installed package
+kairo [workspace]
 
 # Credentials
 node dist/interface/cli/index.js auth login
