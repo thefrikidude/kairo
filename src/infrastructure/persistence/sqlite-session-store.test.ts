@@ -34,6 +34,33 @@ test("active tasks recover as interrupted after restart", async () => {
   restarted.close();
 });
 
+test("saved planning artifacts survive a store restart and remain discoverable", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-plan-store-"));
+  const path = join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(path);
+  const session = first.create("/workspace");
+  const task = first.startTask(session.id, "plan task support", "planning");
+  first.updateTask(task.id, {
+    status: "planned",
+    plan: {
+      goal: "Plan task support",
+      assumptions: [],
+      files: [{ path: "src/application/coding-agent.ts", reason: "Add planning coordination." }],
+      steps: ["Persist plans."],
+      verification: { reason: "No execution occurs in planning mode." },
+      risks: [],
+    },
+  });
+  first.close();
+  const restarted = await SqliteSessionStore.open(path);
+  try {
+    assert.equal(restarted.latestPlan(session.id)?.id, task.id);
+    assert.equal(restarted.task(task.id)?.plan?.verification.command, undefined);
+  } finally {
+    restarted.close();
+  }
+});
+
 test("repository profiles persist for resumed sessions", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kairo-profile-store-"));
   const path = join(dir, "sessions.sqlite");

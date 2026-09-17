@@ -24,9 +24,10 @@ export class GroqProvider implements ModelProvider {
     messages: Message[],
     onText: (chunk: string) => void,
     onProgress?: (event: ProviderProgress) => void,
+    systemInstruction = modelSystemInstruction,
   ): Promise<ModelTurn> {
     return recoverProvider(
-      (markContent) => this.streamOnce(messages, onText, markContent),
+      (markContent) => this.streamOnce(messages, onText, markContent, systemInstruction),
       onProgress,
       undefined,
       "Groq",
@@ -38,12 +39,13 @@ export class GroqProvider implements ModelProvider {
     messages: Message[],
     onText: (chunk: string) => void,
     markContent: () => void,
+    systemInstruction: string,
   ): Promise<ModelTurn> {
     const stream = await this.client.chat.completions.create({
       model: this.model,
       stream: true,
       messages: [
-        { role: "system", content: modelSystemInstruction },
+        { role: "system", content: systemInstruction },
         ...messages.map((message) => this.message(message)),
       ] as never,
       tools: this.tools.map(({ name, description, parameters }) => ({

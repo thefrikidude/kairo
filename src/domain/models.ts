@@ -23,7 +23,8 @@ export interface TaskEvent {
     | "approval"
     | "repair"
     | "verification"
-    | "verification_selected";
+    | "verification_selected"
+    | "plan_submitted";
   createdAt: number;
   operationId?: string;
   name?: string;
@@ -115,17 +116,32 @@ export type TaskStatus =
   | "planning"
   | "acting"
   | "verifying"
+  | "planned"
   | "completed"
   | "verification_required"
   | "failed"
   | "interrupted"
   | "cancelled";
 
+export type TaskMode = "implementation" | "planning";
+
+/** A reviewable, execution-free proposal produced by Kairo's planning mode. */
+export interface TaskPlan {
+  goal: string;
+  assumptions: string[];
+  files: Array<{ path: string; reason: string }>;
+  steps: string[];
+  verification: { command?: string; reason: string };
+  risks: string[];
+}
+
 export interface Task {
   id: string;
   sessionId: string;
   prompt: string;
+  mode: TaskMode;
   status: TaskStatus;
+  plan?: TaskPlan;
   changedFiles: string[];
   verificationCommand?: string;
   verificationOutput?: string;

@@ -10,6 +10,7 @@ import type {
   ModelTurn,
   VerificationSelection,
   ModelSelection,
+  TaskPlan,
 } from "../domain/models.js";
 import type {
   ApprovalPolicy,
@@ -25,6 +26,9 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 const MAX_IDENTICAL_CALLS = 2;
 // A small cap prevents an agent from repeatedly editing a workspace without converging.
 const MAX_REPAIR_ATTEMPTS = 2;
+const MAX_PLANNING_MODEL_TURNS = 12;
+const MAX_PLANNING_TOOL_CALLS = 24;
+const planningTools = new Set(["list_files", "read_file", "read_file_range", "search_files"]);
 
 export class CodingAgent {
   private readonly context: ContextManager;
@@ -48,11 +52,17 @@ export class CodingAgent {
     await this.executeTask(task, input, onText);
   }
 
+  /** Inspects a workspace and saves a structured plan without allowing any mutation. */
+  async plan(sessionId: string, input: string, onText: (text: string) => void): Promise<void> {
+    const task = this.store.startTask(sessionId, input, "planning");
+    await this.executeTask(task, input, onText);
+  }
+
   /** Restarts the latest unfinished task using its saved conversation and repair history. */
   async resume(sessionId: string, onText: (text: string) => void): Promise<void> {
     const task = this.store.latestTask(sessionId);
     if (!task) throw new Error("This session has no task to resume.");
-    if (task.status === "completed" || task.status === "cancelled")
+    if (task.status === "completed" || task.status === "planned" || task.status === "cancelled")
       throw new Error(`Task is already ${task.status}. Start a new task instead.`);
     const resumed = this.store.updateTask(task.id, {
       status: "planning",
@@ -127,7 +137,9 @@ export class CodingAgent {
     initialInput: string | undefined,
     onText: (text: string) => void,
   ): Promise<void> {
-    let task = this.store.updateTask(initialTask.id, { status: "acting" });
+    let task = this.store.updateTask(initialTask.id, {
+      status: initialTask.mode === "planning" ? "planning" : "acting",
+    });
     if (initialInput)
       this.save(task.sessionId, {
         role: "user",
@@ -138,7 +150,9 @@ export class CodingAgent {
     let toolCalls = 0;
     let failures = 0;
     try {
-      for (let turn = 0; turn < MAX_MODEL_TURNS; turn += 1) {
+      const maxTurns = task.mode === "planning" ? MAX_PLANNING_MODEL_TURNS : MAX_MODEL_TURNS;
+      const maxToolCalls = task.mode === "planning" ? MAX_PLANNING_TOOL_CALLS : MAX_TOOL_CALLS;
+      for (let turn = 0; turn < maxTurns; turn += 1) {
         if (this.store.task(task.id)?.status === "cancelled") {
           onText("\nTask cancelled.\n");
           return;
@@ -151,6 +165,10 @@ export class CodingAgent {
             createdAt: Date.now(),
           });
         if (!result.toolCalls.length) {
+          if (task.mode === "planning") {
+            this.fail(task, "Planning ended without a structured plan submission.", onText);
+            return;
+          }
           const verification = await this.runRecommendedVerification(task, onText);
           task = this.store.task(task.id)!;
           if (verification === "ran") {
@@ -171,8 +189,7 @@ export class CodingAgent {
         }
         for (const call of result.toolCalls) {
           toolCalls += 1;
-          if (toolCalls > MAX_TOOL_CALLS)
-            return this.fail(task, "Tool-call limit reached.", onText);
+          if (toolCalls > maxToolCalls) return this.fail(task, "Tool-call limit reached.", onText);
           const fingerprint = `${call.name}:${JSON.stringify(call.args)}`;
           const count = (calls.get(fingerprint) || 0) + 1;
           calls.set(fingerprint, count);
@@ -180,6 +197,7 @@ export class CodingAgent {
             return this.fail(task, `Repeated identical tool call blocked: ${call.name}.`, onText);
           const outcome = await this.executeTool(task, call, onText);
           task = this.store.task(task.id)!;
+          if (task.status === "planned") return;
           if (task.status === "failed") {
             onText(`\nKairo stopped: ${task.error}\n`);
             return;
@@ -226,7 +244,104 @@ export class CodingAgent {
       operationId: call.id,
       name: call.name.slice(0, 120),
     });
+    if (task.mode === "planning") return this.executePlanningTool(task, call, onText);
     return this.executeApprovedTool(task, call, onText);
+  }
+
+  /** Keeps planning tasks read-only and accepts their final artifact without a workspace call. */
+  private async executePlanningTool(
+    task: Task,
+    call: ToolCall,
+    onText: (text: string) => void,
+  ): Promise<ToolResult> {
+    if (call.name === "submit_plan") {
+      this.save(task.sessionId, {
+        role: "model",
+        content: JSON.stringify(call.args),
+        toolCallId: call.id,
+        toolName: call.name,
+        createdAt: Date.now(),
+      });
+      const plan = this.validatePlan(call.args);
+      if (!plan) return this.record(task, call, false, "Invalid plan submission.", false);
+      this.event(task, { kind: "tool_started", operationId: call.id, name: call.name });
+      this.store.updateTask(task.id, { status: "planned", plan });
+      this.event(task, {
+        kind: "tool_finished",
+        operationId: call.id,
+        name: call.name,
+        outcome: "succeeded",
+      });
+      this.event(task, { kind: "plan_submitted", operationId: call.id, name: "plan" });
+      this.store.recordTool(task.sessionId, call.id, call.name, call.args, null, "Plan saved.");
+      this.save(task.sessionId, {
+        role: "tool",
+        content: "Plan saved.",
+        toolCallId: call.id,
+        toolName: call.name,
+        createdAt: Date.now(),
+      });
+      onText("\n[Plan saved]\n");
+      return { ok: true, output: "Plan saved." };
+    }
+    if (!planningTools.has(call.name))
+      return this.record(
+        task,
+        call,
+        false,
+        "Planning mode allows only repository reads and submit_plan; no edits or commands ran.",
+        false,
+      );
+    return this.executeApprovedTool(task, call, onText);
+  }
+
+  /** Validates persisted plan data rather than trusting provider-produced tool arguments. */
+  private validatePlan(args: Record<string, unknown>): TaskPlan | undefined {
+    const strings = (value: unknown): string[] | undefined =>
+      Array.isArray(value) && value.every((item) => typeof item === "string" && item.trim())
+        ? value.map((item) => item.trim())
+        : undefined;
+    const goal = typeof args.goal === "string" && args.goal.trim() ? args.goal.trim() : undefined;
+    const assumptions = strings(args.assumptions);
+    const steps = strings(args.steps);
+    const risks = strings(args.risks);
+    const files = Array.isArray(args.files)
+      ? args.files.map((file) => {
+          const value = file as Record<string, unknown>;
+          return {
+            path: typeof value.path === "string" ? value.path.trim() : "",
+            reason: typeof value.reason === "string" ? value.reason.trim() : "",
+          };
+        })
+      : undefined;
+    const verification = args.verification as Record<string, unknown> | undefined;
+    const command =
+      typeof verification?.command === "string" ? verification.command.trim() : undefined;
+    const reason = typeof verification?.reason === "string" ? verification.reason.trim() : "";
+    if (
+      !goal ||
+      !assumptions ||
+      !steps?.length ||
+      !risks ||
+      !files?.length ||
+      !reason ||
+      files.some(
+        (file) =>
+          !file.path ||
+          !file.reason ||
+          file.path.startsWith("/") ||
+          file.path.split("/").includes(".."),
+      )
+    )
+      return undefined;
+    return {
+      goal,
+      assumptions,
+      files,
+      steps,
+      verification: { ...(command ? { command } : {}), reason },
+      risks,
+    };
   }
 
   /** Records model latency even when streaming fails; partial operations remain visible after restart. */
@@ -239,27 +354,32 @@ export class CodingAgent {
     this.event(task, { kind: "model_started", operationId, name: modelName });
     const started = performance.now();
     try {
-      const result = await this.provider.stream(messages, onText, (progress) => {
-        this.event(task, {
-          kind:
-            progress.kind === "retry"
-              ? "provider_retry"
-              : progress.kind === "retry_wait"
-                ? "provider_retry_wait"
-                : "provider_exhausted",
-          operationId,
-          outcome: progress.category,
-          durationMs: progress.kind === "retry_wait" ? progress.delayMs : undefined,
-        });
-        if (progress.kind === "retry")
-          onText(
-            `\n[${this.modelSelection?.provider ?? "provider"} ${progress.category}: retry ${progress.retry}/3 in ${(progress.delayMs / 1000).toFixed(1)}s]\n`,
-          );
-        if (progress.kind === "exhausted")
-          onText(
-            `\n[${this.modelSelection?.provider ?? "provider"} ${progress.category}: stopped retrying after ${progress.retry} retries]\n`,
-          );
-      });
+      const result = await this.provider.stream(
+        messages,
+        onText,
+        (progress) => {
+          this.event(task, {
+            kind:
+              progress.kind === "retry"
+                ? "provider_retry"
+                : progress.kind === "retry_wait"
+                  ? "provider_retry_wait"
+                  : "provider_exhausted",
+            operationId,
+            outcome: progress.category,
+            durationMs: progress.kind === "retry_wait" ? progress.delayMs : undefined,
+          });
+          if (progress.kind === "retry")
+            onText(
+              `\n[${this.modelSelection?.provider ?? "provider"} ${progress.category}: retry ${progress.retry}/3 in ${(progress.delayMs / 1000).toFixed(1)}s]\n`,
+            );
+          if (progress.kind === "exhausted")
+            onText(
+              `\n[${this.modelSelection?.provider ?? "provider"} ${progress.category}: stopped retrying after ${progress.retry} retries]\n`,
+            );
+        },
+        this.instruction(task),
+      );
       this.event(task, {
         kind: "model_finished",
         operationId,
@@ -278,6 +398,18 @@ export class CodingAgent {
       });
       throw error;
     }
+  }
+
+  /** Gives planning its own strict contract while preserving the existing implementation prompt. */
+  private instruction(task: Task): string | undefined {
+    if (task.mode !== "planning") return undefined;
+    return [
+      "You are Kairo in read-only planning mode.",
+      "Inspect the repository before proposing a change. You may use only list_files, read_file, read_file_range, and search_files.",
+      "Never call write_file, edit_file, or run_command. Do not claim to have changed or verified anything.",
+      "When ready, call submit_plan with a concrete goal, assumptions, affected repository-relative files and reasons, ordered steps, a recommended verification command or no-command explanation, and risks.",
+      "Do not end with prose alone; submit_plan is required to complete the task.",
+    ].join(" ");
   }
 
   /** Attaches identity and wall-clock time without retaining prompts or tool arguments. */

@@ -10,6 +10,7 @@ import type {
   EvaluationAttempt,
   EvaluationRun,
   ProviderId,
+  TaskMode,
 } from "./models.js";
 
 export interface ModelProvider {
@@ -17,6 +18,7 @@ export interface ModelProvider {
     messages: Message[],
     onText: (chunk: string) => void,
     onProgress?: (event: import("./provider-error.js").ProviderProgress) => void,
+    systemInstruction?: string,
   ): Promise<ModelTurn>;
 }
 
@@ -49,7 +51,7 @@ export interface TaskStore {
     approved: boolean | null,
     output: string,
   ): void;
-  startTask(sessionId: string, prompt: string): Task;
+  startTask(sessionId: string, prompt: string, mode?: TaskMode): Task;
   task(id: string): Task | undefined;
   latestTask(sessionId: string): Task | undefined;
   updateTask(
@@ -58,6 +60,7 @@ export interface TaskStore {
       Pick<
         Task,
         | "status"
+        | "plan"
         | "changedFiles"
         | "verificationCommand"
         | "verificationOutput"

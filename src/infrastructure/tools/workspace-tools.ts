@@ -11,6 +11,35 @@ const truncate = (value: string) =>
 
 export const definitions: ToolDefinition[] = [
   {
+    name: "submit_plan",
+    description:
+      "Submit the final structured implementation plan after inspecting the repository. Only available in planning mode.",
+    mutating: false,
+    parameters: {
+      type: "object",
+      properties: {
+        goal: { type: "string" },
+        assumptions: { type: "array", items: { type: "string" } },
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { path: { type: "string" }, reason: { type: "string" } },
+            required: ["path", "reason"],
+          },
+        },
+        steps: { type: "array", items: { type: "string" } },
+        verification: {
+          type: "object",
+          properties: { command: { type: "string" }, reason: { type: "string" } },
+          required: ["reason"],
+        },
+        risks: { type: "array", items: { type: "string" } },
+      },
+      required: ["goal", "assumptions", "files", "steps", "verification", "risks"],
+    },
+  },
+  {
     name: "list_files",
     description: "List workspace files under an optional directory.",
     mutating: false,

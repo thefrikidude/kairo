@@ -1,4 +1,4 @@
-import type { Task, TaskEvent } from "../../domain/models.js";
+import type { Task, TaskEvent, TaskPlan } from "../../domain/models.js";
 import { taskMetrics } from "../../application/task-metrics.js";
 
 /** Formats durable counters; legacy tasks explicitly report unavailable instrumentation. */
@@ -38,4 +38,16 @@ export function formatTrace(task: Task, events: TaskEvent[]): string {
           .join("  "),
       ),
   ].join("\n");
+}
+
+/** Renders the saved plan as a compact terminal artifact for review. */
+export function formatPlan(plan: TaskPlan): string {
+  return [
+    `Goal: ${plan.goal}`,
+    `Assumptions: ${plan.assumptions.length ? plan.assumptions.map((item) => `- ${item}`).join("\n") : "none"}`,
+    `Files:\n${plan.files.length ? plan.files.map((file) => `- ${file.path}: ${file.reason}`).join("\n") : "- No files identified."}`,
+    `Steps:\n${plan.steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`,
+    `Verification: ${plan.verification.command ? `\`${plan.verification.command}\` — ` : "No command selected — "}${plan.verification.reason}`,
+    `Risks: ${plan.risks.length ? plan.risks.map((item) => `- ${item}`).join("\n") : "none"}`,
+  ].join("\n\n");
 }

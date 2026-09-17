@@ -115,7 +115,7 @@ node dist/interface/cli/index.js eval baseline show
 node dist/interface/cli/index.js eval compare <run-id>
 ```
 
-Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/trace [task-id]`, `/changes`, `/verify <command>`, `/compact`, `/cancel`, `/model`, `/logout`, and `/quit`. `/model` switches the global provider/model selection and reuses a saved provider credential when available. `/logout` removes the active provider's saved Keychain credential, then returns to the provider/model chooser without closing Kairo. It does not unset `GEMINI_API_KEY` or `GROQ_API_KEY` from your shell.
+Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/trace [task-id]`, `/changes`, `/plan <task>`, `/plan` (show the latest saved plan), `/verify <command>`, `/compact`, `/cancel`, `/model`, `/logout`, and `/quit`. `/plan <task>` uses repository reads to save a structured implementation plan; it cannot edit files or run commands. `/model` switches the global provider/model selection and reuses a saved provider credential when available. `/logout` removes the active provider's saved Keychain credential, then returns to the provider/model chooser without closing Kairo. It does not unset `GEMINI_API_KEY` or `GROQ_API_KEY` from your shell.
 
 ## Safety model
 

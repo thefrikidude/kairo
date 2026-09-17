@@ -5,7 +5,7 @@ import type { ModelSelection } from "../../domain/models.js";
 import type { ApprovalPolicy, CredentialStore } from "../../domain/ports.js";
 import { CodingAgent } from "../../application/coding-agent.js";
 import { setModelSelection } from "../../infrastructure/configuration/config.js";
-import { formatMetrics, formatTrace } from "./task-trace.js";
+import { formatMetrics, formatPlan, formatTrace } from "./task-trace.js";
 import {
   SqliteSessionStore,
   type Session,
@@ -46,7 +46,7 @@ export async function runRepl(
     if (line === "/quit" || line === "/exit") break;
     if (line === "/help") {
       console.log(
-        "/help  /new  /resume [session-id]  /history  /status  /trace [task-id]  /changes  /verify <command>  /compact  /cancel  /model  /logout  /quit",
+        "/help  /new  /resume [session-id]  /history  /status  /trace [task-id]  /changes  /plan [task]  /verify <command>  /compact  /cancel  /model  /logout  /quit",
       );
       continue;
     }
@@ -106,6 +106,22 @@ export async function runRepl(
       console.log("No active model. Use /model to select one or /quit to exit.");
       continue;
     }
+    if (line === "/plan") {
+      const task = store.latestPlan(active.id);
+      console.log(task?.plan ? formatPlan(task.plan) : "No saved plan in this session.");
+      continue;
+    }
+    if (line.startsWith("/plan ")) {
+      try {
+        await agent.plan(active.id, line.slice(6).trim(), (text) => stdout.write(text));
+        const task = agent.status(active.id);
+        if (task?.mode === "planning" && task.plan) console.log(`\n${formatPlan(task.plan)}`);
+        else stdout.write("\n");
+      } catch (error) {
+        console.error(`Kairo: ${(error as Error).message}`);
+      }
+      continue;
+    }
     if (line === "/trace" || line.startsWith("/trace ")) {
       const task = line === "/trace" ? agent.status(active.id) : store.task(line.slice(7).trim());
       console.log(
@@ -122,7 +138,7 @@ export async function runRepl(
         console.log(task.changedFiles.length ? task.changedFiles.join("\n") : "No files changed.");
       else {
         console.log(
-          `${task.status}: ${task.prompt}${task.error ? `\nError: ${task.error}` : ""}${task.verificationCommand ? `\nVerification: ${task.verificationCommand}` : ""}${task.verificationSelection ? `\nSelection: ${task.verificationSelection.scope} (${task.verificationSelection.source}) — ${task.verificationSelection.reason}` : ""}`,
+          `${task.status} (${task.mode}): ${task.prompt}${task.error ? `\nError: ${task.error}` : ""}${task.verificationCommand ? `\nVerification: ${task.verificationCommand}` : ""}${task.verificationSelection ? `\nSelection: ${task.verificationSelection.scope} (${task.verificationSelection.source}) — ${task.verificationSelection.reason}` : ""}`,
         );
         console.log(formatMetrics(store.taskEvents(task.id)));
       }

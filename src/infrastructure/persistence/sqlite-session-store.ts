@@ -8,6 +8,8 @@ import type {
   RepositoryProfile,
   Task,
   TaskStatus,
+  TaskMode,
+  TaskPlan,
   VerificationSelection,
   EvaluationAttempt,
   EvaluationRun,
@@ -32,7 +34,7 @@ export class SqliteSessionStore {
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_call_id TEXT, tool_name TEXT, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE TABLE IF NOT EXISTS tool_events (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, call_id TEXT NOT NULL, name TEXT NOT NULL, args_json TEXT NOT NULL, approved INTEGER, output TEXT, created_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, changed_files_json TEXT NOT NULL DEFAULT '[]', verification_command TEXT, verification_output TEXT, verification_ok INTEGER, verification_exit_code INTEGER, verification_discovered INTEGER, verification_selection_json TEXT, summary TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
+      CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'implementation', status TEXT NOT NULL, plan_json TEXT, changed_files_json TEXT NOT NULL DEFAULT '[]', verification_command TEXT, verification_output TEXT, verification_ok INTEGER, verification_exit_code INTEGER, verification_discovered INTEGER, verification_selection_json TEXT, summary TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE INDEX IF NOT EXISTS tasks_session_updated ON tasks(session_id, updated_at DESC);
       CREATE TABLE IF NOT EXISTS context_checkpoints (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT, summary TEXT NOT NULL, through_message_id INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE INDEX IF NOT EXISTS checkpoints_session_created ON context_checkpoints(session_id, created_at DESC);
@@ -50,6 +52,10 @@ export class SqliteSessionStore {
       db.exec("ALTER TABLE tasks ADD COLUMN verification_discovered INTEGER");
     if (!columns.some((column) => column.name === "verification_selection_json"))
       db.exec("ALTER TABLE tasks ADD COLUMN verification_selection_json TEXT");
+    if (!columns.some((column) => column.name === "mode"))
+      db.exec("ALTER TABLE tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'implementation'");
+    if (!columns.some((column) => column.name === "plan_json"))
+      db.exec("ALTER TABLE tasks ADD COLUMN plan_json TEXT");
     const store = new SqliteSessionStore(db);
     db.exec(
       "CREATE TABLE IF NOT EXISTS task_events (id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, event_json TEXT NOT NULL); CREATE INDEX IF NOT EXISTS task_events_task ON task_events(task_id, id)",
@@ -340,14 +346,14 @@ export class SqliteSessionStore {
       );
   }
   /** Creates a new task in the initial planning state. */
-  startTask(sessionId: string, prompt: string): Task {
+  startTask(sessionId: string, prompt: string, mode: TaskMode = "implementation"): Task {
     const now = Date.now();
     const id = `task-${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
     this.db
       .prepare(
-        "INSERT INTO tasks(id, session_id, prompt, status, changed_files_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks(id, session_id, prompt, mode, status, changed_files_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(id, sessionId, prompt, "planning", "[]", now, now);
+      .run(id, sessionId, prompt, mode, "planning", "[]", now, now);
     this.recordTaskEvent({ taskId: id, kind: "status", outcome: "planning", createdAt: now });
     return this.task(id)!;
   }
@@ -366,6 +372,16 @@ export class SqliteSessionStore {
         .get(sessionId) as Record<string, unknown> | undefined,
     );
   }
+  /** Finds the most recently saved planning artifact in a session. */
+  latestPlan(sessionId: string): Task | undefined {
+    return this.toTask(
+      this.db
+        .prepare(
+          "SELECT * FROM tasks WHERE session_id=? AND mode='planning' ORDER BY updated_at DESC LIMIT 1",
+        )
+        .get(sessionId) as Record<string, unknown> | undefined,
+    );
+  }
   /** Merges a partial task update and writes the complete task state atomically. */
   updateTask(
     id: string,
@@ -373,6 +389,7 @@ export class SqliteSessionStore {
       Pick<
         Task,
         | "status"
+        | "plan"
         | "changedFiles"
         | "verificationCommand"
         | "verificationOutput"
@@ -390,10 +407,11 @@ export class SqliteSessionStore {
     const next = { ...task, ...patch, updatedAt: Date.now() };
     this.db
       .prepare(
-        "UPDATE tasks SET status=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, verification_exit_code=?, verification_discovered=?, verification_selection_json=?, summary=?, error=?, updated_at=? WHERE id=?",
+        "UPDATE tasks SET status=?, plan_json=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, verification_exit_code=?, verification_discovered=?, verification_selection_json=?, summary=?, error=?, updated_at=? WHERE id=?",
       )
       .run(
         next.status,
+        next.plan ? JSON.stringify(next.plan) : null,
         JSON.stringify(next.changedFiles),
         next.verificationCommand ?? null,
         next.verificationOutput ?? null,
@@ -551,7 +569,9 @@ export class SqliteSessionStore {
       id: String(row.id),
       sessionId: String(row.session_id),
       prompt: String(row.prompt),
+      mode: (row.mode ? String(row.mode) : "implementation") as TaskMode,
       status: row.status as TaskStatus,
+      plan: row.plan_json ? (JSON.parse(String(row.plan_json)) as TaskPlan) : undefined,
       changedFiles: JSON.parse(String(row.changed_files_json)) as string[],
       verificationCommand: row.verification_command ? String(row.verification_command) : undefined,
       verificationOutput: row.verification_output ? String(row.verification_output) : undefined,

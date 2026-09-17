@@ -96,6 +96,113 @@ class DenyCommands implements ApprovalPolicy {
   }
 }
 
+test("planning saves a structured read-only artifact without requiring approval", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    let approvals = 0;
+    const executed: string[] = [];
+    const agent = new CodingAgent(
+      {
+        async stream() {
+          return {
+            text: "",
+            toolCalls: [
+              { id: "inspect", name: "read_file", args: { path: "src/app.ts" } },
+              {
+                id: "plan",
+                name: "submit_plan",
+                args: {
+                  goal: "Add task planning",
+                  assumptions: ["The CLI remains terminal-first."],
+                  files: [{ path: "src/application/coding-agent.ts", reason: "Coordinate plans." }],
+                  steps: ["Add a planning mode.", "Persist the completed plan."],
+                  verification: { command: "pnpm test", reason: "Run the agent tests." },
+                  risks: ["Models can submit malformed tool arguments."],
+                },
+              },
+            ],
+          };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "",
+        async execute(call) {
+          executed.push(call.name);
+          return { ok: true, output: "source" };
+        },
+      },
+      {
+        async approve() {
+          approvals += 1;
+          return true;
+        },
+      },
+      definitions,
+    );
+    await agent.plan(session.id, "plan task planning", () => {});
+    const task = agent.status(session.id)!;
+    assert.equal(task.mode, "planning");
+    assert.equal(task.status, "planned");
+    assert.equal(task.plan?.goal, "Add task planning");
+    assert.deepEqual(executed, ["read_file"]);
+    assert.equal(approvals, 0);
+    assert.equal(
+      store.taskEvents(task.id).some((event) => event.kind === "plan_submitted"),
+      true,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("planning rejects writes and commands before approval or workspace execution", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    let approvals = 0;
+    let executions = 0;
+    const agent = new CodingAgent(
+      {
+        async stream() {
+          return {
+            text: "",
+            toolCalls: [
+              { id: "write", name: "write_file", args: { path: "unsafe.txt", content: "no" } },
+              { id: "command", name: "run_command", args: { command: "touch unsafe.txt" } },
+              { id: "done", name: "submit_plan", args: { bad: true } },
+            ],
+          };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "",
+        async execute() {
+          executions += 1;
+          return { ok: true, output: "" };
+        },
+      },
+      {
+        async approve() {
+          approvals += 1;
+          return true;
+        },
+      },
+      definitions,
+    );
+    await agent.plan(session.id, "unsafe plan", () => {});
+    assert.equal(approvals, 0);
+    assert.equal(executions, 0);
+    assert.equal(agent.status(session.id)?.status, "failed");
+  } finally {
+    store.close();
+  }
+});
+
 test("model operations record provider and model attribution", async () => {
   const store = await SqliteSessionStore.open(":memory:");
   try {
