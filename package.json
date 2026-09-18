@@ -7,7 +7,7 @@
     "kairo": "./dist/interface/cli/index.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24.21.0"
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
