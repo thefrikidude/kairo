@@ -6,7 +6,6 @@ import { createInterface } from "node:readline/promises";
 import {
   defaultConfig,
   loadConfig,
-  loadStoredConfig,
   setConfig,
   setModelSelection,
 } from "../../infrastructure/configuration/config.js";
@@ -35,8 +34,8 @@ import {
 
 import { compareWithBaseline } from "../../application/evaluation-comparison.js";
 import { formatBaseline, formatComparison } from "./evaluation-comparison-report.js";
-import { configureProvider, terminalSetupIO } from "./provider-setup.js";
-import type { ModelSelection, ProviderId } from "../../domain/models.js";
+import { terminalSetupIO } from "./provider-setup.js";
+import type { ProviderId } from "../../domain/models.js";
 
 /** Prints the supported command-line shapes when arguments are invalid. */
 function usage(): void {
@@ -54,22 +53,6 @@ async function promptSecret(question: string): Promise<string> {
   }
 }
 
-/** Shows model choice for every workspace launch while keeping saved selections as defaults. */
-async function resolveStartupSelection(credentials: MacOSKeychainStore): Promise<ModelSelection> {
-  const current = (await loadStoredConfig()) ?? defaultConfig;
-  const rl = createInterface({ input: stdin, output: stdout });
-  try {
-    console.log("Choose a model provider for this Kairo session.");
-    const selection = await configureProvider(terminalSetupIO(rl), credentials, current, {
-      allowCancel: false,
-    });
-    if (!selection) throw new Error("Provider setup was cancelled.");
-    await setModelSelection(selection);
-    return selection;
-  } finally {
-    rl.close();
-  }
-}
 /** Parses CLI commands, wires concrete adapters, and starts the workspace REPL. */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -272,12 +255,7 @@ async function main(): Promise<void> {
   const session = resumeId ? store.get(resumeId) : undefined;
   if (resumeId && !session) throw new Error(`Session not found: ${resumeId}`);
   const workspace = session?.workspace || (await realpath(resolve(args[0] || process.cwd())));
-  const config = await resolveStartupSelection(credentials);
-  const key = await credentials.get(config.provider);
-  if (!key)
-    throw new Error(
-      `No ${config.provider} credential. Run \`kairo auth login ${config.provider}\` or set ${providerById(config.provider).environmentVariable}.`,
-    );
+  const config = await loadConfig();
   const tools = await WorkspaceTools.create(workspace);
   const active = session || store.create(workspace);
   if (!store.repositoryProfile(active.id))
