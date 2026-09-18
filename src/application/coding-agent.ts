@@ -166,14 +166,17 @@ export class CodingAgent {
           });
         if (!result.toolCalls.length) {
           if (task.mode === "planning") {
-            this.fail(task, "Planning ended without a structured plan submission.", onText);
+            // PLAN mode can also answer a greeting or conceptual question. A plan is
+            // durable only after submit_plan, but plain conversational text is not an
+            // agent failure and should not be presented as one.
+            this.finish(task);
             return;
           }
           const verification = await this.runRecommendedVerification(task, onText);
           task = this.store.task(task.id)!;
           if (verification === "ran") {
             if (task.status === "failed") {
-              onText(`\nKairo stopped: ${task.error}\n`);
+              onText(`\nKairo couldn't complete this task: ${task.error}\n`);
               return;
             }
             failures = 0;
@@ -199,7 +202,7 @@ export class CodingAgent {
           task = this.store.task(task.id)!;
           if (task.status === "planned") return;
           if (task.status === "failed") {
-            onText(`\nKairo stopped: ${task.error}\n`);
+            onText(`\nKairo couldn't complete this task: ${task.error}\n`);
             return;
           }
           failures = outcome.ok ? 0 : failures + 1;
@@ -226,7 +229,7 @@ export class CodingAgent {
   /** Records a terminal task failure and makes the reason visible in the REPL. */
   private fail(task: Task, error: string, onText: (text: string) => void): void {
     this.store.updateTask(task.id, { status: "failed", error });
-    onText(`\nKairo stopped: ${error}\n`);
+    onText(`\nKairo couldn't complete this task: ${error}\n`);
   }
   /** Appends a durable conversation message for later context reconstruction. */
   private save(session: string, message: Message): void {
@@ -405,10 +408,11 @@ export class CodingAgent {
     if (task.mode !== "planning") return undefined;
     return [
       "You are Kairo in read-only planning mode.",
-      "Inspect the repository before proposing a change. You may use only list_files, read_file, read_file_range, and search_files.",
+      "For a request to change, investigate, or plan repository work, inspect only the files needed to make a concrete plan. You may use only list_files, read_file, read_file_range, and search_files.",
+      "For greetings or general questions that do not need repository context, answer directly without tools and do not submit a plan.",
       "Never call write_file, edit_file, or run_command. Do not claim to have changed or verified anything.",
       "When ready, call submit_plan with a concrete goal, assumptions, affected repository-relative files and reasons, ordered steps, a recommended verification command or no-command explanation, and risks.",
-      "Do not end with prose alone; submit_plan is required to complete the task.",
+      "For repository work, submit_plan is required to save the structured plan; do not end with prose alone.",
     ].join(" ");
   }
 

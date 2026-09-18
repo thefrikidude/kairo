@@ -22,7 +22,7 @@ The application layer depends only on `domain/` interfaces. Gemini and Groq prov
 
 - Persisted task traces: use `/trace [task-id]` for chronological events and `/status` for model/tool timing, approval counts, repairs, and command outcomes. Traces contain operation metadata, not prompts, file contents, or raw command output.
 
-- Interactive Gemini or Groq coding-agent REPL for one local workspace, with model selection at every startup and in-session switching.
+- Interactive Ink terminal UI for one local workspace, with a streaming transcript, task status, approval overlays, and an in-session model picker.
 - A bounded JavaScript/TypeScript repository profile on session start: package manager, scripts, config files, source/test roots, ignored paths, and a compact file index.
 - Task-aware file ranking and line-range reads, so the selected model receives likely relevant files without flooding its context. Ranking combines task/error terms, declared symbols, local imports, and test-to-source relationships.
 - Workspace-confined file listing, code search, file reading, exact text edits, file writes, and shell commands.
@@ -50,7 +50,7 @@ pnpm build
 node dist/interface/cli/index.js .
 ```
 
-Every workspace launch asks you to choose Gemini or Groq, then select a recommended or custom model. Kairo reuses a saved credential for that provider; otherwise it securely asks for and saves the matching API key.
+Kairo opens directly into the terminal UI with the last saved model selected. Use `/models` to open the model picker, then use the arrow keys and Enter (or a number key) to select an available model. Kairo reuses the selected provider's saved credential. If a provider is not authenticated yet, run `kairo auth login <provider>` once, then reopen `/models`.
 
 ## Production
 
@@ -115,7 +115,7 @@ node dist/interface/cli/index.js eval baseline show
 node dist/interface/cli/index.js eval compare <run-id>
 ```
 
-Inside a session, use `/help`, `/new`, `/history`, `/resume` (current task), `/resume <id>` (another session), `/status`, `/trace [task-id]`, `/changes`, `/plan <task>`, `/plan` (show the latest saved plan), `/verify <command>`, `/compact`, `/cancel`, `/model`, `/logout`, and `/quit`. `/plan <task>` uses repository reads to save a structured implementation plan; it cannot edit files or run commands. `/model` switches the global provider/model selection and reuses a saved provider credential when available. `/logout` removes the active provider's saved Keychain credential, then returns to the provider/model chooser without closing Kairo. It does not unset `GEMINI_API_KEY` or `GROQ_API_KEY` from your shell.
+Inside a session, type `/` to open the command palette; keep typing to filter commands, then use the arrow keys and Enter or Tab to select one. `/plan` silently toggles the live interaction mode. In PLAN mode, repository requests create a read-only, structured implementation plan; it cannot edit files or run commands. Enter `/plan` again to return to BUILD mode, where ordinary messages use the normal coding-agent loop. The mode is intentionally reset to BUILD when Kairo starts, a new session is created, or another session is resumed. The bordered composer shows the active PLAN or BUILD mode and selected model beneath the input. The Ink UI displays streamed responses, task state, and approval prompts; press `y` or Enter to allow an action, or `n` or Escape to deny it.
 
 ## Safety model
 

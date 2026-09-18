@@ -158,6 +158,40 @@ test("planning saves a structured read-only artifact without requiring approval"
   }
 });
 
+test("planning treats a conversational response without a plan as completed, not failed", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    const agent = new CodingAgent(
+      {
+        async stream() {
+          return { text: "Hello! How can I help?", toolCalls: [] };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "",
+        async execute() {
+          return { ok: true, output: "" };
+        },
+      },
+      {
+        async approve() {
+          return true;
+        },
+      },
+      definitions,
+    );
+    await agent.plan(session.id, "hello", () => {});
+    const task = agent.status(session.id)!;
+    assert.equal(task.status, "completed");
+    assert.equal(task.plan, undefined);
+  } finally {
+    store.close();
+  }
+});
+
 test("planning rejects writes and commands before approval or workspace execution", async () => {
   const store = await SqliteSessionStore.open(":memory:");
   try {
