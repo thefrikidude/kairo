@@ -115,7 +115,7 @@ node dist/interface/cli/index.js eval baseline show
 node dist/interface/cli/index.js eval compare <run-id>
 ```
 
-Inside a session, type `/` to open the command palette; keep typing to filter commands, then use the arrow keys and Enter or Tab to select one. `/plan` silently toggles the live interaction mode. In PLAN mode, repository requests create a read-only, structured implementation plan; it cannot edit files or run commands. Enter `/plan` again to return to BUILD mode, where ordinary messages use the normal coding-agent loop. The mode is intentionally reset to BUILD when Kairo starts, a new session is created, or another session is resumed. The bordered composer shows the active PLAN or BUILD mode and selected model beneath the input. The Ink UI displays streamed responses, task state, and approval prompts; press `y` or Enter to allow an action, or `n` or Escape to deny it.
+Inside a session, type `/` to open the command palette; keep typing to filter commands, then use the arrow keys and Enter or Tab to run a no-argument command or fill a command that needs more input. `/plan` silently toggles the live interaction mode. In PLAN mode, repository requests create a read-only, structured implementation plan; it cannot edit files or run commands. Enter `/plan` again to return to BUILD mode, where ordinary messages use the normal coding-agent loop. The mode is intentionally reset to BUILD when Kairo starts, a new session is created, or another session is resumed. The bordered composer shows the active PLAN or BUILD mode and selected model beneath the input. The Ink UI displays streamed responses, task state, and approval prompts; press `y` or Enter to allow an action, or `n` or Escape to deny it.
 
 ## Safety model
 

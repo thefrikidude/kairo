@@ -162,17 +162,6 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     if (inputKey.toLowerCase() === "n" || key.escape) answerApproval(false);
   });
 
-  useInput((inputKey, key) => {
-    if (pendingApproval || modelPicker || !commandMatches.length) return;
-    if (key.upArrow) return setCommandIndex((current) => Math.max(0, current - 1));
-    if (key.downArrow)
-      return setCommandIndex((current) => Math.min(commandMatches.length - 1, current + 1));
-    if (key.tab) {
-      const selected = commandMatches[commandIndex];
-      if (selected) setInput(commandInput(selected));
-    }
-  });
-
   const chooseModel = useCallback(
     async (next: ModelSelection) => {
       const nextKey = await props.credentials.get(next.provider);
@@ -251,12 +240,15 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
 
   const submit = useCallback(
     async (value: string) => {
-      const line = value.trim();
+      let line = value.trim();
       if (!line || busy !== "idle" || pendingApproval) return;
       const selectedCommand = commandMatches[commandIndex];
       if (selectedCommand && line !== selectedCommand.name) {
-        setInput(commandInput(selectedCommand));
-        return;
+        if ("acceptsArgument" in selectedCommand && selectedCommand.acceptsArgument) {
+          setInput(commandInput(selectedCommand));
+          return;
+        }
+        line = selectedCommand.name;
       }
       setInput("");
       if (line === "/plan") {
@@ -393,6 +385,22 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       commandMatches,
     ],
   );
+
+  useInput((inputKey, key) => {
+    if (pendingApproval || modelPicker || !commandMatches.length) return;
+    if (key.upArrow) return setCommandIndex((current) => Math.max(0, current - 1));
+    if (key.downArrow)
+      return setCommandIndex((current) => Math.min(commandMatches.length - 1, current + 1));
+    if (key.tab) {
+      const selected = commandMatches[commandIndex];
+      if (!selected) return;
+      if ("acceptsArgument" in selected && selected.acceptsArgument) {
+        setInput(commandInput(selected));
+      } else {
+        void submit(selected.name);
+      }
+    }
+  });
 
   return (
     <Box flexDirection="column">
