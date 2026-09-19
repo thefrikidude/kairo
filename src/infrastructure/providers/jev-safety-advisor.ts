@@ -3,6 +3,7 @@ import type {
   JevAssessment,
   JevDecision,
   JevRecovery,
+  JevModelTier,
   JevRisk,
   JevRoute,
   JevSafetyAdvisor,
@@ -52,6 +53,17 @@ export class JevDecisionProvider implements JevSafetyAdvisor {
         "The current check is too narrow; recommend the next broader discovered verification command.",
       escalate:
         "The failure is ambiguous, risky, or lacks enough evidence; stop automatic repair and ask the user.",
+    });
+  }
+
+  /** Selects a bounded coding-model tier; Kairo applies the local allowlist and credentials. */
+  async modelTier(state: string): Promise<JevDecision<JevModelTier>> {
+    return this.decide("coding_model_tier", state, {
+      fast: "A small, focused, low-risk implementation or explanation where low latency matters most.",
+      balanced:
+        "A normal feature or bug fix that benefits from reliable coding ability and moderate latency.",
+      strong:
+        "A complex, multi-file, architectural, or difficult debugging task needing the strongest available coding model.",
     });
   }
 

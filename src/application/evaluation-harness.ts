@@ -142,6 +142,9 @@ export async function runJevEvaluationSuite(): Promise<JevEvaluationReport> {
     async recover() {
       return { value: "repair", confidence: 1 };
     },
+    async modelTier() {
+      return { value: "balanced", confidence: 1 };
+    },
   };
   return {
     off: await runEvaluationSuite(),

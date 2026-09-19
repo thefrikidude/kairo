@@ -32,13 +32,18 @@ test("Jev rejects malformed decisions and classifies authentication failures", a
   );
 });
 
-test("Jev serializes typed route and recovery decisions independently", async () => {
+test("Jev serializes typed route, recovery, and model-tier decisions independently", async () => {
   const questions: string[] = [];
   const provider = new JevDecisionProvider("key", async (_input, init) => {
     const body = JSON.parse(String(init?.body)) as { questions: Record<string, unknown> };
     const question = Object.keys(body.questions)[0]!;
     questions.push(question);
-    const choice = question === "task_route" ? "plan" : "escalate";
+    const choice =
+      question === "task_route"
+        ? "plan"
+        : question === "verification_recovery"
+          ? "escalate"
+          : "fast";
     return new Response(JSON.stringify({ answers: { [question]: { choice, confidence: 0.9 } } }));
   });
   assert.deepEqual(await provider.route("broad architecture task"), {
@@ -49,5 +54,6 @@ test("Jev serializes typed route and recovery decisions independently", async ()
     value: "escalate",
     confidence: 0.9,
   });
-  assert.deepEqual(questions, ["task_route", "verification_recovery"]);
+  assert.deepEqual(await provider.modelTier("small edit"), { value: "fast", confidence: 0.9 });
+  assert.deepEqual(questions, ["task_route", "verification_recovery", "coding_model_tier"]);
 });

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodingAgent } from "./coding-agent.js";
@@ -52,6 +52,9 @@ test("Jev enriches but never bypasses mutation approval or retains source conten
       async recover() {
         return { value: "repair", confidence: 1 };
       },
+      async modelTier() {
+        return { value: "balanced", confidence: 1 };
+      },
     };
     const agent = new CodingAgent(
       new FakeProvider(),
@@ -83,6 +86,127 @@ test("Jev enriches but never bypasses mutation approval or retains source conten
       true,
     );
     assert.doesNotMatch(JSON.stringify(store.taskEvents(task.id)), /Update a file|written/);
+  } finally {
+    store.close();
+  }
+});
+
+test("safe Jev autonomy runs only a discovered low-risk verification without prompting", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-jev-autonomy-"));
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create(root);
+    saveVerificationProfile(store, session.id, root);
+    let approvals = 0;
+    const advisor: JevSafetyAdvisor = {
+      async assess() {
+        return { risk: "low", confidence: 0.95 };
+      },
+      async route() {
+        return { value: "build", confidence: 1 };
+      },
+      async recover() {
+        return { value: "repair", confidence: 1 };
+      },
+      async modelTier() {
+        return { value: "balanced", confidence: 1 };
+      },
+    };
+    await new CodingAgent(
+      new FakeProvider(),
+      store,
+      await WorkspaceTools.create(root),
+      {
+        async approve() {
+          approvals += 1;
+          return true;
+        },
+      },
+      definitions,
+      undefined,
+      advisor,
+      { routing: true, safety: true, recovery: true, autonomy: true },
+    ).run(session.id, "create a file", () => {});
+    const task = store.latestTask(session.id)!;
+    assert.equal(task.status, "completed");
+    assert.equal(approvals, 1, "the file write still requires the user");
+    const events = store.taskEvents(task.id);
+    assert.equal(
+      events.some(
+        (event) =>
+          event.kind === "autonomous" && event.outcome === "jev-low-risk-discovered-verification",
+      ),
+      true,
+    );
+    assert.equal(taskMetrics(events).autonomousActions, 1);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("safe Jev autonomy never bypasses approval for arbitrary verification commands", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    let approvals = 0;
+    const advisor: JevSafetyAdvisor = {
+      async assess() {
+        return { risk: "low", confidence: 1 };
+      },
+      async route() {
+        return { value: "build", confidence: 1 };
+      },
+      async recover() {
+        return { value: "repair", confidence: 1 };
+      },
+      async modelTier() {
+        return { value: "balanced", confidence: 1 };
+      },
+    };
+    let turn = 0;
+    await new CodingAgent(
+      {
+        async stream() {
+          turn += 1;
+          return turn === 1
+            ? {
+                text: "",
+                toolCalls: [
+                  {
+                    id: "command",
+                    name: "run_command",
+                    args: { command: "echo unsafe", verification: true },
+                  },
+                ],
+              }
+            : { text: "done", toolCalls: [] };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "Run command",
+        async execute() {
+          return { ok: true, output: "" };
+        },
+      },
+      {
+        async approve() {
+          approvals += 1;
+          return false;
+        },
+      },
+      definitions,
+      undefined,
+      advisor,
+      { routing: true, safety: true, recovery: true, autonomy: true },
+    ).run(session.id, "run arbitrary command", () => {});
+    assert.equal(approvals, 1);
+    assert.equal(
+      taskMetrics(store.taskEvents(store.latestTask(session.id)!.id)).autonomousActions,
+      0,
+    );
   } finally {
     store.close();
   }
@@ -260,6 +384,9 @@ test("high-confidence Jev routing plans only the current BUILD request", async (
       },
       async recover() {
         return { value: "repair", confidence: 1 };
+      },
+      async modelTier() {
+        return { value: "balanced", confidence: 1 };
       },
     };
     const agent = new CodingAgent(
@@ -658,6 +785,9 @@ test("Jev can escalate a failed verification without bypassing its original appr
       },
       async recover() {
         return { value: "escalate", confidence: 0.9 };
+      },
+      async modelTier() {
+        return { value: "balanced", confidence: 1 };
       },
     };
     await new CodingAgent(

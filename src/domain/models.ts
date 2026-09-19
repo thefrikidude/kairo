@@ -23,6 +23,7 @@ export interface TaskEvent {
     | "tool_started"
     | "tool_finished"
     | "approval"
+    | "autonomous"
     | "repair"
     | "verification"
     | "verification_selected"

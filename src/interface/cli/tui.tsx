@@ -5,11 +5,17 @@ import type { ModelSelection, TaskStatus, ToolCall } from "../../domain/models.j
 import type { ApprovalPolicy, CredentialStore, JevFeatures } from "../../domain/ports.js";
 import { CodingAgent } from "../../application/coding-agent.js";
 import {
+  setAutoModelRoutingEnabled,
   setJevEnabled,
   setJevFeature,
   setModelSelection,
 } from "../../infrastructure/configuration/config.js";
 import { JevDecisionProvider } from "../../infrastructure/providers/jev-safety-advisor.js";
+import {
+  modelRoutingState,
+  selectAutoModel,
+  type AvailableModel,
+} from "../../application/model-routing.js";
 import {
   isProviderId,
   providerById,
@@ -35,6 +41,7 @@ export type ModelOption = ModelSelection & { label: string };
 export const slashCommands = [
   { name: "/plan", description: "Toggle read-only planning mode" },
   { name: "/models", description: "Choose a model" },
+  { name: "/auto", description: "Toggle Jev automatic model routing" },
   { name: "/jev", description: "Manage the Jev safety advisor" },
   { name: "/new", description: "Start a new session" },
   { name: "/resume", description: "Continue a task or open a session", acceptsArgument: true },
@@ -112,6 +119,7 @@ export interface KairoTuiProps {
   initialJevKey?: string;
   initialJevEnabled: boolean;
   initialJevFeatures: JevFeatures;
+  initialAutoModelRoutingEnabled: boolean;
   credentials: CredentialStore;
 }
 
@@ -124,6 +132,8 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const [jevKey, setJevKey] = useState<string | undefined>(props.initialJevKey);
   const [jevEnabled, setJevEnabledState] = useState(props.initialJevEnabled);
   const [jevFeatures, setJevFeatures] = useState(props.initialJevFeatures);
+  const [autoModelRouting, setAutoModelRouting] = useState(props.initialAutoModelRoutingEnabled);
+  const [routedSelection, setRoutedSelection] = useState<ModelSelection>();
   const [mode, setMode] = useState<InteractionMode>("build");
   const [input, setInput] = useState("");
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
@@ -167,6 +177,58 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           )
         : undefined,
     [apiKey, approval, jevEnabled, jevFeatures, jevKey, props.createAgent, selection],
+  );
+  const resolveTaskAgent = useCallback(
+    async (request: string): Promise<CodingAgent | undefined> => {
+      if (!autoModelRouting || !jevEnabled || !jevKey || !agent) {
+        setRoutedSelection(undefined);
+        return agent;
+      }
+      const providerKeys = new Map(
+        await Promise.all(
+          providerRegistry.map(
+            async (provider) => [provider.id, await props.credentials.get(provider.id)] as const,
+          ),
+        ),
+      );
+      const available: AvailableModel[] = models.flatMap((model) => {
+        const apiKey = providerKeys.get(model.provider);
+        const tier = providerById(model.provider).models.find(
+          (item) => item.id === model.model,
+        )?.tier;
+        return apiKey && tier ? [{ ...model, apiKey, tier }] : [];
+      });
+      if (!available.length) {
+        setRoutedSelection(undefined);
+        return agent;
+      }
+      try {
+        const decision = await new JevDecisionProvider(jevKey).modelTier(
+          modelRoutingState(request, available),
+        );
+        if (decision.confidence < 0.85) {
+          setRoutedSelection(undefined);
+          return agent;
+        }
+        const routed = selectAutoModel(available, selection, decision.value);
+        if (!routed) {
+          setRoutedSelection(undefined);
+          return agent;
+        }
+        setRoutedSelection({ provider: routed.provider, model: routed.model });
+        return props.createAgent(
+          approval,
+          { provider: routed.provider, model: routed.model },
+          routed.apiKey,
+          new JevDecisionProvider(jevKey),
+          jevFeatures,
+        );
+      } catch {
+        setRoutedSelection(undefined);
+        return agent;
+      }
+    },
+    [agent, approval, autoModelRouting, jevEnabled, jevFeatures, jevKey, models, props, selection],
   );
   const append = useCallback((kind: TranscriptEntry["kind"], text: string) => {
     setEntries((current) => [...current, { id: current.length, kind, text }]);
@@ -232,9 +294,9 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     }
     if (key.escape) return setJevPanel(false);
     if (key.upArrow) return setJevIndex((current) => Math.max(0, current - 1));
-    if (key.downArrow) return setJevIndex((current) => Math.min(5, current + 1));
-    if (key.return || /^[1-6]$/.test(inputKey)) {
-      const action = /^[1-6]$/.test(inputKey) ? Number(inputKey) - 1 : jevIndex;
+    if (key.downArrow) return setJevIndex((current) => Math.min(6, current + 1));
+    if (key.return || /^[1-7]$/.test(inputKey)) {
+      const action = /^[1-7]$/.test(inputKey) ? Number(inputKey) - 1 : jevIndex;
       if (action === 0) {
         if (!jevKey) {
           setJevCredentialError("Add a TypeSafe API key before enabling Jev.");
@@ -270,12 +332,19 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         return;
       }
       if (action === 4) {
+        const next = !jevFeatures.autonomy;
+        void setJevFeature("autonomy", next).then(() =>
+          setJevFeatures((current) => ({ ...current, autonomy: next })),
+        );
+        return;
+      }
+      if (action === 5) {
         setJevCredentialInput("");
         setJevCredentialError(undefined);
         setJevCredentialMode(true);
         return;
       }
-      if (action === 5) {
+      if (action === 6) {
         void props.credentials.clear("jev").then(async () => {
           await setJevEnabled(false);
           setJevKey(undefined);
@@ -297,8 +366,11 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         return;
       }
       await setModelSelection(next);
+      await setAutoModelRoutingEnabled(false);
       setSelection(next);
       setApiKey(nextKey);
+      setAutoModelRouting(false);
+      setRoutedSelection(undefined);
       append("system", `Using ${next.provider}/${next.model}.`);
     },
     [append, props.credentials],
@@ -315,8 +387,11 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         await providerById(credentialModel.provider).validate(key);
         await props.credentials.save(credentialModel.provider, key);
         await setModelSelection(credentialModel);
+        await setAutoModelRoutingEnabled(false);
         setSelection(credentialModel);
         setApiKey(key);
+        setAutoModelRouting(false);
+        setRoutedSelection(undefined);
         setCredentialInput("");
         setCredentialModel(undefined);
         append("system", `Using ${credentialModel.provider}/${credentialModel.model}.`);
@@ -376,9 +451,11 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         appendStream(entryId, chunk);
       };
       try {
-        if (taskMode === "plan") await agent.plan(active.id, request, onAgentText);
-        else await agent.run(active.id, request, onAgentText);
-        const task = agent.status(active.id);
+        const taskAgent = taskMode === "build" ? await resolveTaskAgent(request) : agent;
+        if (!taskAgent) throw new Error("No credential is available for the selected model.");
+        if (taskMode === "plan") await taskAgent.plan(active.id, request, onAgentText);
+        else await taskAgent.run(active.id, request, onAgentText);
+        const task = taskAgent.status(active.id);
         if (task?.mode === "planning" && task.plan) append("system", formatPlan(task.plan));
         if ((task?.status as TaskStatus | undefined) === "cancelled")
           append("system", "Task cancelled.");
@@ -392,7 +469,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           append("error", `Kairo: ${(error as Error).message}`);
       }
     },
-    [active.id, agent, append, appendStream, entries.length],
+    [active.id, agent, append, appendStream, entries.length, resolveTaskAgent],
   );
 
   const submit = useCallback(
@@ -495,6 +572,23 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         }
         return;
       }
+      if (line === "/auto") {
+        if (!autoModelRouting && (!jevEnabled || !jevKey))
+          return append(
+            "error",
+            "Enable Jev and add its API key with /jev before enabling auto routing.",
+          );
+        const next = !autoModelRouting;
+        await setAutoModelRoutingEnabled(next);
+        setAutoModelRouting(next);
+        setRoutedSelection(undefined);
+        return append(
+          "system",
+          next
+            ? "Automatic Jev model routing enabled. Your selected model remains the fallback."
+            : `Manual model selection enabled: ${selection.provider}/${selection.model}.`,
+        );
+      }
       if (line === "/models") {
         const selected = models.findIndex(
           (item) => item.provider === selection.provider && item.model === selection.model,
@@ -539,6 +633,9 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       busy,
       exit,
       mode,
+      autoModelRouting,
+      jevEnabled,
+      jevKey,
       pendingApproval,
       props.credentials,
       props.store,
@@ -642,6 +739,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
                 `Task routing: ${jevFeatures.routing ? "on" : "off"}`,
                 `Safety context: ${jevFeatures.safety ? "on" : "off"}`,
                 `Recovery advice: ${jevFeatures.recovery ? "on" : "off"}`,
+                `Safe autonomy: ${jevFeatures.autonomy ? "on" : "off"}`,
                 "Add or replace API key",
                 "Remove API key",
               ].map((label, index) => (
@@ -697,12 +795,22 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
               focus={busy === "idle"}
             />
           </Box>
-          <Box paddingX={1}>
-            <ModeBadge mode={mode} />
-            <Text color="gray">
-              {" "}
-              · {selection.provider}/{selection.model}
-            </Text>
+          <Box paddingX={1} justifyContent="space-between">
+            <Box>
+              <ModeBadge mode={mode} />
+              <Text color="gray">
+                {" "}
+                · {autoModelRouting ? "AUTO → " : ""}
+                {(routedSelection ?? selection).provider}/{(routedSelection ?? selection).model}
+              </Text>
+            </Box>
+            {autoModelRouting || jevEnabled ? (
+              <Box>
+                {autoModelRouting ? <Text color="cyan">AUTO</Text> : null}
+                {autoModelRouting && jevEnabled ? <Text color="gray"> · </Text> : null}
+                {jevEnabled ? <Text color="magenta">JEV</Text> : null}
+              </Box>
+            ) : null}
           </Box>
         </Box>
       )}

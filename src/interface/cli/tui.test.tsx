@@ -47,6 +47,10 @@ test("slash-command palette filters names and hides after an argument begins", (
     matchingSlashCommands("/jev").map((command) => command.name),
     ["/jev"],
   );
+  assert.deepEqual(
+    matchingSlashCommands("/aut").map((command) => command.name),
+    ["/auto"],
+  );
 });
 
 test("TUI approval waits for and returns the user's decision", async () => {

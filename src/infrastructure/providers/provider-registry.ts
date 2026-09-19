@@ -8,7 +8,12 @@ export interface ProviderDescriptor {
   id: ProviderId;
   name: string;
   environmentVariable: string;
-  models: Array<{ id: string; label: string; recommended?: boolean }>;
+  models: Array<{
+    id: string;
+    label: string;
+    tier: "fast" | "balanced" | "strong";
+    recommended?: boolean;
+  }>;
   create(apiKey: string, model: string, tools: ToolDefinition[]): ModelProvider;
   validate(apiKey: string): Promise<void>;
 }
@@ -24,7 +29,9 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
     id: "gemini",
     name: "Gemini",
     environmentVariable: "GEMINI_API_KEY",
-    models: [{ id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", recommended: true }],
+    models: [
+      { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", tier: "balanced", recommended: true },
+    ],
     create: (apiKey, model, tools) => new GeminiProvider(apiKey, model, tools),
     validate: async (apiKey) =>
       validateResponse(
@@ -39,8 +46,8 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
     name: "Groq",
     environmentVariable: "GROQ_API_KEY",
     models: [
-      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", recommended: true },
-      { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B (faster)" },
+      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", tier: "strong", recommended: true },
+      { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B (faster)", tier: "fast" },
     ],
     create: (apiKey, model, tools) => new GroqProvider(apiKey, model, tools),
     validate: async (apiKey) =>
@@ -59,19 +66,23 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
       {
         id: "qwen/qwen3.8-27b:free",
         label: "Qwen 3.8 27B (free)",
+        tier: "balanced",
         recommended: true,
       },
       {
         id: "cohere/north-mini-code:free",
         label: "Cohere North Mini Code (free)",
+        tier: "fast",
       },
       {
         id: "deepseek/deepseek-v4-flash-0731:free",
         label: "DeepSeek V4 Flash (free)",
+        tier: "fast",
       },
       {
         id: "openrouter/free",
         label: "OpenRouter free-model router",
+        tier: "balanced",
       },
     ],
     create: (apiKey, model, tools) => new OpenRouterProvider(apiKey, model, tools),

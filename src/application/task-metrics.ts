@@ -32,6 +32,7 @@ export function taskMetrics(events: TaskEvent[]) {
     approvals: count("approval", "approved"),
     denials: count("approval", "denied"),
     approvalMs: duration("approval"),
+    autonomousActions: count("autonomous"),
     repairs: count("repair"),
     verificationPasses: count("verification", "passed"),
     verificationFailures: count("verification", "failed"),

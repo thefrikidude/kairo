@@ -102,6 +102,7 @@ export interface CredentialStore {
 export type JevRisk = "low" | "medium" | "high";
 export type JevRoute = "build" | "plan";
 export type JevRecovery = "repair" | "broaden" | "escalate";
+export type JevModelTier = "fast" | "balanced" | "strong";
 export interface JevDecision<T extends string> {
   value: T;
   confidence: number;
@@ -110,16 +111,19 @@ export interface JevAssessment {
   risk: JevRisk;
   confidence: number;
 }
-/** Classifies safe operation metadata; it never authorizes an action. */
+/** Classifies bounded operation metadata; Kairo applies all autonomy policy locally. */
 export interface JevSafetyAdvisor {
   assess(state: string): Promise<JevAssessment>;
   route(state: string): Promise<JevDecision<JevRoute>>;
   recover(state: string): Promise<JevDecision<JevRecovery>>;
+  modelTier(state: string): Promise<JevDecision<JevModelTier>>;
 }
 export interface JevFeatures {
   routing: boolean;
   safety: boolean;
   recovery: boolean;
+  /** Allows only Jev-approved, discovered verification commands to run without a prompt. */
+  autonomy?: boolean;
 }
 
 /** Stores metadata-only reliability evidence separately from raw task history. */

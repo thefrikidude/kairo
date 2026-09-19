@@ -8,6 +8,8 @@ export interface KairoConfig extends ModelSelection {
   jevRoutingEnabled: boolean;
   jevSafetyEnabled: boolean;
   jevRecoveryEnabled: boolean;
+  jevAutonomyEnabled: boolean;
+  autoModelRoutingEnabled: boolean;
 }
 export const defaultConfig: KairoConfig = {
   provider: "gemini",
@@ -16,6 +18,8 @@ export const defaultConfig: KairoConfig = {
   jevRoutingEnabled: true,
   jevSafetyEnabled: true,
   jevRecoveryEnabled: true,
+  jevAutonomyEnabled: false,
+  autoModelRoutingEnabled: false,
 };
 
 /** Reads only an explicitly stored, valid config; legacy model-only files migrate to Gemini. */
@@ -30,6 +34,8 @@ export async function loadStoredConfig(): Promise<KairoConfig | undefined> {
       jevRoutingEnabled: parsed.jevRoutingEnabled !== false,
       jevSafetyEnabled: parsed.jevSafetyEnabled !== false,
       jevRecoveryEnabled: parsed.jevRecoveryEnabled !== false,
+      jevAutonomyEnabled: parsed.jevAutonomyEnabled === true,
+      autoModelRoutingEnabled: parsed.autoModelRoutingEnabled === true,
     };
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
@@ -58,7 +64,7 @@ export async function setJevEnabled(jevEnabled: boolean): Promise<void> {
 
 /** Updates one Jev capability without exposing its credential in configuration. */
 export async function setJevFeature(
-  feature: "routing" | "safety" | "recovery",
+  feature: "routing" | "safety" | "recovery" | "autonomy",
   enabled: boolean,
 ): Promise<void> {
   const key =
@@ -66,8 +72,15 @@ export async function setJevFeature(
       ? "jevRoutingEnabled"
       : feature === "safety"
         ? "jevSafetyEnabled"
-        : "jevRecoveryEnabled";
+        : feature === "recovery"
+          ? "jevRecoveryEnabled"
+          : "jevAutonomyEnabled";
   await saveConfig({ ...(await loadConfig()), [key]: enabled });
+}
+
+/** Persists whether Jev may choose an allowed coding model for each BUILD request. */
+export async function setAutoModelRoutingEnabled(enabled: boolean): Promise<void> {
+  await saveConfig({ ...(await loadConfig()), autoModelRoutingEnabled: enabled });
 }
 
 async function saveConfig(config: KairoConfig): Promise<void> {

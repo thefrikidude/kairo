@@ -21,6 +21,7 @@ import type {
   ToolExecutor,
   JevSafetyAdvisor,
   JevFeatures,
+  JevRisk,
 } from "../domain/ports.js";
 
 const MAX_MODEL_TURNS = 20;
@@ -46,7 +47,12 @@ export class CodingAgent {
     private readonly toolDefinitions: ToolDefinition[],
     private readonly modelSelection?: ModelSelection,
     private readonly jev?: JevSafetyAdvisor,
-    private readonly jevFeatures: JevFeatures = { routing: true, safety: true, recovery: true },
+    private readonly jevFeatures: JevFeatures = {
+      routing: true,
+      safety: true,
+      recovery: true,
+      autonomy: false,
+    },
   ) {
     this.context = new ContextManager(store);
   }
@@ -435,7 +441,7 @@ export class CodingAgent {
     this.store.recordTaskEvent({ ...event, taskId: task.id, createdAt: Date.now() });
   }
 
-  /** Executes a tool only after approval; execution duration excludes the user's decision time. */
+  /** Executes a tool after user approval, except for the deliberately narrow Jev trust envelope. */
   private async executeApprovedTool(
     task: Task,
     call: ToolCall,
@@ -456,18 +462,28 @@ export class CodingAgent {
     let approved: boolean | null = null;
     if (!definition) return this.record(task, call, false, "Unknown tool requested.", false);
     if (definition.mutating) {
-      const description = await this.approvalDescription(task, call);
-      const approvalStarted = performance.now();
-      approved = await this.approval.approve(call, description);
-      this.event(task, {
-        kind: "approval",
-        operationId: call.id,
-        outcome: approved ? "approved" : "denied",
-        durationMs: performance.now() - approvalStarted,
-      });
-      if (!approved) {
-        onText(`\n[Denied] ${call.name}\n`);
-        return this.record(task, call, false, "User denied this action.", false);
+      if (await this.autonomouslyApprovedVerification(task, call, isVerification)) {
+        this.event(task, {
+          kind: "autonomous",
+          operationId: call.id,
+          name: call.name,
+          outcome: "jev-low-risk-discovered-verification",
+        });
+        onText(`\n[Jev autonomously approved discovered verification]\n`);
+      } else {
+        const description = await this.approvalDescription(task, call);
+        const approvalStarted = performance.now();
+        approved = await this.approval.approve(call, description);
+        this.event(task, {
+          kind: "approval",
+          operationId: call.id,
+          outcome: approved ? "approved" : "denied",
+          durationMs: performance.now() - approvalStarted,
+        });
+        if (!approved) {
+          onText(`\n[Denied] ${call.name}\n`);
+          return this.record(task, call, false, "User denied this action.", false);
+        }
       }
     }
     onText(`\n[Tool] ${call.name}\n`);
@@ -602,17 +618,46 @@ export class CodingAgent {
     return result;
   }
 
-  /** Adds an advisory Jev label while keeping approval mandatory on every mutation. */
+  /** Auto-authorizes only known verification after a high-confidence low-risk Jev assessment. */
+  private async autonomouslyApprovedVerification(
+    task: Task,
+    call: ToolCall,
+    isVerification: boolean,
+  ): Promise<boolean> {
+    if (
+      !this.jev ||
+      !this.jevFeatures.safety ||
+      !this.jevFeatures.autonomy ||
+      call.name !== "run_command" ||
+      !isVerification ||
+      !this.isDiscoveredVerification(task.sessionId, String(call.args.command ?? ""))
+    )
+      return false;
+    const assessment = await this.jevAssessment(task, call);
+    return assessment?.value === "low";
+  }
+
+  /** Adds an advisory Jev label while preserving user approval outside the trust envelope. */
   private async approvalDescription(task: Task, call: ToolCall): Promise<string> {
     const description = this.tools.description(call);
-    if (!this.jev || !this.jevFeatures.safety) return description;
-    const assessment = await this.jevDecision(task, "safety", async () => {
+    const assessment = await this.jevAssessment(task, call);
+    return assessment
+      ? `${description}\nJev risk: ${assessment.value} (${Math.round(assessment.confidence * 100)}% confidence).`
+      : this.jev && this.jevFeatures.safety
+        ? `${description}\nJev risk: unavailable — standard approval required.`
+        : description;
+  }
+
+  /** Requests a typed risk assessment once; uncertain and failed assessments fall back safely. */
+  private async jevAssessment(
+    task: Task,
+    call: ToolCall,
+  ): Promise<{ value: JevRisk; confidence: number } | undefined> {
+    if (!this.jev || !this.jevFeatures.safety) return undefined;
+    return this.jevDecision(task, "safety", async () => {
       const result = await this.jev!.assess(this.jevState(task, call));
       return { value: result.risk, confidence: result.confidence };
     });
-    return assessment
-      ? `${description}\nJev risk: ${assessment.value} (${Math.round(assessment.confidence * 100)}% confidence).`
-      : `${description}\nJev risk: unavailable — standard approval required.`;
   }
 
   /** Records only decision metadata; low-confidence and failed decisions never change agent behavior. */

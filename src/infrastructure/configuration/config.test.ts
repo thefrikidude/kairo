@@ -7,6 +7,7 @@ import {
   loadConfig,
   loadStoredConfig,
   setConfig,
+  setAutoModelRoutingEnabled,
   setJevEnabled,
   setJevFeature,
   setModelSelection,
@@ -26,6 +27,8 @@ test("config migrates legacy Gemini files and persists provider selections", asy
       jevRoutingEnabled: true,
       jevSafetyEnabled: true,
       jevRecoveryEnabled: true,
+      jevAutonomyEnabled: false,
+      autoModelRoutingEnabled: false,
     });
     await setModelSelection({ provider: "groq", model: "openai/gpt-oss-120b" });
     assert.deepEqual(await loadConfig(), {
@@ -35,9 +38,13 @@ test("config migrates legacy Gemini files and persists provider selections", asy
       jevRoutingEnabled: true,
       jevSafetyEnabled: true,
       jevRecoveryEnabled: true,
+      jevAutonomyEnabled: false,
+      autoModelRoutingEnabled: false,
     });
     await setJevEnabled(true);
     await setJevFeature("routing", false);
+    await setJevFeature("autonomy", true);
+    await setAutoModelRoutingEnabled(true);
     await setConfig("model", "custom/groq");
     assert.deepEqual(await loadConfig(), {
       provider: "groq",
@@ -46,6 +53,8 @@ test("config migrates legacy Gemini files and persists provider selections", asy
       jevRoutingEnabled: false,
       jevSafetyEnabled: true,
       jevRecoveryEnabled: true,
+      jevAutonomyEnabled: true,
+      autoModelRoutingEnabled: true,
     });
   } finally {
     if (previous === undefined) delete process.env.KAIRO_STATE_DIR;

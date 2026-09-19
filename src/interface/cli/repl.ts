@@ -32,7 +32,9 @@ export async function runRepl(
       routing: initialConfig.jevRoutingEnabled,
       safety: initialConfig.jevSafetyEnabled,
       recovery: initialConfig.jevRecoveryEnabled,
+      autonomy: initialConfig.jevAutonomyEnabled,
     },
+    initialAutoModelRoutingEnabled: initialConfig.autoModelRoutingEnabled,
     credentials,
   });
 }

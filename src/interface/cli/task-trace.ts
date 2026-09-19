@@ -10,7 +10,7 @@ export function formatMetrics(events: TaskEvent[]): string {
     `Provider retries: ${m.providerRetries}; retry waiting: ${Math.round(m.providerWaitMs)} ms`,
     `Model: ${m.modelTurns} turns, ${m.modelFailures} failures, ${Math.round(m.modelMs)} ms`,
     `Tools: ${m.toolRequests} requests, ${m.toolExecutions} executed, ${m.toolFailures} failures, ${Math.round(m.toolMs)} ms`,
-    `Approvals: ${m.approvals} allowed, ${m.denials} denied, ${Math.round(m.approvalMs)} ms waiting`,
+    `Approvals: ${m.approvals} allowed, ${m.denials} denied, ${m.autonomousActions} Jev-autonomous, ${Math.round(m.approvalMs)} ms waiting`,
     `Repairs: ${m.repairs}${m.repairConverged ? " (converged)" : ""}; command checks: ${m.verificationPasses} passed, ${m.verificationFailures} failed`,
     `Verification selection: ${m.focusedVerifications} focused, ${m.broadVerifications} broad (${m.verificationSelections} total)`,
     `Jev: ${m.jevDecisions} decisions (${m.jevRoutes} routing, ${m.jevSafetyChecks} safety, ${m.jevRecoveryChecks} recovery), ${m.jevFailures} fallbacks, ${Math.round(m.jevMs)} ms`,
