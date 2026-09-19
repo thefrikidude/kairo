@@ -21,11 +21,12 @@ import { WorkspaceTools, definitions } from "../../infrastructure/tools/workspac
 import { RepositoryProfiler } from "../../infrastructure/repository/repository-profiler.js";
 import { CodingAgent } from "../../application/coding-agent.js";
 import { runRepl } from "./repl.js";
-import { runEvaluationSuite } from "../../application/evaluation-harness.js";
+import { runEvaluationSuite, runJevEvaluationSuite } from "../../application/evaluation-harness.js";
 import { runLiveEvaluationSuite } from "../../application/live-evaluation.js";
 import { runSelfEvaluationSuite } from "../../application/self-evaluation.js";
 import {
   formatEvaluationReport,
+  formatJevEvaluationReport,
   formatEvaluationHistory,
   formatEvaluationRun,
   formatLiveEvaluationReport,
@@ -36,11 +37,12 @@ import { compareWithBaseline } from "../../application/evaluation-comparison.js"
 import { formatBaseline, formatComparison } from "./evaluation-comparison-report.js";
 import { terminalSetupIO } from "./provider-setup.js";
 import type { ProviderId } from "../../domain/models.js";
+import type { JevFeatures } from "../../domain/ports.js";
 
 /** Prints the supported command-line shapes when arguments are invalid. */
 function usage(): void {
   console.log(
-    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval live [--json] | kairo eval self [--trials <1-5>] [--json] | kairo eval history [--json] | kairo eval show <run-id> [--json] | kairo eval baseline set <run-id> [--json] | kairo eval baseline show [--json] | kairo eval compare <run-id> [--json] | kairo auth login|logout [gemini|groq] | kairo auth status | kairo config get provider|model | kairo config set model <value> | kairo sessions list | kairo resume <id>",
+    "Usage: kairo [workspace] | kairo eval [--json] | kairo eval jev [--json] | kairo eval live [--json] | kairo eval self [--trials <1-5>] [--json] | kairo eval history [--json] | kairo eval show <run-id> [--json] | kairo eval baseline set <run-id> [--json] | kairo eval baseline show [--json] | kairo eval compare <run-id> [--json] | kairo auth login|logout [gemini|groq] | kairo auth status | kairo config get provider|model | kairo config set model <value> | kairo sessions list | kairo resume <id>",
   );
 }
 /** Collects a masked secret using the same terminal behavior as first-run setup. */
@@ -149,6 +151,15 @@ async function main(): Promise<void> {
           : formatLiveEvaluationReport(results),
       );
       process.exitCode = results.every((result) => result.passed) ? 0 : 1;
+      return;
+    }
+    if (args[1] === "jev") {
+      const report = await runJevEvaluationSuite();
+      console.log(
+        args.includes("--json")
+          ? JSON.stringify(report, null, 2)
+          : formatJevEvaluationReport(report),
+      );
       return;
     }
     if (args[1] === "self") {
@@ -261,7 +272,7 @@ async function main(): Promise<void> {
   if (!store.repositoryProfile(active.id))
     store.saveRepositoryProfile(active.id, await new RepositoryProfiler().profile(tools.root));
   await runRepl(
-    (approval, selection, apiKey) =>
+    (approval, selection, apiKey, jev, jevFeatures) =>
       new CodingAgent(
         createProvider(selection, apiKey, definitions),
         store,
@@ -269,6 +280,8 @@ async function main(): Promise<void> {
         approval,
         definitions,
         selection,
+        jev,
+        jevFeatures,
       ),
     store,
     active,

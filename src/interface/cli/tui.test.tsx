@@ -43,6 +43,10 @@ test("slash-command palette filters names and hides after an argument begins", (
     ["/verify"],
   );
   assert.deepEqual(matchingSlashCommands("/resume session-id"), []);
+  assert.deepEqual(
+    matchingSlashCommands("/jev").map((command) => command.name),
+    ["/jev"],
+  );
 });
 
 test("TUI approval waits for and returns the user's decision", async () => {

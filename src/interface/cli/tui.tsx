@@ -2,11 +2,17 @@ import { Box, render, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useCallback, useMemo, useState } from "react";
 import type { ModelSelection, TaskStatus, ToolCall } from "../../domain/models.js";
-import type { ApprovalPolicy, CredentialStore } from "../../domain/ports.js";
+import type { ApprovalPolicy, CredentialStore, JevFeatures } from "../../domain/ports.js";
 import { CodingAgent } from "../../application/coding-agent.js";
-import { setModelSelection } from "../../infrastructure/configuration/config.js";
+import {
+  setJevEnabled,
+  setJevFeature,
+  setModelSelection,
+} from "../../infrastructure/configuration/config.js";
+import { JevDecisionProvider } from "../../infrastructure/providers/jev-safety-advisor.js";
 import {
   isProviderId,
+  providerById,
   providerRegistry,
 } from "../../infrastructure/providers/provider-registry.js";
 import { formatMetrics, formatPlan, formatTrace } from "./task-trace.js";
@@ -29,6 +35,7 @@ export type ModelOption = ModelSelection & { label: string };
 export const slashCommands = [
   { name: "/plan", description: "Toggle read-only planning mode" },
   { name: "/models", description: "Choose a model" },
+  { name: "/jev", description: "Manage the Jev safety advisor" },
   { name: "/new", description: "Start a new session" },
   { name: "/resume", description: "Continue a task or open a session", acceptsArgument: true },
   { name: "/history", description: "List saved sessions" },
@@ -91,11 +98,20 @@ function entryColor(entry: TranscriptEntry): string | undefined {
 }
 
 export interface KairoTuiProps {
-  createAgent: (approval: ApprovalPolicy, selection: ModelSelection, apiKey: string) => CodingAgent;
+  createAgent: (
+    approval: ApprovalPolicy,
+    selection: ModelSelection,
+    apiKey: string,
+    jev?: JevDecisionProvider,
+    jevFeatures?: JevFeatures,
+  ) => CodingAgent;
   store: SqliteSessionStore;
   session: Session;
   initialSelection: ModelSelection;
   initialApiKey?: string;
+  initialJevKey?: string;
+  initialJevEnabled: boolean;
+  initialJevFeatures: JevFeatures;
   credentials: CredentialStore;
 }
 
@@ -105,15 +121,12 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const [active, setActive] = useState(props.session);
   const [selection, setSelection] = useState(props.initialSelection);
   const [apiKey, setApiKey] = useState<string | undefined>(props.initialApiKey);
+  const [jevKey, setJevKey] = useState<string | undefined>(props.initialJevKey);
+  const [jevEnabled, setJevEnabledState] = useState(props.initialJevEnabled);
+  const [jevFeatures, setJevFeatures] = useState(props.initialJevFeatures);
   const [mode, setMode] = useState<InteractionMode>("build");
   const [input, setInput] = useState("");
-  const [entries, setEntries] = useState<TranscriptEntry[]>([
-    {
-      id: 0,
-      kind: "system",
-      text: `Kairo session ${props.session.id} — BUILD mode. Type / for commands.`,
-    },
-  ]);
+  const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [busy, setBusy] = useState<"idle" | "planning" | "acting" | "verifying" | "cancelled">(
     "idle",
   );
@@ -121,6 +134,16 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const [pendingApproval, setPendingApproval] = useState<PendingApproval>();
   const [modelPicker, setModelPicker] = useState(false);
   const [modelIndex, setModelIndex] = useState(0);
+  const [credentialModel, setCredentialModel] = useState<ModelSelection>();
+  const [credentialInput, setCredentialInput] = useState("");
+  const [credentialError, setCredentialError] = useState<string>();
+  const [savingCredential, setSavingCredential] = useState(false);
+  const [jevPanel, setJevPanel] = useState(false);
+  const [jevIndex, setJevIndex] = useState(0);
+  const [jevCredentialInput, setJevCredentialInput] = useState("");
+  const [jevCredentialError, setJevCredentialError] = useState<string>();
+  const [jevCredentialMode, setJevCredentialMode] = useState(false);
+  const [savingJevCredential, setSavingJevCredential] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const models = useMemo(modelOptions, []);
   const commandMatches = useMemo(() => matchingSlashCommands(input), [input]);
@@ -133,8 +156,17 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     [],
   );
   const agent = useMemo(
-    () => (apiKey ? props.createAgent(approval, selection, apiKey) : undefined),
-    [apiKey, approval, props.createAgent, selection],
+    () =>
+      apiKey
+        ? props.createAgent(
+            approval,
+            selection,
+            apiKey,
+            jevEnabled && jevKey ? new JevDecisionProvider(jevKey) : undefined,
+            jevFeatures,
+          )
+        : undefined,
+    [apiKey, approval, jevEnabled, jevFeatures, jevKey, props.createAgent, selection],
   );
   const append = useCallback((kind: TranscriptEntry["kind"], text: string) => {
     setEntries((current) => [...current, { id: current.length, kind, text }]);
@@ -162,14 +194,106 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     if (inputKey.toLowerCase() === "n" || key.escape) answerApproval(false);
   });
 
+  const saveJevCredential = useCallback(
+    async (value: string) => {
+      if (savingJevCredential) return;
+      const key = value.trim();
+      if (!key) return setJevCredentialError("API key cannot be empty.");
+      setSavingJevCredential(true);
+      setJevCredentialError(undefined);
+      try {
+        await new JevDecisionProvider(key).validate();
+        await props.credentials.save("jev", key);
+        await setJevEnabled(true);
+        setJevKey(key);
+        setJevEnabledState(true);
+        setJevCredentialInput("");
+        setJevCredentialMode(false);
+        setJevPanel(false);
+        append("system", "Jev safety advisor enabled.");
+      } catch (error) {
+        setJevCredentialError((error as Error).message);
+      } finally {
+        setSavingJevCredential(false);
+      }
+    },
+    [append, props.credentials, savingJevCredential],
+  );
+
+  useInput((inputKey, key) => {
+    if (!jevPanel || savingJevCredential) return;
+    if (jevCredentialMode) {
+      if (key.escape) {
+        setJevCredentialInput("");
+        setJevCredentialError(undefined);
+        setJevCredentialMode(false);
+      }
+      return;
+    }
+    if (key.escape) return setJevPanel(false);
+    if (key.upArrow) return setJevIndex((current) => Math.max(0, current - 1));
+    if (key.downArrow) return setJevIndex((current) => Math.min(5, current + 1));
+    if (key.return || /^[1-6]$/.test(inputKey)) {
+      const action = /^[1-6]$/.test(inputKey) ? Number(inputKey) - 1 : jevIndex;
+      if (action === 0) {
+        if (!jevKey) {
+          setJevCredentialError("Add a TypeSafe API key before enabling Jev.");
+          setJevCredentialMode(true);
+          return;
+        }
+        const next = !jevEnabled;
+        void setJevEnabled(next).then(() => {
+          setJevEnabledState(next);
+          append("system", `Jev safety advisor ${next ? "enabled" : "disabled"}.`);
+        });
+        return setJevPanel(false);
+      }
+      if (action === 1) {
+        const next = !jevFeatures.routing;
+        void setJevFeature("routing", next).then(() =>
+          setJevFeatures((current) => ({ ...current, routing: next })),
+        );
+        return;
+      }
+      if (action === 2) {
+        const next = !jevFeatures.safety;
+        void setJevFeature("safety", next).then(() =>
+          setJevFeatures((current) => ({ ...current, safety: next })),
+        );
+        return;
+      }
+      if (action === 3) {
+        const next = !jevFeatures.recovery;
+        void setJevFeature("recovery", next).then(() =>
+          setJevFeatures((current) => ({ ...current, recovery: next })),
+        );
+        return;
+      }
+      if (action === 4) {
+        setJevCredentialInput("");
+        setJevCredentialError(undefined);
+        setJevCredentialMode(true);
+        return;
+      }
+      if (action === 5) {
+        void props.credentials.clear("jev").then(async () => {
+          await setJevEnabled(false);
+          setJevKey(undefined);
+          setJevEnabledState(false);
+          setJevPanel(false);
+          append("system", "Jev credential removed.");
+        });
+      }
+    }
+  });
+
   const chooseModel = useCallback(
     async (next: ModelSelection) => {
       const nextKey = await props.credentials.get(next.provider);
       if (!nextKey) {
-        append(
-          "error",
-          `No ${next.provider} credential. Run \`kairo auth login ${next.provider}\`, then reopen /models.`,
-        );
+        setCredentialInput("");
+        setCredentialError(undefined);
+        setCredentialModel(next);
         return;
       }
       await setModelSelection(next);
@@ -179,6 +303,40 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     },
     [append, props.credentials],
   );
+
+  const saveCredential = useCallback(
+    async (value: string) => {
+      if (!credentialModel || savingCredential) return;
+      const key = value.trim();
+      if (!key) return setCredentialError("API key cannot be empty.");
+      setSavingCredential(true);
+      setCredentialError(undefined);
+      try {
+        await providerById(credentialModel.provider).validate(key);
+        await props.credentials.save(credentialModel.provider, key);
+        await setModelSelection(credentialModel);
+        setSelection(credentialModel);
+        setApiKey(key);
+        setCredentialInput("");
+        setCredentialModel(undefined);
+        append("system", `Using ${credentialModel.provider}/${credentialModel.model}.`);
+      } catch (error) {
+        setCredentialError((error as Error).message);
+      } finally {
+        setSavingCredential(false);
+      }
+    },
+    [append, credentialModel, props.credentials, savingCredential],
+  );
+
+  useInput((inputKey, key) => {
+    if (!credentialModel || savingCredential) return;
+    if (key.escape) {
+      setCredentialInput("");
+      setCredentialError(undefined);
+      setCredentialModel(undefined);
+    }
+  });
 
   useInput((inputKey, key) => {
     if (!modelPicker) return;
@@ -202,10 +360,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const runTask = useCallback(
     async (request: string, taskMode: InteractionMode) => {
       if (!agent)
-        return append(
-          "error",
-          "No active credential. Run `kairo auth login <provider>`, then use /models.",
-        );
+        return append("error", "No active credential. Use /models to add a provider API key.");
       append("user", request);
       const entryId = entries.length + 1;
       setEntries((current) => [...current, { id: entryId, kind: "assistant", text: "" }]);
@@ -232,7 +387,9 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       } catch (error) {
         setActivity(undefined);
         setBusy("idle");
-        append("error", `Kairo: ${(error as Error).message}`);
+        // CodingAgent already rendered and persisted a terminal task failure. Avoid echoing it.
+        if (agent.status(active.id)?.status !== "failed")
+          append("error", `Kairo: ${(error as Error).message}`);
       }
     },
     [active.id, agent, append, appendStream, entries.length],
@@ -346,12 +503,20 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         setModelPicker(true);
         return;
       }
+      if (line === "/jev") {
+        setJevCredentialInput("");
+        setJevCredentialError(undefined);
+        setJevCredentialMode(false);
+        setJevIndex(0);
+        setJevPanel(true);
+        return;
+      }
       if (line === "/model" || line.startsWith("/model ")) {
         const [provider, ...modelParts] = line.slice(6).trim().split(/\s+/);
         if (!provider || !modelParts.length || !isProviderId(provider))
           return append(
             "system",
-            `Current model: ${selection.provider}/${selection.model}\nUse: /model <gemini|groq> <model-id>`,
+            `Current model: ${selection.provider}/${selection.model}\nUse: /model <gemini|groq|openrouter> <model-id>`,
           );
         const next = { provider, model: modelParts.join(" ") };
         await chooseModel(next);
@@ -387,7 +552,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   );
 
   useInput((inputKey, key) => {
-    if (pendingApproval || modelPicker || !commandMatches.length) return;
+    if (pendingApproval || modelPicker || jevPanel || !commandMatches.length) return;
     if (key.upArrow) return setCommandIndex((current) => Math.max(0, current - 1));
     if (key.downArrow)
       return setCommandIndex((current) => Math.min(commandMatches.length - 1, current + 1));
@@ -430,6 +595,64 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           <Text>{pendingApproval.description}</Text>
           <Text>Allow? [y/N]</Text>
         </Box>
+      ) : credentialModel ? (
+        <Box borderStyle="single" borderColor="cyan" flexDirection="column" paddingX={1}>
+          <Text bold>{providerById(credentialModel.provider).name} API key</Text>
+          <Text color="gray">Saved securely in macOS Keychain.</Text>
+          <TextInput
+            value={credentialInput}
+            onChange={(value) => {
+              setCredentialInput(value);
+              setCredentialError(undefined);
+            }}
+            onSubmit={saveCredential}
+            mask="•"
+            placeholder={savingCredential ? "Validating…" : "Paste API key"}
+            focus={!savingCredential}
+          />
+          {credentialError ? <Text color="red">{credentialError}</Text> : null}
+          <Text color="gray">Enter save · Esc cancel</Text>
+        </Box>
+      ) : jevPanel ? (
+        <Box borderStyle="single" borderColor="magenta" flexDirection="column" paddingX={1}>
+          <Text bold>Jev safety advisor · {jevEnabled ? "enabled" : "disabled"}</Text>
+          <Text color="gray">
+            {jevKey ? "TypeSafe key saved in macOS Keychain." : "No TypeSafe API key saved."}
+          </Text>
+          {jevCredentialMode ? (
+            <>
+              <TextInput
+                value={jevCredentialInput}
+                onChange={(value) => {
+                  setJevCredentialInput(value);
+                  setJevCredentialError(undefined);
+                }}
+                onSubmit={saveJevCredential}
+                mask="•"
+                placeholder={savingJevCredential ? "Validating…" : "Paste TypeSafe API key"}
+                focus={!savingJevCredential}
+              />
+              {jevCredentialError ? <Text color="red">{jevCredentialError}</Text> : null}
+              <Text color="gray">Enter save · Esc cancel</Text>
+            </>
+          ) : (
+            <>
+              {[
+                `${jevEnabled ? "Disable" : "Enable"} advisor`,
+                `Task routing: ${jevFeatures.routing ? "on" : "off"}`,
+                `Safety context: ${jevFeatures.safety ? "on" : "off"}`,
+                `Recovery advice: ${jevFeatures.recovery ? "on" : "off"}`,
+                "Add or replace API key",
+                "Remove API key",
+              ].map((label, index) => (
+                <Text key={label} color={index === jevIndex ? "magenta" : undefined}>
+                  {index === jevIndex ? "›" : " "} {index + 1}. {label}
+                </Text>
+              ))}
+              <Text color="gray">↑/↓ choose · Enter select · Esc close</Text>
+            </>
+          )}
+        </Box>
       ) : modelPicker ? (
         <Box borderStyle="single" borderColor="cyan" flexDirection="column" paddingX={1}>
           <Text bold>Select a model</Text>
@@ -457,9 +680,6 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
             </Box>
           ) : null}
           <Box borderStyle="round" borderColor={mode === "plan" ? "yellow" : "green"} paddingX={1}>
-            <Text color={mode === "plan" ? "yellow" : "green"}>
-              {mode === "plan" ? "plan> " : "kairo> "}
-            </Text>
             <TextInput
               value={input}
               onChange={(value) => {
@@ -493,6 +713,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
 /** Starts the Ink renderer and keeps the existing CLI composition boundary intact. */
 export async function runTui(props: Omit<KairoTuiProps, "initialApiKey">): Promise<void> {
   const key = await props.credentials.get(props.initialSelection.provider);
-  const app = render(<KairoTui {...props} initialApiKey={key} />);
+  const jevKey = await props.credentials.get("jev");
+  const app = render(<KairoTui {...props} initialApiKey={key} initialJevKey={jevKey} />);
   await app.waitUntilExit();
 }

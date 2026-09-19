@@ -11,6 +11,7 @@ import type {
   VerificationSelection,
   ModelSelection,
   TaskPlan,
+  FailureEvidence,
 } from "../domain/models.js";
 import type {
   ApprovalPolicy,
@@ -18,6 +19,8 @@ import type {
   TaskStore,
   ToolDefinition,
   ToolExecutor,
+  JevSafetyAdvisor,
+  JevFeatures,
 } from "../domain/ports.js";
 
 const MAX_MODEL_TURNS = 20;
@@ -42,13 +45,24 @@ export class CodingAgent {
     private readonly approval: ApprovalPolicy,
     private readonly toolDefinitions: ToolDefinition[],
     private readonly modelSelection?: ModelSelection,
+    private readonly jev?: JevSafetyAdvisor,
+    private readonly jevFeatures: JevFeatures = { routing: true, safety: true, recovery: true },
   ) {
     this.context = new ContextManager(store);
   }
 
   /** Starts a new persisted task and drives it until it completes, pauses, or fails. */
   async run(sessionId: string, input: string, onText: (text: string) => void): Promise<void> {
-    const task = this.store.startTask(sessionId, input);
+    let task = this.store.startTask(sessionId, input);
+    if (this.jev && this.jevFeatures.routing) {
+      const decision = await this.jevDecision(task, "route", () =>
+        this.jev!.route(this.jevTaskState(input)),
+      );
+      if (decision?.value === "plan") {
+        task = this.store.updateTask(task.id, { mode: "planning" });
+        onText("\n[Jev routed this request to a one-time read-only plan]\n");
+      }
+    }
     await this.executeTask(task, input, onText);
   }
 
@@ -200,7 +214,7 @@ export class CodingAgent {
             return this.fail(task, `Repeated identical tool call blocked: ${call.name}.`, onText);
           const outcome = await this.executeTool(task, call, onText);
           task = this.store.task(task.id)!;
-          if (task.status === "planned") return;
+          if (task.status === "planned" || task.status === "verification_required") return;
           if (task.status === "failed") {
             onText(`\nKairo couldn't complete this task: ${task.error}\n`);
             return;
@@ -442,8 +456,9 @@ export class CodingAgent {
     let approved: boolean | null = null;
     if (!definition) return this.record(task, call, false, "Unknown tool requested.", false);
     if (definition.mutating) {
+      const description = await this.approvalDescription(task, call);
       const approvalStarted = performance.now();
-      approved = await this.approval.approve(call, this.tools.description(call));
+      approved = await this.approval.approve(call, description);
       this.event(task, {
         kind: "approval",
         operationId: call.id,
@@ -522,26 +537,58 @@ export class CodingAgent {
       });
     if (isVerification && !result.ok && task.changedFiles.length) {
       const attempts = this.store.repairAttempts(task.id);
-      if (attempts.length >= MAX_REPAIR_ATTEMPTS) {
+      const command = String(call.args.command ?? "");
+      const evidence = this.failureAnalyzer.analyze(command, result.output);
+      const decision =
+        this.jev && this.jevFeatures.recovery
+          ? await this.jevDecision(task, "recovery", () =>
+              this.jev!.recover(this.jevRecoveryState(task, evidence)),
+            )
+          : undefined;
+      if (decision?.value === "escalate") {
+        this.store.updateTask(task.id, {
+          status: "verification_required",
+          error: "Jev recommends manual verification review before further repair.",
+        });
+        onText(
+          "\n[Jev escalated failed verification for manual review. Use /verify <command> when ready.]\n",
+        );
+      } else if (decision?.value === "broaden") {
+        const profile = this.store.repositoryProfile(task.sessionId);
+        const selection =
+          profile && task.verificationSelection
+            ? this.verificationPlanner.broader(profile, task.verificationSelection)
+            : undefined;
+        if (selection) {
+          task = this.store.updateTask(task.id, {
+            status: "verifying",
+            verificationSelection: selection,
+          });
+          this.recordVerificationSelection(task, selection);
+          onText(
+            `\n[Jev recommends broader verification: ${selection.command}. Approval required before it runs.]\n`,
+          );
+          const broadened = await this.executeTool(
+            task,
+            {
+              id: crypto.randomUUID(),
+              name: "run_command",
+              args: { command: selection.command, verification: true },
+            },
+            onText,
+          );
+          if (broadened.output === "User denied this action.")
+            this.store.updateTask(task.id, { status: "verification_required" });
+        } else {
+          this.recordRepair(task, attempts.length, command, evidence, onText);
+        }
+      } else if (attempts.length >= MAX_REPAIR_ATTEMPTS) {
         this.store.updateTask(task.id, {
           status: "failed",
           error: `Repair limit reached after ${MAX_REPAIR_ATTEMPTS} failed verification attempts.`,
         });
       } else {
-        const command = String(call.args.command ?? "");
-        const evidence = this.failureAnalyzer.analyze(command, result.output);
-        this.store.recordRepairAttempt({
-          id: `repair-${crypto.randomUUID()}`,
-          taskId: task.id,
-          command,
-          evidence,
-          selectedFiles: evidence.fileLocations.map((location) => location.path),
-          createdAt: Date.now(),
-        });
-        // The next model turn receives a compact repair brief from ContextManager.
-        onText(
-          `\n[Verification failed — repair attempt ${attempts.length + 1}/${MAX_REPAIR_ATTEMPTS}]\n`,
-        );
+        this.recordRepair(task, attempts.length, command, evidence, onText);
       }
     }
     this.store.recordTool(task.sessionId, call.id, call.name, call.args, approved, result.output);
@@ -553,6 +600,107 @@ export class CodingAgent {
       createdAt: Date.now(),
     });
     return result;
+  }
+
+  /** Adds an advisory Jev label while keeping approval mandatory on every mutation. */
+  private async approvalDescription(task: Task, call: ToolCall): Promise<string> {
+    const description = this.tools.description(call);
+    if (!this.jev || !this.jevFeatures.safety) return description;
+    const assessment = await this.jevDecision(task, "safety", async () => {
+      const result = await this.jev!.assess(this.jevState(task, call));
+      return { value: result.risk, confidence: result.confidence };
+    });
+    return assessment
+      ? `${description}\nJev risk: ${assessment.value} (${Math.round(assessment.confidence * 100)}% confidence).`
+      : `${description}\nJev risk: unavailable — standard approval required.`;
+  }
+
+  /** Records only decision metadata; low-confidence and failed decisions never change agent behavior. */
+  private async jevDecision<T extends string>(
+    task: Task,
+    name: string,
+    decide: () => Promise<{ value: T; confidence: number }>,
+  ): Promise<{ value: T; confidence: number } | undefined> {
+    const operationId = crypto.randomUUID();
+    const started = performance.now();
+    this.event(task, { kind: "jev_requested", operationId, name });
+    try {
+      const decision = await decide();
+      const reliable = decision.confidence >= 0.85;
+      this.event(task, {
+        kind: "jev_completed",
+        operationId,
+        name,
+        outcome: `${decision.value}:${reliable ? "high-confidence" : "uncertain"}`,
+        durationMs: performance.now() - started,
+      });
+      return reliable ? decision : undefined;
+    } catch {
+      this.event(task, {
+        kind: "jev_failed",
+        operationId,
+        name,
+        outcome: "unavailable",
+        durationMs: performance.now() - started,
+      });
+      return undefined;
+    }
+  }
+
+  /** Builds bounded operation metadata without sending source, output, or secret-bearing edit content. */
+  private jevState(task: Task, call: ToolCall): string {
+    const redact = (value: string) =>
+      value
+        .replace(/(?:sk|gsk|or|AIza)[-_a-zA-Z0-9]{12,}/g, "[redacted]")
+        .replace(/((?:api[_-]?key|token|password))\s*[=:]\s*\S+/gi, "$1=[redacted]")
+        .slice(0, 1_500);
+    const detail =
+      call.name === "run_command"
+        ? `command: ${redact(String(call.args.command ?? ""))}`
+        : `path: ${redact(String(call.args.path ?? "workspace"))}`;
+    return [
+      `Task: ${redact(task.prompt)}`,
+      `Tool: ${call.name}`,
+      detail,
+      "No source file contents, prior tool output, or credentials are included.",
+    ].join("\n");
+  }
+
+  private jevTaskState(input: string): string {
+    return `Task request: ${input.replace(/(?:sk|gsk|or|AIza)[-_a-zA-Z0-9]{12,}/g, "[redacted]").slice(0, 1_500)}\nChoose whether Kairo should build directly or first create a read-only plan.`;
+  }
+
+  /** Supplies failure metadata only; provider output and source snippets remain local. */
+  private jevRecoveryState(task: Task, evidence: FailureEvidence): string {
+    return [
+      `Changed paths: ${task.changedFiles.map((path) => path.slice(0, 240)).join(", ")}`,
+      `Verification scope: ${task.verificationSelection?.scope ?? "unknown"}`,
+      `Failure evidence: ${evidence.fileLocations.length ? "file locations extracted" : "no file locations extracted"}`,
+      `Affected paths: ${evidence.fileLocations.map((location) => location.path.slice(0, 240)).join(", ") || "unknown"}`,
+      "Choose repair, broader verification, or manual escalation. No source or command output is included.",
+    ]
+      .join("\n")
+      .slice(0, 1_500);
+  }
+
+  private recordRepair(
+    task: Task,
+    previousAttempts: number,
+    command: string,
+    evidence: FailureEvidence,
+    onText: (text: string) => void,
+  ): void {
+    this.store.recordRepairAttempt({
+      id: `repair-${crypto.randomUUID()}`,
+      taskId: task.id,
+      command,
+      evidence,
+      selectedFiles: evidence.fileLocations.map((location) => location.path),
+      createdAt: Date.now(),
+    });
+    onText(
+      `\n[Verification failed — repair attempt ${previousAttempts + 1}/${MAX_REPAIR_ATTEMPTS}]\n`,
+    );
   }
 
   /** Persists a tool call that could not reach the executor, such as a denied request. */

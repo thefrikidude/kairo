@@ -8,7 +8,7 @@ import { taskMetrics } from "./task-metrics.js";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
 import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-tools.js";
 import type { ModelTurn, Message, ToolCall } from "../domain/models.js";
-import type { ApprovalPolicy, ModelProvider } from "../domain/ports.js";
+import type { ApprovalPolicy, JevSafetyAdvisor, ModelProvider } from "../domain/ports.js";
 
 class FakeProvider implements ModelProvider {
   private n = 0;
@@ -34,6 +34,59 @@ class Deny implements ApprovalPolicy {
     return false;
   }
 }
+
+test("Jev enriches but never bypasses mutation approval or retains source content", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    let approvalDescription = "";
+    let state = "";
+    const advisor: JevSafetyAdvisor = {
+      async assess(value) {
+        state = value;
+        return { risk: "high", confidence: 0.91 };
+      },
+      async route() {
+        return { value: "build", confidence: 1 };
+      },
+      async recover() {
+        return { value: "repair", confidence: 1 };
+      },
+    };
+    const agent = new CodingAgent(
+      new FakeProvider(),
+      store,
+      {
+        root: "/workspace",
+        description: () => "Write a.txt",
+        async execute() {
+          return { ok: true, output: "written" };
+        },
+      },
+      {
+        async approve(_call, description) {
+          approvalDescription = description;
+          return true;
+        },
+      },
+      definitions,
+      undefined,
+      advisor,
+    );
+    await agent.run(session.id, "Update a file", () => {});
+    const task = agent.status(session.id)!;
+    assert.match(approvalDescription, /Jev risk: high \(91% confidence\)/);
+    assert.match(state, /Tool: write_file/);
+    assert.doesNotMatch(state, /content:|written/);
+    assert.equal(
+      store.taskEvents(task.id).some((event) => event.kind === "jev_completed"),
+      true,
+    );
+    assert.doesNotMatch(JSON.stringify(store.taskEvents(task.id)), /Update a file|written/);
+  } finally {
+    store.close();
+  }
+});
 
 test("later edits invalidate a passing check and ordinary commands cannot verify changes", async () => {
   for (const command of ["true", "false"]) {
@@ -187,6 +240,58 @@ test("planning treats a conversational response without a plan as completed, not
     const task = agent.status(session.id)!;
     assert.equal(task.status, "completed");
     assert.equal(task.plan, undefined);
+  } finally {
+    store.close();
+  }
+});
+
+test("high-confidence Jev routing plans only the current BUILD request", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    let routes = 0;
+    const advisor: JevSafetyAdvisor = {
+      async assess() {
+        return { risk: "low", confidence: 1 };
+      },
+      async route() {
+        routes += 1;
+        return { value: routes === 1 ? "plan" : "build", confidence: 0.9 };
+      },
+      async recover() {
+        return { value: "repair", confidence: 1 };
+      },
+    };
+    const agent = new CodingAgent(
+      {
+        async stream() {
+          return { text: "done", toolCalls: [] };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "",
+        async execute() {
+          return { ok: true, output: "" };
+        },
+      },
+      new Allow(),
+      definitions,
+      undefined,
+      advisor,
+    );
+    await agent.run(session.id, "design a broad migration", () => {});
+    const planned = agent.status(session.id)!;
+    assert.equal(planned.mode, "planning");
+    await agent.run(session.id, "make a focused edit", () => {});
+    assert.equal(agent.status(session.id)?.mode, "implementation");
+    assert.equal(
+      store
+        .taskEvents(planned.id)
+        .some((event) => event.kind === "jev_completed" && event.name === "route"),
+      true,
+    );
   } finally {
     store.close();
   }
@@ -536,6 +641,52 @@ test("agent continues with a persisted, focused repair after failed verification
   assert.ok(metrics.modelMs >= 0);
   assert.equal(events.at(-1)?.outcome, "completed");
   store.close();
+});
+
+test("Jev can escalate a failed verification without bypassing its original approval", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-jev-escalate-"));
+  const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
+  try {
+    const session = store.create(root);
+    let approvals = 0;
+    const advisor: JevSafetyAdvisor = {
+      async assess() {
+        return { risk: "high", confidence: 0.95 };
+      },
+      async route() {
+        return { value: "build", confidence: 1 };
+      },
+      async recover() {
+        return { value: "escalate", confidence: 0.9 };
+      },
+    };
+    await new CodingAgent(
+      new RepairingProvider(),
+      store,
+      await WorkspaceTools.create(root),
+      {
+        async approve() {
+          approvals += 1;
+          return true;
+        },
+      },
+      definitions,
+      undefined,
+      advisor,
+    ).run(session.id, "create a file", () => {});
+    const task = store.latestTask(session.id)!;
+    assert.equal(task.status, "verification_required");
+    assert.equal(store.repairAttempts(task.id).length, 0);
+    assert.equal(approvals, 2);
+    assert.equal(
+      store
+        .taskEvents(task.id)
+        .some((event) => event.kind === "jev_completed" && event.name === "recovery"),
+      true,
+    );
+  } finally {
+    store.close();
+  }
 });
 
 class ExhaustedRepairProvider implements ModelProvider {

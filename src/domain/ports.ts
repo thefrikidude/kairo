@@ -10,6 +10,7 @@ import type {
   EvaluationAttempt,
   EvaluationRun,
   ProviderId,
+  CredentialId,
   TaskMode,
 } from "./models.js";
 
@@ -60,6 +61,7 @@ export interface TaskStore {
       Pick<
         Task,
         | "status"
+        | "mode"
         | "plan"
         | "changedFiles"
         | "verificationCommand"
@@ -92,9 +94,32 @@ export interface ApprovalPolicy {
   approve(call: ToolCall, description: string): Promise<boolean>;
 }
 export interface CredentialStore {
-  get(provider: ProviderId): Promise<string | undefined>;
-  save(provider: ProviderId, value: string): Promise<void>;
-  clear(provider: ProviderId): Promise<void>;
+  get(provider: CredentialId): Promise<string | undefined>;
+  save(provider: CredentialId, value: string): Promise<void>;
+  clear(provider: CredentialId): Promise<void>;
+}
+
+export type JevRisk = "low" | "medium" | "high";
+export type JevRoute = "build" | "plan";
+export type JevRecovery = "repair" | "broaden" | "escalate";
+export interface JevDecision<T extends string> {
+  value: T;
+  confidence: number;
+}
+export interface JevAssessment {
+  risk: JevRisk;
+  confidence: number;
+}
+/** Classifies safe operation metadata; it never authorizes an action. */
+export interface JevSafetyAdvisor {
+  assess(state: string): Promise<JevAssessment>;
+  route(state: string): Promise<JevDecision<JevRoute>>;
+  recover(state: string): Promise<JevDecision<JevRecovery>>;
+}
+export interface JevFeatures {
+  routing: boolean;
+  safety: boolean;
+  recovery: boolean;
 }
 
 /** Stores metadata-only reliability evidence separately from raw task history. */

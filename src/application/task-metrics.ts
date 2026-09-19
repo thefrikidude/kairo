@@ -38,6 +38,17 @@ export function taskMetrics(events: TaskEvent[]) {
     verificationSelections: count("verification_selected"),
     focusedVerifications: count("verification_selected", "focused"),
     broadVerifications: count("verification_selected", "broad"),
+    jevDecisions: count("jev_completed"),
+    jevFailures: count("jev_failed"),
+    jevMs: duration("jev_completed") + duration("jev_failed"),
+    jevRoutes: events.filter((event) => event.kind === "jev_completed" && event.name === "route")
+      .length,
+    jevSafetyChecks: events.filter(
+      (event) => event.kind === "jev_completed" && event.name === "safety",
+    ).length,
+    jevRecoveryChecks: events.filter(
+      (event) => event.kind === "jev_completed" && event.name === "recovery",
+    ).length,
     repairConverged:
       events.some((event) => event.kind === "repair") &&
       events.findLast((event) => event.kind === "verification")?.outcome === "passed" &&

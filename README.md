@@ -31,7 +31,8 @@ The application layer depends only on `domain/` interfaces. Gemini and Groq prov
 - Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume. Repository profiles are persisted with sessions, so resuming does not rediscover from zero.
 - Discovered test, typecheck, lint, and build scripts are included in the task context. After edits, Kairo recommends the narrowest plausible check, explains its focused/broad scope, and runs it only through the normal approval prompt. A successful approved command records its command, exit status, selection reason, and verification result.
 - Failed post-edit verification creates a bounded repair brief from stack traces and test failures, including affected files, excerpts, and remaining retry budget. The selected model can continue repairing in the same task; retries rerun the focused failed check before Kairo proposes a broader discovered check, and every edit and command still requires approval.
-- Provider-scoped credentials from the macOS Keychain, with `GEMINI_API_KEY` and `GROQ_API_KEY` as temporary or CI overrides.
+- Optional TypeSafe Jev decision layer: confidence-gated, per-request BUILD-to-PLAN routing; advisory risk context in every write/command approval; and bounded repair, broader-check, or escalation guidance after failed verification. All workspace restrictions and approvals remain deterministic.
+- Provider-scoped credentials from the macOS Keychain, with `GEMINI_API_KEY`, `GROQ_API_KEY`, and `OPENROUTER_API_KEY` as temporary or CI overrides.
 
 Kairo does not currently implement automatic model routing or failover, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
 
@@ -50,7 +51,9 @@ pnpm build
 node dist/interface/cli/index.js .
 ```
 
-Kairo opens directly into the terminal UI with the last saved model selected. Use `/models` to open the model picker, then use the arrow keys and Enter (or a number key) to select an available model. Kairo reuses the selected provider's saved credential. If a provider is not authenticated yet, run `kairo auth login <provider>` once, then reopen `/models`.
+Kairo opens directly into the terminal UI with the last saved model selected. Use `/models` to open the model picker, then use the arrow keys and Enter (or a number key) to select an available model. Selecting a provider without a credential opens a masked in-TUI API-key prompt; Kairo validates the key and saves it in macOS Keychain. OpenRouter starts with curated free, tool-capable models; use `/model openrouter <model-id>` for any compatible OpenRouter model. Free availability and rate limits are controlled by OpenRouter and may change. TypeSafe Jev is intentionally excluded from active model selection because it produces typed decisions rather than code or chat responses.
+
+Use `/jev` to configure TypeSafe Jev as an optional decision layer. Its panel has a master toggle plus independent routing, safety, and recovery toggles. For a BUILD request, a `plan` route at 85% confidence or above creates a read-only plan for that request only; the session remains in BUILD mode. For every write or command, Jev can enrich—but never decide—the existing approval with a risk/confidence label. After failed verification, it can recommend a bounded repair, a broader discovered check (which still requires `/verify` approval), or a manual escalation. Explicit PLAN mode always wins. Jev never generates code, bypasses workspace restrictions, blocks a user-approved action, or replaces explicit user approval. Its key is stored separately in macOS Keychain (or supplied with `TYPESAFE_API_KEY`). Kairo sends only bounded metadata: task/action labels, repository-relative paths, command text, check scope, and sanitized failure locations. It never sends source contents, edit payloads, tool output, credentials, or raw provider responses; traces retain only decision type, result/confidence bucket, fallback, and duration.
 
 ## Production
 
@@ -127,7 +130,7 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 
 1. **Make one agent dependable** — in progress: bounded tool loops, failure recovery, deterministic context checkpoints, repository profiling and relevance ranking, interrupted-task recovery, approval-gated focused verification, and bounded repair are implemented. Next is measuring and improving repair reliability across more realistic tasks.
 2. **Add provider abstraction** — implemented for Gemini and Groq through a shared provider registry; local providers remain future work.
-3. **Route tasks to models** — select fast, cheap, or stronger models based on task class, measured cost, latency, and reliability.
+3. **Route tasks to models** — Jev can route the current request between BUILD and a read-only plan; selecting fast, cheap, or stronger coding models based on measured reliability remains future work.
 4. **Add specialized subagents** — research, coding, and testing child sessions coordinated by a main agent.
 5. **Build an evaluation system** — run repeatable coding tasks and compare models, routing rules, agent profiles, cost, latency, and verified success.
 
@@ -142,6 +145,8 @@ Self-evaluation baselines are selected manually and stored locally as a pointer 
 Trace durations separate model streaming, tool execution, and approval waiting; they are measured operation time, not total task wall time. Unfinished operations remain visible after interruption. Older tasks have no historical trace backfill. Only discovered checks, explicit model checks (`run_command` with `verification: true`), and manual `/verify` commands count as verification. Every successful file-tool edit invalidates prior verification. Project-wide scripts report broad scope even when chosen for a particular source file. Repair convergence requires a completed task whose latest check passed. A passing command is not proof of task correctness. Token usage and cost are not measured yet.
 
 `kairo eval` runs deterministic scripted model decisions against disposable fixture copies. It measures the agent loop, tool safety, repair flow, verification, and tracing without calling any model provider. It is the reproducible baseline for later live-provider evaluations; it does not measure model reasoning quality.
+
+`kairo eval jev` runs the same deterministic fixtures twice, with the Jev layer off and with fixed high-confidence decision fixtures on. It reports verified completion, repairs, failed checks, escalations, routing/safety/recovery counts, and Jev latency. It does not call TypeSafe or judge live Jev quality; use it to spot integration regressions and decision-layer overhead.
 
 `kairo eval live` runs the same tasks with Gemini in disposable fixture copies and asks DeepEval's `TaskCompletionMetric` to judge each recorded agent trajectory. It requires a Gemini credential, consumes Gemini API usage for both the agent and judge, and is intentionally separate from the deterministic test gate. The final result requires both the fixture's independent filesystem/test assertion and the DeepEval verdict to pass. DeepEval receives only the task, final response, tool names, status, and verification metadata; it does not receive source files or command output.
 

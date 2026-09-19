@@ -26,7 +26,10 @@ export interface TaskEvent {
     | "repair"
     | "verification"
     | "verification_selected"
-    | "plan_submitted";
+    | "plan_submitted"
+    | "jev_requested"
+    | "jev_completed"
+    | "jev_failed";
   createdAt: number;
   operationId?: string;
   name?: string;
@@ -191,6 +194,12 @@ export interface EvaluationResult {
     repairConverged: boolean;
     modelMs: number;
     toolMs: number;
+    jevDecisions?: number;
+    jevFailures?: number;
+    jevMs?: number;
+    jevRoutes?: number;
+    jevSafetyChecks?: number;
+    jevRecoveryChecks?: number;
   };
 }
 

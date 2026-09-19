@@ -2,7 +2,7 @@ import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EvaluationResult, Message, ModelTurn, ToolCall } from "../domain/models.js";
-import type { ApprovalPolicy, ModelProvider } from "../domain/ports.js";
+import type { ApprovalPolicy, JevSafetyAdvisor, ModelProvider } from "../domain/ports.js";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
 import { RepositoryProfiler } from "../infrastructure/repository/repository-profiler.js";
 import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-tools.js";
@@ -125,8 +125,35 @@ export async function runEvaluationSuite(): Promise<EvaluationResult[]> {
   return results;
 }
 
+export type JevEvaluationReport = {
+  off: EvaluationResult[];
+  on: EvaluationResult[];
+};
+
+/** Runs matched deterministic fixtures to isolate Jev decision overhead from model quality. */
+export async function runJevEvaluationSuite(): Promise<JevEvaluationReport> {
+  const advisor: JevSafetyAdvisor = {
+    async assess() {
+      return { risk: "low", confidence: 1 };
+    },
+    async route() {
+      return { value: "build", confidence: 1 };
+    },
+    async recover() {
+      return { value: "repair", confidence: 1 };
+    },
+  };
+  return {
+    off: await runEvaluationSuite(),
+    on: await Promise.all(evaluationScenarios.map((scenario) => runScenario(scenario, advisor))),
+  };
+}
+
 /** Runs one scenario with isolated storage so benchmark state cannot affect the user workspace. */
-export async function runScenario(scenario: EvaluationScenario): Promise<EvaluationResult> {
+export async function runScenario(
+  scenario: EvaluationScenario,
+  jev?: JevSafetyAdvisor,
+): Promise<EvaluationResult> {
   const root = await mkdtemp(join(tmpdir(), `kairo-eval-${scenario.id}-`));
   try {
     await cp(join(fixtures, scenario.id), root, { recursive: true });
@@ -141,6 +168,8 @@ export async function runScenario(scenario: EvaluationScenario): Promise<Evaluat
         tools,
         new FixtureApproval(),
         definitions,
+        undefined,
+        jev,
       );
       await agent.run(session.id, scenario.prompt, () => {});
       const task = agent.status(session.id)!;
@@ -167,6 +196,12 @@ export async function runScenario(scenario: EvaluationScenario): Promise<Evaluat
           repairConverged: metrics.repairConverged,
           modelMs: metrics.modelMs,
           toolMs: metrics.toolMs,
+          jevDecisions: metrics.jevDecisions,
+          jevFailures: metrics.jevFailures,
+          jevMs: metrics.jevMs,
+          jevRoutes: metrics.jevRoutes,
+          jevSafetyChecks: metrics.jevSafetyChecks,
+          jevRecoveryChecks: metrics.jevRecoveryChecks,
         },
       };
     } finally {

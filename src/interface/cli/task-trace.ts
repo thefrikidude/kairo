@@ -13,6 +13,7 @@ export function formatMetrics(events: TaskEvent[]): string {
     `Approvals: ${m.approvals} allowed, ${m.denials} denied, ${Math.round(m.approvalMs)} ms waiting`,
     `Repairs: ${m.repairs}${m.repairConverged ? " (converged)" : ""}; command checks: ${m.verificationPasses} passed, ${m.verificationFailures} failed`,
     `Verification selection: ${m.focusedVerifications} focused, ${m.broadVerifications} broad (${m.verificationSelections} total)`,
+    `Jev: ${m.jevDecisions} decisions (${m.jevRoutes} routing, ${m.jevSafetyChecks} safety, ${m.jevRecoveryChecks} recovery), ${m.jevFailures} fallbacks, ${Math.round(m.jevMs)} ms`,
     `Unfinished operations: ${m.unfinishedOperations}`,
   ].join("\n");
 }

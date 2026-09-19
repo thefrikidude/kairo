@@ -368,7 +368,9 @@ export class SqliteSessionStore {
   latestTask(sessionId: string): Task | undefined {
     return this.toTask(
       this.db
-        .prepare("SELECT * FROM tasks WHERE session_id=? ORDER BY updated_at DESC LIMIT 1")
+        .prepare(
+          "SELECT * FROM tasks WHERE session_id=? ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+        )
         .get(sessionId) as Record<string, unknown> | undefined,
     );
   }
@@ -389,6 +391,7 @@ export class SqliteSessionStore {
       Pick<
         Task,
         | "status"
+        | "mode"
         | "plan"
         | "changedFiles"
         | "verificationCommand"
@@ -407,9 +410,10 @@ export class SqliteSessionStore {
     const next = { ...task, ...patch, updatedAt: Date.now() };
     this.db
       .prepare(
-        "UPDATE tasks SET status=?, plan_json=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, verification_exit_code=?, verification_discovered=?, verification_selection_json=?, summary=?, error=?, updated_at=? WHERE id=?",
+        "UPDATE tasks SET mode=?, status=?, plan_json=?, changed_files_json=?, verification_command=?, verification_output=?, verification_ok=?, verification_exit_code=?, verification_discovered=?, verification_selection_json=?, summary=?, error=?, updated_at=? WHERE id=?",
       )
       .run(
+        next.mode,
         next.status,
         next.plan ? JSON.stringify(next.plan) : null,
         JSON.stringify(next.changedFiles),

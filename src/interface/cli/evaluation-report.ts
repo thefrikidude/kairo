@@ -5,6 +5,32 @@ import type {
   LiveEvaluationResult,
   SelfEvaluationResult,
 } from "../../domain/models.js";
+import type { JevEvaluationReport } from "../../application/evaluation-harness.js";
+
+/** Reports matched deterministic Jev-off/Jev-on trials without changing evaluator semantics. */
+export function formatJevEvaluationReport(report: JevEvaluationReport): string {
+  const summarize = (results: EvaluationResult[]) => ({
+    completed: results.filter((result) => result.passed).length,
+    repairs: results.reduce((sum, result) => sum + result.metrics.repairs, 0),
+    verificationFailures: results.reduce(
+      (sum, result) => sum + result.metrics.verificationFailures,
+      0,
+    ),
+    escalations: results.filter((result) => result.taskStatus === "verification_required").length,
+    jevMs: results.reduce((sum, result) => sum + (result.metrics.jevMs ?? 0), 0),
+    routes: results.reduce((sum, result) => sum + (result.metrics.jevRoutes ?? 0), 0),
+    safety: results.reduce((sum, result) => sum + (result.metrics.jevSafetyChecks ?? 0), 0),
+    recovery: results.reduce((sum, result) => sum + (result.metrics.jevRecoveryChecks ?? 0), 0),
+  });
+  const off = summarize(report.off);
+  const on = summarize(report.on);
+  return [
+    "Kairo deterministic Jev evaluation (matched fixtures)",
+    `Jev off: ${off.completed}/${report.off.length} verified completion; repairs=${off.repairs}; verification failures=${off.verificationFailures}; escalations=${off.escalations}`,
+    `Jev on: ${on.completed}/${report.on.length} verified completion; repairs=${on.repairs}; verification failures=${on.verificationFailures}; escalations=${on.escalations}; Jev latency=${Math.round(on.jevMs)} ms; routing=${on.routes}; safety=${on.safety}; recovery=${on.recovery}`,
+    "This deterministic mode measures integration behavior and metadata overhead, not live Jev decision quality.",
+  ].join("\n");
+}
 
 /** Renders benchmark evidence in a compact human-readable report. */
 export function formatEvaluationReport(results: EvaluationResult[]): string {
