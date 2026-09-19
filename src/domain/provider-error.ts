@@ -13,8 +13,10 @@ export class ProviderError extends Error {
     readonly retryable: boolean,
     readonly retryAfterMs?: number,
     provider = "Model provider",
+    /** A deliberately generic next step; never copied from a provider response. */
+    readonly guidance?: string,
   ) {
-    super(`${provider} request failed (${category}).`);
+    super(`${provider} request failed (${category}).${guidance ? ` ${guidance}` : ""}`);
     this.name = "ProviderError";
   }
 }

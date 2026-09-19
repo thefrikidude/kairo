@@ -75,6 +75,27 @@ test("authentication, request and daily quota errors never retry", async () => {
     assert.equal(calls, 1);
   }
 });
+
+test("free-model quota errors do not spend the allowance on automatic retries", async () => {
+  let calls = 0;
+  await assert.rejects(
+    recoverProvider(
+      async () => {
+        calls++;
+        throw { status: 429 };
+      },
+      undefined,
+      timer(),
+      "OpenRouter",
+      false,
+    ),
+    (error: unknown) =>
+      error instanceof ProviderError &&
+      /free-model rate limit was reached/.test(error.message) &&
+      error.retryable === false,
+  );
+  assert.equal(calls, 1);
+});
 test("received text or function-call content prevents replay", async () => {
   let calls = 0;
   await assert.rejects(
@@ -106,4 +127,22 @@ test("normalization reads nested Gemini retry hints and never retains raw bodies
     5000,
   );
   assert.equal(normalizeProviderError(new TypeError("fetch failed")).category, "network");
+});
+
+test("OpenRouter-style billing and request failures expose safe next steps", () => {
+  const credit = normalizeProviderError(
+    { status: 402, message: "private provider body" },
+    "OpenRouter",
+  );
+  assert.equal(credit.category, "quota");
+  assert.match(credit.message, /credits, limits, or available model routes/);
+  assert.doesNotMatch(credit.message, /private provider body/);
+
+  const request = normalizeProviderError(
+    { status: 400, message: "private provider body" },
+    "OpenRouter",
+  );
+  assert.equal(request.category, "request");
+  assert.match(request.message, /supports chat and tool calling/);
+  assert.doesNotMatch(request.message, /private provider body/);
 });

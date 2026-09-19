@@ -25,7 +25,15 @@ test("mode badge renders the active plan and build states", () => {
 test("model picker lists every registered model", () => {
   assert.deepEqual(
     modelOptions().map(({ provider, model }) => `${provider}/${model}`),
-    ["gemini/gemini-2.5-flash", "groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"],
+    [
+      "gemini/gemini-2.5-flash",
+      "groq/openai/gpt-oss-120b",
+      "groq/openai/gpt-oss-20b",
+      "openrouter/qwen/qwen3.8-27b:free",
+      "openrouter/cohere/north-mini-code:free",
+      "openrouter/deepseek/deepseek-v4-flash-0731:free",
+      "openrouter/openrouter/free",
+    ],
   );
 });
 

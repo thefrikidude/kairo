@@ -52,12 +52,24 @@ export function normalizeProviderError(error: unknown, provider = "Model provide
   const text = texts.join(" ");
   const code = codes.join(" ");
   if (/\b(401|403|UNAUTHENTICATED|PERMISSION_DENIED)\b/.test(code))
-    return new ProviderError("authentication", false, undefined, provider);
-  if (/\b(429|RESOURCE_EXHAUSTED)\b/.test(code)) {
+    return new ProviderError(
+      "authentication",
+      false,
+      undefined,
+      provider,
+      "Check the API key in /models.",
+    );
+  if (/\b(402|429|RESOURCE_EXHAUSTED)\b/.test(code)) {
     const permanent = /per.?day|daily|billing|credit/i.test(
       text.replace(/check your plan and billing details/gi, ""),
     );
-    return new ProviderError("quota", !permanent, retryAfterMs, provider);
+    return new ProviderError(
+      "quota",
+      !permanent,
+      retryAfterMs,
+      provider,
+      "Check the provider's credits, limits, or available model routes.",
+    );
   }
   if (/\b(500|502|503|504|UNAVAILABLE|INTERNAL)\b/.test(code))
     return new ProviderError("service", true, retryAfterMs, provider);
@@ -66,7 +78,13 @@ export function normalizeProviderError(error: unknown, provider = "Model provide
     /fetch failed|network error|timed out/i.test(text)
   )
     return new ProviderError("network", true, retryAfterMs, provider);
-  return new ProviderError("request", false, undefined, provider);
+  return new ProviderError(
+    "request",
+    false,
+    undefined,
+    provider,
+    "Check that the selected model supports chat and tool calling.",
+  );
 }
 
 export interface RecoveryClock {
@@ -86,6 +104,7 @@ export async function recoverProvider<T>(
   progress: (event: ProviderProgress) => void = () => {},
   timer: RecoveryClock = clock,
   provider = "Model provider",
+  retryQuota = true,
 ): Promise<T> {
   let retries = 0;
   let waited = 0;
@@ -96,7 +115,15 @@ export async function recoverProvider<T>(
         hasContent = true;
       });
     } catch (raw) {
-      const error = normalizeProviderError(raw, provider);
+      let error = normalizeProviderError(raw, provider);
+      if (!retryQuota && error.category === "quota")
+        error = new ProviderError(
+          "quota",
+          false,
+          error.retryAfterMs,
+          provider,
+          "The free-model rate limit was reached. Wait before trying again, or add OpenRouter credits.",
+        );
       const delay = error.retryAfterMs ?? 1000 * 2 ** retries + timer.random() * 250;
       if (!error.retryable || hasContent || retries >= 3 || delay > 30000 - waited) {
         progress({ kind: "exhausted", category: error.category, retry: retries, delayMs: 0 });

@@ -1,5 +1,7 @@
 export type Role = "user" | "model" | "tool";
-export type ProviderId = "gemini" | "groq";
+export type ProviderId = "gemini" | "groq" | "openrouter";
+/** Credential-only services are deliberately separate from selectable coding providers. */
+export type CredentialId = ProviderId | "jev";
 
 export interface ModelSelection {
   provider: ProviderId;

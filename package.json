@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.0.0",
+    "@openrouter/sdk": "^1.2.145",
     "@sentry/node": "10.37.0",
     "better-sqlite3": "^12.0.0",
     "deepeval": "0.9.14",

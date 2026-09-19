@@ -2,6 +2,7 @@ import type { ModelSelection, ProviderId } from "../../domain/models.js";
 import type { ModelProvider, ToolDefinition } from "../../domain/ports.js";
 import { GeminiProvider } from "./gemini-provider.js";
 import { GroqProvider } from "./groq-provider.js";
+import { OpenRouterProvider } from "./openrouter-provider.js";
 
 export interface ProviderDescriptor {
   id: ProviderId;
@@ -50,6 +51,38 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
         }),
       ),
   },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    environmentVariable: "OPENROUTER_API_KEY",
+    models: [
+      {
+        id: "qwen/qwen3.8-27b:free",
+        label: "Qwen 3.8 27B (free)",
+        recommended: true,
+      },
+      {
+        id: "cohere/north-mini-code:free",
+        label: "Cohere North Mini Code (free)",
+      },
+      {
+        id: "deepseek/deepseek-v4-flash-0731:free",
+        label: "DeepSeek V4 Flash (free)",
+      },
+      {
+        id: "openrouter/free",
+        label: "OpenRouter free-model router",
+      },
+    ],
+    create: (apiKey, model, tools) => new OpenRouterProvider(apiKey, model, tools),
+    validate: async (apiKey) =>
+      validateResponse(
+        "OpenRouter",
+        await fetch("https://openrouter.ai/api/v1/key", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }),
+      ),
+  },
 ] as const;
 
 /** Narrows untrusted CLI/config text to a registered provider identifier. */
@@ -68,5 +101,9 @@ export function createProvider(
   apiKey: string,
   tools: ToolDefinition[],
 ): ModelProvider {
+  if (selection.provider === "openrouter" && /(^|\/)jev(?:-|$)/i.test(selection.model))
+    throw new Error(
+      "Jev is a decision model, not a Kairo coding model. Use a text model for the active agent.",
+    );
   return providerById(selection.provider).create(apiKey, selection.model, tools);
 }
