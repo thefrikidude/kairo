@@ -16,7 +16,7 @@ src/
 └── interface/cli/   # Terminal command parsing and interactive REPL
 ```
 
-The application layer depends only on `domain/` interfaces. Gemini and Groq providers, SQLite, and terminal tools are adapters, so they can be replaced without rewriting the coding-agent workflow.
+The application layer depends only on `domain/` interfaces. Gemini, Groq, and OpenRouter providers, SQLite, and terminal tools are adapters, so they can be replaced without rewriting the coding-agent workflow.
 
 ## Current capabilities
 
@@ -26,13 +26,13 @@ The application layer depends only on `domain/` interfaces. Gemini and Groq prov
 - A bounded JavaScript/TypeScript repository profile on session start: package manager, scripts, config files, source/test roots, ignored paths, and a compact file index.
 - Task-aware file ranking and line-range reads, so the selected model receives likely relevant files without flooding its context. Ranking combines task/error terms, declared symbols, local imports, and test-to-source relationships.
 - Workspace-confined file listing, code search, file reading, exact text edits, file writes, and shell commands.
-- Explicit approval before every edit, write, or shell command.
+- Explicit approval before every edit, write, or shell command, except for opt-in Jev autonomy over a high-confidence, low-risk, repository-discovered verification command.
 - Bounded model/tool loops, repeated-call protection, failure tracking, and explicit verification status after edits.
 - Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume. Repository profiles are persisted with sessions, so resuming does not rediscover from zero.
-- Discovered test, typecheck, lint, and build scripts are included in the task context. After edits, Kairo recommends the narrowest plausible check, explains its focused/broad scope, and runs it only through the normal approval prompt. A successful approved command records its command, exit status, selection reason, and verification result.
-- Failed post-edit verification creates a bounded repair brief from stack traces and test failures, including affected files, excerpts, and remaining retry budget. The selected model can continue repairing in the same task; retries rerun the focused failed check before Kairo proposes a broader discovered check, and every edit and command still requires approval.
+- Discovered test, typecheck, lint, and build scripts are included in the task context. After edits, Kairo recommends the narrowest plausible check and explains its focused/broad scope. It runs through the normal approval prompt unless the opt-in Jev trust envelope has autonomously approved a high-confidence, low-risk discovered verification command. A successful command records its command, exit status, selection reason, and verification result.
+- Failed post-edit verification creates a bounded repair brief from stack traces and test failures, including affected files, excerpts, and remaining retry budget. The selected model can continue repairing in the same task; retries rerun the focused failed check before Kairo proposes a broader discovered check. Every edit and arbitrary command still requires approval.
 - Optional TypeSafe Jev decision layer: confidence-gated, per-request BUILD-to-PLAN routing; advisory risk context in every write/command approval; bounded repair, broader-check, or escalation guidance; and opt-in autonomy for high-confidence, low-risk, repository-discovered verification only. All workspace restrictions remain deterministic; edits and arbitrary commands always require approval.
-- Provider-scoped credentials from the macOS Keychain, with `GEMINI_API_KEY`, `GROQ_API_KEY`, and `OPENROUTER_API_KEY` as temporary or CI overrides.
+- Provider-scoped credentials from the macOS Keychain, with `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, and `TYPESAFE_API_KEY` as temporary or CI overrides.
 
 Kairo does not currently implement model failover, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
 
@@ -40,7 +40,7 @@ Kairo does not currently implement model failover, a full-screen terminal UI, MC
 
 - Node.js 20 or newer
 - pnpm
-- A Gemini or Groq API key
+- A Gemini, Groq, or OpenRouter API key; TypeSafe is optional for Jev
 - macOS for `kairo auth login`; on other systems, use the provider environment variable instead
 
 ## Development
@@ -85,8 +85,10 @@ kairo [workspace]
 # Credentials
 node dist/interface/cli/index.js auth login
 node dist/interface/cli/index.js auth login groq
+node dist/interface/cli/index.js auth login openrouter
 node dist/interface/cli/index.js auth logout
 node dist/interface/cli/index.js auth logout groq
+node dist/interface/cli/index.js auth logout openrouter
 node dist/interface/cli/index.js auth status
 
 # Model configuration
@@ -101,6 +103,10 @@ node dist/interface/cli/index.js resume <session-id>
 # Run the isolated scripted benchmark suite
 node dist/interface/cli/index.js eval
 node dist/interface/cli/index.js eval --json
+
+# Compare fixed Jev-off/Jev-on control-loop fixtures (does not call TypeSafe)
+node dist/interface/cli/index.js eval jev
+node dist/interface/cli/index.js eval jev --json
 
 # Run live Gemini tasks in disposable fixtures and score their traces with DeepEval
 node dist/interface/cli/index.js eval live
@@ -122,15 +128,15 @@ Inside a session, type `/` to open the command palette; keep typing to filter co
 
 ## Safety model
 
-Kairo resolves tool paths against the selected workspace and rejects attempts to escape it, including through symlinks. Read-only tools run immediately. Mutating actions always show the requested action and require a `y` or `yes` confirmation.
+Kairo resolves tool paths against the selected workspace and rejects attempts to escape it, including through symlinks. Read-only tools run immediately. Mutating actions show the requested action and require a `y` or `yes` confirmation, except when the optional Jev trust envelope auto-approves a high-confidence, low-risk discovered verification command.
 
 Tool calls, approvals, outputs, and conversation messages are persisted so an interrupted session can be resumed. Session data is stored under the platform state directory; set `KAIRO_STATE_DIR` to use an isolated location for development or tests.
 
 ## Roadmap
 
 1. **Make one agent dependable** — in progress: bounded tool loops, failure recovery, deterministic context checkpoints, repository profiling and relevance ranking, interrupted-task recovery, approval-gated focused verification, and bounded repair are implemented. Next is measuring and improving repair reliability across more realistic tasks.
-2. **Add provider abstraction** — implemented for Gemini and Groq through a shared provider registry; local providers remain future work.
-3. **Route tasks to models** — Jev can route the current request between BUILD and a read-only plan; selecting fast, cheap, or stronger coding models based on measured reliability remains future work.
+2. **Add provider abstraction** — implemented for Gemini, Groq, and OpenRouter through a shared provider registry; local providers remain future work.
+3. **Route tasks to models** — Jev can route a BUILD request to a read-only plan and, with `/auto`, select a locally credentialed fast, balanced, or strong coding-model tier. Selecting models from measured reliability and cost evidence remains future work.
 4. **Add specialized subagents** — research, coding, and testing child sessions coordinated by a main agent.
 5. **Build an evaluation system** — run repeatable coding tasks and compare models, routing rules, agent profiles, cost, latency, and verified success.
 
