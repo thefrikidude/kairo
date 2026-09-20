@@ -5,6 +5,7 @@ import {
   ModeBadge,
   TuiApproval,
   interactionModeAfterCommand,
+  interactionModeAfterTask,
   matchingSlashCommands,
   modelOptions,
 } from "./tui.js";
@@ -13,6 +14,12 @@ test("plan command toggles the live interaction mode", () => {
   assert.equal(interactionModeAfterCommand("build", "/plan"), "plan");
   assert.equal(interactionModeAfterCommand("plan", "/plan"), "build");
   assert.equal(interactionModeAfterCommand("plan", "/status"), "plan");
+});
+
+test("a Jev planning task leaves the composer in PLAN mode", () => {
+  assert.equal(interactionModeAfterTask("build", "planning"), "plan");
+  assert.equal(interactionModeAfterTask("plan", "implementation"), "plan");
+  assert.equal(interactionModeAfterTask("build", "implementation"), "build");
 });
 
 test("mode badge renders the active plan and build states", () => {

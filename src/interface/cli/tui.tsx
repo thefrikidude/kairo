@@ -105,6 +105,14 @@ export function interactionModeAfterCommand(
   return command === "/plan" ? (mode === "build" ? "plan" : "build") : mode;
 }
 
+/** Reflects a completed Jev planning route in the persistent TUI interaction mode. */
+export function interactionModeAfterTask(
+  mode: InteractionMode,
+  taskMode: "implementation" | "planning" | undefined,
+): InteractionMode {
+  return taskMode === "planning" ? "plan" : mode;
+}
+
 export function ModeBadge({ mode }: { mode: InteractionMode }): React.JSX.Element {
   return <Text color={mode === "plan" ? "yellow" : "green"}>{mode.toUpperCase()}</Text>;
 }
@@ -492,10 +500,19 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
             ? "Answering"
             : "Working",
       );
+      let routedToPlan = false;
       const onAgentText = (chunk: string) => {
+        if (chunk === "\n[Jev routed this request to a one-time read-only plan]\n") {
+          routedToPlan = true;
+          setMode("plan");
+          setActivity("Planning");
+          return appendStream(entryId, chunk);
+        }
         const tool = /^\n\[Tool] ([^\n]+)\n$/.exec(chunk);
         if (tool) {
-          setActivity(`${taskMode === "plan" ? "Planning" : "Working"} · ${tool[1]}…`);
+          setActivity(
+            `${taskMode === "plan" || routedToPlan ? "Planning" : "Working"} · ${tool[1]}…`,
+          );
           return;
         }
         if (/^\n\[(Plan saved|Verification passed)]\n$/.test(chunk)) return;
@@ -543,6 +560,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           }
         }
         const task = taskAgent.status(active.id);
+        setMode((current) => interactionModeAfterTask(current, task?.mode));
         if (task?.mode === "planning" && task.plan) append("system", formatPlan(task.plan));
         if ((task?.status as TaskStatus | undefined) === "cancelled")
           append("system", "Task cancelled.");
