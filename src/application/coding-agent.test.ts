@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodingAgent } from "./coding-agent.js";
 import { taskMetrics } from "./task-metrics.js";
+import { ProviderError } from "../domain/provider-error.js";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
 import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-tools.js";
 import type { ModelTurn, Message, ToolCall } from "../domain/models.js";
@@ -86,6 +87,78 @@ test("Jev enriches but never bypasses mutation approval or retains source conten
       true,
     );
     assert.doesNotMatch(JSON.stringify(store.taskEvents(task.id)), /Update a file|written/);
+  } finally {
+    store.close();
+  }
+});
+
+test("conversation answers do not create a task or expose tools", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    let received: Message[] = [];
+    const provider: ModelProvider = {
+      async stream(messages, onText, _progress, _instruction, toolsEnabled) {
+        received = messages;
+        assert.equal(toolsEnabled, false);
+        onText("Hello!");
+        return { text: "Hello!", toolCalls: [] };
+      },
+    };
+    const agent = new CodingAgent(
+      provider,
+      store,
+      {
+        root: "/workspace",
+        description: () => "",
+        async execute() {
+          return { ok: true, output: "" };
+        },
+      },
+      new Deny(),
+      definitions,
+    );
+    await agent.answer(session.id, "Hello", () => {});
+    assert.equal(agent.status(session.id), undefined);
+    assert.deepEqual(
+      received.map((message) => message.content),
+      ["Hello"],
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("a replacement provider can continue the same task after quota exhaustion", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    const quotaProvider: ModelProvider = {
+      async stream() {
+        throw new ProviderError("quota", false);
+      },
+    };
+    const replacement: ModelProvider = {
+      async stream(_messages, onText) {
+        onText("Recovered.");
+        return { text: "Recovered.", toolCalls: [] };
+      },
+    };
+    const tools = {
+      root: "/workspace",
+      description: () => "",
+      async execute() {
+        return { ok: true, output: "" };
+      },
+    };
+    const first = new CodingAgent(quotaProvider, store, tools, new Deny(), definitions);
+    await assert.rejects(first.run(session.id, "Explain the project", () => {}));
+    const failed = first.status(session.id)!;
+    assert.equal(failed.status, "failed");
+    const second = new CodingAgent(replacement, store, tools, new Deny(), definitions);
+    await second.retryAfterProviderQuota(session.id, () => {});
+    assert.equal(second.status(session.id)?.id, failed.id);
+    assert.equal(second.status(session.id)?.status, "completed");
   } finally {
     store.close();
   }

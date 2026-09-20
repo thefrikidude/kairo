@@ -41,13 +41,19 @@ test("Jev serializes typed route, recovery, and model-tier decisions independent
     const choice =
       question === "task_route"
         ? "plan"
-        : question === "verification_recovery"
-          ? "escalate"
-          : "fast";
+        : question === "interaction_intent"
+          ? "conversation"
+          : question === "verification_recovery"
+            ? "escalate"
+            : "fast";
     return new Response(JSON.stringify({ answers: { [question]: { choice, confidence: 0.9 } } }));
   });
   assert.deepEqual(await provider.route("broad architecture task"), {
     value: "plan",
+    confidence: 0.9,
+  });
+  assert.deepEqual(await provider.intent("hello"), {
+    value: "conversation",
     confidence: 0.9,
   });
   assert.deepEqual(await provider.recover("failed check metadata"), {
@@ -55,5 +61,10 @@ test("Jev serializes typed route, recovery, and model-tier decisions independent
     confidence: 0.9,
   });
   assert.deepEqual(await provider.modelTier("small edit"), { value: "fast", confidence: 0.9 });
-  assert.deepEqual(questions, ["task_route", "verification_recovery", "coding_model_tier"]);
+  assert.deepEqual(questions, [
+    "task_route",
+    "interaction_intent",
+    "verification_recovery",
+    "coding_model_tier",
+  ]);
 });

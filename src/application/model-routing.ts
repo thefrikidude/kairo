@@ -25,6 +25,30 @@ export function selectAutoModel(
   );
 }
 
+/** Orders replacement models after quota exhaustion, preferring a different provider first. */
+export function quotaFallbackModels(
+  available: AvailableModel[],
+  selected: ModelSelection,
+  manual: ModelSelection,
+  tier: JevModelTier,
+): AvailableModel[] {
+  const remaining = available.filter(
+    (candidate) => candidate.provider !== selected.provider || candidate.model !== selected.model,
+  );
+  const rank = (candidate: AvailableModel): number => {
+    const sameProvider = candidate.provider === selected.provider;
+    const sameTier = candidate.tier === tier;
+    const manualModel = candidate.provider === manual.provider && candidate.model === manual.model;
+    if (!sameProvider && sameTier) return 0;
+    if (!sameProvider && manualModel) return 1;
+    if (!sameProvider) return 2;
+    if (sameTier) return 3;
+    if (manualModel) return 4;
+    return 5;
+  };
+  return remaining.sort((left, right) => rank(left) - rank(right));
+}
+
 /** Builds bounded, credential-free metadata for the TypeSafe decision request. */
 export function modelRoutingState(request: string, candidates: AvailableModel[]): string {
   return [

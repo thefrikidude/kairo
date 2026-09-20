@@ -3,7 +3,13 @@ import TextInput from "ink-text-input";
 import { useCallback, useMemo, useState } from "react";
 import type { ModelSelection, TaskStatus, ToolCall } from "../../domain/models.js";
 import type { ApprovalPolicy, CredentialStore, JevFeatures } from "../../domain/ports.js";
+import { ProviderError } from "../../domain/provider-error.js";
 import { CodingAgent } from "../../application/coding-agent.js";
+import {
+  autoInteractionMode,
+  greetingResponse,
+  interactionIntentState,
+} from "../../application/interaction-routing.js";
 import {
   setAutoModelRoutingEnabled,
   setJevEnabled,
@@ -13,6 +19,7 @@ import {
 import { JevDecisionProvider } from "../../infrastructure/providers/jev-safety-advisor.js";
 import {
   modelRoutingState,
+  quotaFallbackModels,
   selectAutoModel,
   type AvailableModel,
 } from "../../application/model-routing.js";
@@ -37,6 +44,11 @@ type TranscriptEntry = {
 
 type PendingApproval = { description: string; resolve: (approved: boolean) => void };
 export type ModelOption = ModelSelection & { label: string };
+type TaskAgentRoute = {
+  agent: CodingAgent;
+  selection: ModelSelection;
+  fallbacks: AvailableModel[];
+};
 
 export const slashCommands = [
   { name: "/plan", description: "Toggle read-only planning mode" },
@@ -179,10 +191,10 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     [apiKey, approval, jevEnabled, jevFeatures, jevKey, props.createAgent, selection],
   );
   const resolveTaskAgent = useCallback(
-    async (request: string): Promise<CodingAgent | undefined> => {
+    async (request: string): Promise<TaskAgentRoute | undefined> => {
       if (!autoModelRouting || !jevEnabled || !jevKey || !agent) {
         setRoutedSelection(undefined);
-        return agent;
+        return agent && { agent, selection, fallbacks: [] };
       }
       const providerKeys = new Map(
         await Promise.all(
@@ -200,7 +212,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       });
       if (!available.length) {
         setRoutedSelection(undefined);
-        return agent;
+        return { agent, selection, fallbacks: [] };
       }
       try {
         const decision = await new JevDecisionProvider(jevKey).modelTier(
@@ -208,27 +220,51 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         );
         if (decision.confidence < 0.85) {
           setRoutedSelection(undefined);
-          return agent;
+          return { agent, selection, fallbacks: [] };
         }
         const routed = selectAutoModel(available, selection, decision.value);
         if (!routed) {
           setRoutedSelection(undefined);
-          return agent;
+          return { agent, selection, fallbacks: [] };
         }
         setRoutedSelection({ provider: routed.provider, model: routed.model });
-        return props.createAgent(
-          approval,
-          { provider: routed.provider, model: routed.model },
-          routed.apiKey,
-          new JevDecisionProvider(jevKey),
-          jevFeatures,
-        );
+        const routedSelection = { provider: routed.provider, model: routed.model };
+        return {
+          agent: props.createAgent(
+            approval,
+            routedSelection,
+            routed.apiKey,
+            new JevDecisionProvider(jevKey),
+            jevFeatures,
+          ),
+          selection: routedSelection,
+          fallbacks: quotaFallbackModels(available, routedSelection, selection, decision.value),
+        };
       } catch {
         setRoutedSelection(undefined);
-        return agent;
+        return { agent, selection, fallbacks: [] };
       }
     },
     [agent, approval, autoModelRouting, jevEnabled, jevFeatures, jevKey, models, props, selection],
+  );
+  const classifyInteraction = useCallback(
+    async (request: string) => {
+      const localResponse = greetingResponse(request);
+      if (localResponse) return { intent: "conversation" as const, localResponse };
+      if (!jevEnabled || !jevKey || !jevFeatures.routing)
+        return { intent: "repository_task" as const };
+      try {
+        const decision = await new JevDecisionProvider(jevKey).intent(
+          interactionIntentState(request),
+        );
+        return decision.confidence >= 0.85
+          ? { intent: decision.value }
+          : { intent: "repository_task" as const };
+      } catch {
+        return { intent: "repository_task" as const };
+      }
+    },
+    [jevEnabled, jevFeatures.routing, jevKey],
   );
   const append = useCallback((kind: TranscriptEntry["kind"], text: string) => {
     setEntries((current) => [...current, { id: current.length, kind, text }]);
@@ -433,14 +469,29 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   });
 
   const runTask = useCallback(
-    async (request: string, taskMode: InteractionMode) => {
+    async (request: string, requestedMode: InteractionMode) => {
+      const interaction =
+        requestedMode === "build" || autoModelRouting
+          ? await classifyInteraction(request)
+          : undefined;
+      const taskMode =
+        autoModelRouting && interaction ? autoInteractionMode(interaction.intent) : requestedMode;
+      if (autoModelRouting && taskMode !== mode) setMode(taskMode);
+      append("user", request);
+      if (interaction?.intent === "conversation")
+        return append("assistant", interaction.localResponse ?? "How can I help?");
       if (!agent)
         return append("error", "No active credential. Use /models to add a provider API key.");
-      append("user", request);
       const entryId = entries.length + 1;
       setEntries((current) => [...current, { id: entryId, kind: "assistant", text: "" }]);
       setBusy(taskMode === "plan" ? "planning" : "acting");
-      setActivity(taskMode === "plan" ? "Planning" : "Working");
+      setActivity(
+        taskMode === "plan"
+          ? "Planning"
+          : interaction?.intent === "answer"
+            ? "Answering"
+            : "Working",
+      );
       const onAgentText = (chunk: string) => {
         const tool = /^\n\[Tool] ([^\n]+)\n$/.exec(chunk);
         if (tool) {
@@ -451,10 +502,46 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         appendStream(entryId, chunk);
       };
       try {
-        const taskAgent = taskMode === "build" ? await resolveTaskAgent(request) : agent;
-        if (!taskAgent) throw new Error("No credential is available for the selected model.");
+        const route =
+          taskMode === "build" && interaction?.intent === "repository_task"
+            ? await resolveTaskAgent(request)
+            : agent && { agent, selection, fallbacks: [] };
+        if (!route) throw new Error("No credential is available for the selected model.");
+        let taskAgent = route.agent;
         if (taskMode === "plan") await taskAgent.plan(active.id, request, onAgentText);
-        else await taskAgent.run(active.id, request, onAgentText);
+        else if (interaction?.intent === "answer")
+          await taskAgent.answer(active.id, request, onAgentText);
+        else {
+          try {
+            await taskAgent.run(active.id, request, onAgentText);
+          } catch (error) {
+            if (!(error instanceof ProviderError) || error.category !== "quota") throw error;
+            let latestError: unknown = error;
+            for (const fallback of route.fallbacks) {
+              append(
+                "system",
+                `Automatic fallback: ${route.selection.provider}/${route.selection.model} reached its quota; switching to ${fallback.provider}/${fallback.model}.`,
+              );
+              taskAgent = props.createAgent(
+                approval,
+                { provider: fallback.provider, model: fallback.model },
+                fallback.apiKey,
+                new JevDecisionProvider(jevKey!),
+                jevFeatures,
+              );
+              try {
+                await taskAgent.retryAfterProviderQuota(active.id, onAgentText);
+                latestError = undefined;
+                break;
+              } catch (fallbackError) {
+                latestError = fallbackError;
+                if (!(fallbackError instanceof ProviderError) || fallbackError.category !== "quota")
+                  throw fallbackError;
+              }
+            }
+            if (latestError) throw latestError;
+          }
+        }
         const task = taskAgent.status(active.id);
         if (task?.mode === "planning" && task.plan) append("system", formatPlan(task.plan));
         if ((task?.status as TaskStatus | undefined) === "cancelled")
@@ -469,7 +556,22 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           append("error", `Kairo: ${(error as Error).message}`);
       }
     },
-    [active.id, agent, append, appendStream, entries.length, resolveTaskAgent],
+    [
+      active.id,
+      agent,
+      append,
+      appendStream,
+      approval,
+      autoModelRouting,
+      classifyInteraction,
+      entries.length,
+      jevFeatures,
+      jevKey,
+      props,
+      resolveTaskAgent,
+      selection,
+      mode,
+    ],
   );
 
   const submit = useCallback(
@@ -610,7 +712,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         if (!provider || !modelParts.length || !isProviderId(provider))
           return append(
             "system",
-            `Current model: ${selection.provider}/${selection.model}\nUse: /model <gemini|groq|openrouter> <model-id>`,
+            `Current model: ${selection.provider}/${selection.model}\nUse: /model <gemini|groq|mistral> <model-id>`,
           );
         const next = { provider, model: modelParts.join(" ") };
         await chooseModel(next);

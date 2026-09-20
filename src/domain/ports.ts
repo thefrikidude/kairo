@@ -20,6 +20,7 @@ export interface ModelProvider {
     onText: (chunk: string) => void,
     onProgress?: (event: import("./provider-error.js").ProviderProgress) => void,
     systemInstruction?: string,
+    toolsEnabled?: boolean,
   ): Promise<ModelTurn>;
 }
 
@@ -103,6 +104,7 @@ export type JevRisk = "low" | "medium" | "high";
 export type JevRoute = "build" | "plan";
 export type JevRecovery = "repair" | "broaden" | "escalate";
 export type JevModelTier = "fast" | "balanced" | "strong";
+export type JevInteractionIntent = "conversation" | "answer" | "repository_task";
 export interface JevDecision<T extends string> {
   value: T;
   confidence: number;
@@ -114,6 +116,8 @@ export interface JevAssessment {
 /** Classifies bounded operation metadata; Kairo applies all autonomy policy locally. */
 export interface JevSafetyAdvisor {
   assess(state: string): Promise<JevAssessment>;
+  /** Routes an input before Kairo creates a repository task or exposes tools. */
+  intent?(state: string): Promise<JevDecision<JevInteractionIntent>>;
   route(state: string): Promise<JevDecision<JevRoute>>;
   recover(state: string): Promise<JevDecision<JevRecovery>>;
   modelTier(state: string): Promise<JevDecision<JevModelTier>>;

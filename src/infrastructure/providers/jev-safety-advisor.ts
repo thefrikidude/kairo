@@ -4,6 +4,7 @@ import type {
   JevDecision,
   JevRecovery,
   JevModelTier,
+  JevInteractionIntent,
   JevRisk,
   JevRoute,
   JevSafetyAdvisor,
@@ -37,6 +38,18 @@ export class JevDecisionProvider implements JevSafetyAdvisor {
   async assess(state: string): Promise<JevAssessment> {
     const decision = await this.decide("action_risk", state, riskChoices);
     return { risk: decision.value, confidence: decision.confidence };
+  }
+
+  /** Separates chat from repository work before Kairo exposes workspace context or tools. */
+  async intent(state: string): Promise<JevDecision<JevInteractionIntent>> {
+    return this.decide("interaction_intent", state, {
+      conversation:
+        "A greeting, acknowledgement, or casual social message that needs a short direct reply and no model call.",
+      answer:
+        "A general question or explanation that can be answered without repository context or tools.",
+      repository_task:
+        "A request to inspect, explain using, change, test, run, or otherwise act on the current repository.",
+    });
   }
 
   async route(state: string): Promise<JevDecision<JevRoute>> {

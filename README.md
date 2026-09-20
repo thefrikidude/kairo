@@ -16,7 +16,7 @@ src/
 └── interface/cli/   # Terminal command parsing and interactive REPL
 ```
 
-The application layer depends only on `domain/` interfaces. Gemini, Groq, and OpenRouter providers, SQLite, and terminal tools are adapters, so they can be replaced without rewriting the coding-agent workflow.
+The application layer depends only on `domain/` interfaces. Gemini, Groq, and Mistral providers, SQLite, and terminal tools are adapters, so they can be replaced without rewriting the coding-agent workflow.
 
 ## Current capabilities
 
@@ -31,16 +31,17 @@ The application layer depends only on `domain/` interfaces. Gemini, Groq, and Op
 - Automatic context checkpoints for long sessions, local SQLite task history, interrupted-task recovery, and session resume. Repository profiles are persisted with sessions, so resuming does not rediscover from zero.
 - Discovered test, typecheck, lint, and build scripts are included in the task context. After edits, Kairo recommends the narrowest plausible check and explains its focused/broad scope. It runs through the normal approval prompt unless the opt-in Jev trust envelope has autonomously approved a high-confidence, low-risk discovered verification command. A successful command records its command, exit status, selection reason, and verification result.
 - Failed post-edit verification creates a bounded repair brief from stack traces and test failures, including affected files, excerpts, and remaining retry budget. The selected model can continue repairing in the same task; retries rerun the focused failed check before Kairo proposes a broader discovered check. Every edit and arbitrary command still requires approval.
-- Optional TypeSafe Jev decision layer: confidence-gated, per-request BUILD-to-PLAN routing; advisory risk context in every write/command approval; bounded repair, broader-check, or escalation guidance; and opt-in autonomy for high-confidence, low-risk, repository-discovered verification only. All workspace restrictions remain deterministic; edits and arbitrary commands always require approval.
-- Provider-scoped credentials from the macOS Keychain, with `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, and `TYPESAFE_API_KEY` as temporary or CI overrides.
+- Optional TypeSafe Jev decision layer: obvious greetings stay local; confidence-gated intent routing keeps general questions tool-free and sends repository work into BUILD; BUILD-to-PLAN routing; advisory risk context in every write/command approval; bounded repair, broader-check, or escalation guidance; and opt-in autonomy for high-confidence, low-risk, repository-discovered verification only. All workspace restrictions remain deterministic; edits and arbitrary commands always require approval.
+- In `/auto`, a quota-exhausted routed model resumes the same task on the next locally credentialed fallback, preferring another provider before another model on the exhausted provider. Manual model selection never fails over automatically.
+- Provider-scoped credentials from the macOS Keychain, with `GEMINI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, and `TYPESAFE_API_KEY` as temporary or CI overrides.
 
-Kairo does not currently implement model failover, a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
+Kairo does not currently implement a full-screen terminal UI, MCP/plugins, Git worktrees, or subagents. Those are deliberate next phases, not current features.
 
 ## Requirements
 
 - Node.js 20 or newer
 - pnpm
-- A Gemini, Groq, or OpenRouter API key; TypeSafe is optional for Jev
+- A Gemini, Groq, or Mistral API key; TypeSafe is optional for Jev
 - macOS for `kairo auth login`; on other systems, use the provider environment variable instead
 
 ## Development
@@ -51,9 +52,9 @@ pnpm build
 node dist/interface/cli/index.js .
 ```
 
-Kairo opens directly into the terminal UI with the last saved model selected. Use `/models` to open the model picker, then use the arrow keys and Enter (or a number key) to select an available model. Selecting a model pins manual mode and Kairo will not override it. With Jev enabled, `/auto` toggles per-BUILD-task model routing across only the locally credentialed models in Kairo's allowlist; entering `/auto` again returns to the pinned fallback. PLAN mode is always user-controlled and never auto-switches models. Selecting a provider without a credential opens a masked in-TUI API-key prompt; Kairo validates the key and saves it in macOS Keychain. OpenRouter starts with curated free, tool-capable models; use `/model openrouter <model-id>` for any compatible OpenRouter model. Free availability and rate limits are controlled by OpenRouter and may change. TypeSafe Jev is intentionally excluded from active model selection because it produces typed decisions rather than code or chat responses.
+Kairo opens directly into the terminal UI with the last saved model selected. `Hello` and similarly obvious greetings are answered locally without a task, provider call, repository context, or tools. With Jev enabled, other general questions are answered by the selected coding model with tools disabled; Jev sends only repository requests into BUILD. Use `/models` to open the model picker, then use the arrow keys and Enter (or a number key) to select an available model. Selecting a model pins manual mode and Kairo will not override it. With Jev enabled, `/auto` routes both interaction mode and model choice: conversation and tool-free-answer inputs switch to PLAN, while repository implementation requests switch to BUILD and select from the locally credentialed model allowlist. Entering `/auto` again returns to the pinned fallback. If an AUTO-routed provider exhausts quota before Kairo finishes the task, it resumes on an available fallback, preferring another provider. When AUTO is off, `/plan` remains fully user-controlled. Selecting a provider without a credential opens a masked in-TUI API-key prompt; Kairo validates the key and saves it in macOS Keychain. Mistral Small 4 is the default Mistral option; Mistral Free mode enables API access without a credit card, subject to its current included usage and rate limits. TypeSafe Jev is intentionally excluded from active model selection because it produces typed decisions rather than code or chat responses.
 
-Use `/jev` to configure TypeSafe Jev as an optional decision layer. Its panel has a master toggle plus routing, safety, recovery, and safe-autonomy toggles. For a BUILD request, a `plan` route at 85% confidence or above creates a read-only plan for that request only; the session remains in BUILD mode. With safe autonomy enabled, Jev may run only a repository-discovered verification command when its risk assessment is high-confidence and low risk. Reads already run without approval; file edits, writes, and every arbitrary or manually supplied shell command still require the user. After failed verification, Jev can recommend a bounded repair, a broader discovered check, or a manual escalation. Explicit PLAN mode always wins. Jev never generates code, bypasses workspace restrictions, blocks a user-approved action, or grants wider permissions after a fallback. Its key is stored separately in macOS Keychain (or supplied with `TYPESAFE_API_KEY`). Kairo sends only bounded metadata: task/action labels, repository-relative paths, command text, check scope, and sanitized failure locations. It never sends source contents, edit payloads, tool output, credentials, or raw provider responses; traces retain only decision type, result/confidence bucket, fallback, and duration.
+Use `/jev` to configure TypeSafe Jev as an optional decision layer. Its panel has a master toggle plus routing, safety, recovery, and safe-autonomy toggles. Routing first classifies an ambiguous message as conversation, tool-free answer, or repository task; low-confidence or unavailable Jev decisions safely fall back to repository-task handling. For a BUILD request, a `plan` route at 85% confidence or above creates a read-only plan for that request only; the session remains in BUILD mode. With safe autonomy enabled, Jev may run only a repository-discovered verification command when its risk assessment is high-confidence and low risk. Reads already run without approval; file edits, writes, and every arbitrary or manually supplied shell command still require the user. After failed verification, Jev can recommend a bounded repair, a broader discovered check, or a manual escalation. Explicit PLAN mode always wins. Jev never generates code, bypasses workspace restrictions, blocks a user-approved action, or grants wider permissions after a fallback. Its key is stored separately in macOS Keychain (or supplied with `TYPESAFE_API_KEY`). Kairo sends only bounded metadata: task/action labels, repository-relative paths, command text, check scope, and sanitized failure locations. It never sends source contents, edit payloads, tool output, credentials, or raw provider responses; traces retain only decision type, result/confidence bucket, fallback, and duration.
 
 ## Production
 
@@ -85,10 +86,10 @@ kairo [workspace]
 # Credentials
 node dist/interface/cli/index.js auth login
 node dist/interface/cli/index.js auth login groq
-node dist/interface/cli/index.js auth login openrouter
+node dist/interface/cli/index.js auth login mistral
 node dist/interface/cli/index.js auth logout
 node dist/interface/cli/index.js auth logout groq
-node dist/interface/cli/index.js auth logout openrouter
+node dist/interface/cli/index.js auth logout mistral
 node dist/interface/cli/index.js auth status
 
 # Model configuration
@@ -135,8 +136,8 @@ Tool calls, approvals, outputs, and conversation messages are persisted so an in
 ## Roadmap
 
 1. **Make one agent dependable** — in progress: bounded tool loops, failure recovery, deterministic context checkpoints, repository profiling and relevance ranking, interrupted-task recovery, approval-gated focused verification, and bounded repair are implemented. Next is measuring and improving repair reliability across more realistic tasks.
-2. **Add provider abstraction** — implemented for Gemini, Groq, and OpenRouter through a shared provider registry; local providers remain future work.
-3. **Route tasks to models** — Jev can route a BUILD request to a read-only plan and, with `/auto`, select a locally credentialed fast, balanced, or strong coding-model tier. Selecting models from measured reliability and cost evidence remains future work.
+2. **Add provider abstraction** — implemented for Gemini, Groq, and Mistral through a shared provider registry; local providers remain future work.
+3. **Route tasks to models** — Jev classifies messages before the coding loop, can route a BUILD request to a read-only plan and, with `/auto`, selects a locally credentialed fast, balanced, or strong coding-model tier with quota fallback. Selecting models from measured reliability and cost evidence remains future work.
 4. **Add specialized subagents** — research, coding, and testing child sessions coordinated by a main agent.
 5. **Build an evaluation system** — run repeatable coding tasks and compare models, routing rules, agent profiles, cost, latency, and verified success.
 

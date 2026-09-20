@@ -23,6 +23,7 @@ export class GeminiProvider implements ModelProvider {
     onText: (chunk: string) => void,
     onProgress?: (event: ProviderProgress) => void,
     systemInstruction = modelSystemInstruction,
+    toolsEnabled = true,
   ): Promise<ModelTurn> {
     return recoverProvider(
       (markContent) =>
@@ -34,6 +35,7 @@ export class GeminiProvider implements ModelProvider {
           },
           markContent,
           systemInstruction,
+          toolsEnabled,
         ),
       onProgress,
       undefined,
@@ -46,6 +48,7 @@ export class GeminiProvider implements ModelProvider {
     onText: (chunk: string) => void,
     markContent: () => void,
     systemInstruction: string,
+    toolsEnabled: boolean,
   ): Promise<ModelTurn> {
     const contents = messages.map((message) => {
       if (message.role === "tool")
@@ -78,15 +81,19 @@ export class GeminiProvider implements ModelProvider {
       contents: contents as never,
       config: {
         systemInstruction,
-        tools: [
-          {
-            functionDeclarations: this.tools.map(({ name, description, parameters }) => ({
-              name,
-              description,
-              parameters,
-            })),
-          },
-        ],
+        ...(toolsEnabled
+          ? {
+              tools: [
+                {
+                  functionDeclarations: this.tools.map(({ name, description, parameters }) => ({
+                    name,
+                    description,
+                    parameters,
+                  })),
+                },
+              ],
+            }
+          : {}),
       } as never,
     });
     let text = "";

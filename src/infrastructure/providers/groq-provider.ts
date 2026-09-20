@@ -25,9 +25,11 @@ export class GroqProvider implements ModelProvider {
     onText: (chunk: string) => void,
     onProgress?: (event: ProviderProgress) => void,
     systemInstruction = modelSystemInstruction,
+    toolsEnabled = true,
   ): Promise<ModelTurn> {
     return recoverProvider(
-      (markContent) => this.streamOnce(messages, onText, markContent, systemInstruction),
+      (markContent) =>
+        this.streamOnce(messages, onText, markContent, systemInstruction, toolsEnabled),
       onProgress,
       undefined,
       "Groq",
@@ -40,6 +42,7 @@ export class GroqProvider implements ModelProvider {
     onText: (chunk: string) => void,
     markContent: () => void,
     systemInstruction: string,
+    toolsEnabled: boolean,
   ): Promise<ModelTurn> {
     const stream = await this.client.chat.completions.create({
       model: this.model,
@@ -48,12 +51,16 @@ export class GroqProvider implements ModelProvider {
         { role: "system", content: systemInstruction },
         ...messages.map((message) => this.message(message)),
       ] as never,
-      tools: this.tools.map(({ name, description, parameters }) => ({
-        type: "function" as const,
-        function: { name, description, parameters },
-      })) as never,
-      tool_choice: "auto",
-      parallel_tool_calls: false,
+      ...(toolsEnabled
+        ? {
+            tools: this.tools.map(({ name, description, parameters }) => ({
+              type: "function" as const,
+              function: { name, description, parameters },
+            })) as never,
+            tool_choice: "auto" as const,
+            parallel_tool_calls: false,
+          }
+        : {}),
     });
     let text = "";
     const pending = new Map<number, PendingToolCall>();

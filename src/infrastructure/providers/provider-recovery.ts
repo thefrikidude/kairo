@@ -122,7 +122,7 @@ export async function recoverProvider<T>(
           false,
           error.retryAfterMs,
           provider,
-          "The free-model rate limit was reached. Wait before trying again, or add OpenRouter credits.",
+          "The provider quota was exhausted. Wait before trying again or use a provider with available capacity.",
         );
       const delay = error.retryAfterMs ?? 1000 * 2 ** retries + timer.random() * 250;
       if (!error.retryable || hasContent || retries >= 3 || delay > 30000 - waited) {

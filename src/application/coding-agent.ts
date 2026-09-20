@@ -1,6 +1,7 @@
 import { ContextManager } from "./context-manager.js";
 import { FailureAnalyzer } from "./failure-analyzer.js";
 import { VerificationPlanner } from "./verification-planner.js";
+import { conversationSystemInstruction } from "./model-system-instruction.js";
 import type {
   Message,
   Task,
@@ -76,6 +77,31 @@ export class CodingAgent {
   async plan(sessionId: string, input: string, onText: (text: string) => void): Promise<void> {
     const task = this.store.startTask(sessionId, input, "planning");
     await this.executeTask(task, input, onText);
+  }
+
+  /** Answers without creating a task, loading repository context, or allowing tools. */
+  async answer(sessionId: string, input: string, onText: (text: string) => void): Promise<void> {
+    this.save(sessionId, { role: "user", content: input, createdAt: Date.now() });
+    const result = await this.provider.stream(
+      [{ role: "user", content: input, createdAt: Date.now() }],
+      onText,
+      undefined,
+      conversationSystemInstruction,
+      false,
+    );
+    if (result.toolCalls.length)
+      throw new Error("A conversation response unexpectedly requested a tool.");
+    if (result.text)
+      this.save(sessionId, { role: "model", content: result.text, createdAt: Date.now() });
+  }
+
+  /** Continues the failed task with a replacement provider after a quota exhaustion. */
+  async retryAfterProviderQuota(sessionId: string, onText: (text: string) => void): Promise<void> {
+    const task = this.store.latestTask(sessionId);
+    if (!task || task.status !== "failed")
+      throw new Error("No provider-quota failure is available to continue.");
+    const resumed = this.store.updateTask(task.id, { status: "acting", error: undefined });
+    await this.executeTask(resumed, undefined, onText);
   }
 
   /** Restarts the latest unfinished task using its saved conversation and repair history. */

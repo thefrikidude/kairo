@@ -17,11 +17,11 @@ test("credentials use independent provider services and environment overrides", 
   assert.equal(await store.get("gemini"), "saved-key");
   await store.save("groq", "gsk_saved");
   await store.clear("gemini");
-  await store.save("openrouter", "or_saved");
+  await store.save("mistral", "mistral_saved");
   await store.save("jev", "ts_saved");
   assert.ok(calls.some((args) => args.includes("dev.kairo.gemini")));
   assert.ok(calls.some((args) => args.includes("dev.kairo.groq")));
-  assert.ok(calls.some((args) => args.includes("dev.kairo.openrouter")));
+  assert.ok(calls.some((args) => args.includes("dev.kairo.mistral")));
   assert.ok(calls.some((args) => args.includes("dev.kairo.jev")));
   assert.doesNotMatch(JSON.stringify(calls), /environment-key/);
 });

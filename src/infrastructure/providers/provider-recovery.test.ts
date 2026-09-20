@@ -76,7 +76,7 @@ test("authentication, request and daily quota errors never retry", async () => {
   }
 });
 
-test("free-model quota errors do not spend the allowance on automatic retries", async () => {
+test("non-retry quota errors do not spend the allowance on automatic retries", async () => {
   let calls = 0;
   await assert.rejects(
     recoverProvider(
@@ -86,12 +86,12 @@ test("free-model quota errors do not spend the allowance on automatic retries", 
       },
       undefined,
       timer(),
-      "OpenRouter",
+      "Mistral",
       false,
     ),
     (error: unknown) =>
       error instanceof ProviderError &&
-      /free-model rate limit was reached/.test(error.message) &&
+      /provider quota was exhausted/.test(error.message) &&
       error.retryable === false,
   );
   assert.equal(calls, 1);
@@ -129,10 +129,10 @@ test("normalization reads nested Gemini retry hints and never retains raw bodies
   assert.equal(normalizeProviderError(new TypeError("fetch failed")).category, "network");
 });
 
-test("OpenRouter-style billing and request failures expose safe next steps", () => {
+test("billing and request failures expose safe next steps", () => {
   const credit = normalizeProviderError(
     { status: 402, message: "private provider body" },
-    "OpenRouter",
+    "Mistral",
   );
   assert.equal(credit.category, "quota");
   assert.match(credit.message, /credits, limits, or available model routes/);
@@ -140,7 +140,7 @@ test("OpenRouter-style billing and request failures expose safe next steps", () 
 
   const request = normalizeProviderError(
     { status: 400, message: "private provider body" },
-    "OpenRouter",
+    "Mistral",
   );
   assert.equal(request.category, "request");
   assert.match(request.message, /supports chat and tool calling/);

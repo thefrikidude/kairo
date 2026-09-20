@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createProvider, isProviderId, providerById } from "./provider-registry.js";
+import { isProviderId, providerById } from "./provider-registry.js";
 
-test("OpenRouter is a supported provider with a free, tool-capable default", () => {
-  assert.equal(isProviderId("openrouter"), true);
-  assert.equal(providerById("openrouter").models[0]?.id, "qwen/qwen3.8-27b:free");
+test("Mistral is a supported provider with a tool-capable default", () => {
+  assert.equal(isProviderId("mistral"), true);
+  assert.equal(isProviderId("openrouter"), false);
+  assert.equal(providerById("mistral").models[0]?.id, "mistral-small-latest");
 });
 
-test("OpenRouter validates a key against its authenticated key endpoint", async () => {
+test("Mistral validates a key against its models endpoint", async () => {
   const originalFetch = globalThis.fetch;
   let request: RequestInfo | URL | undefined;
   globalThis.fetch = async (input) => {
@@ -15,16 +16,9 @@ test("OpenRouter validates a key against its authenticated key endpoint", async 
     return new Response(null, { status: 200 });
   };
   try {
-    await providerById("openrouter").validate("or_test");
-    assert.equal(String(request), "https://openrouter.ai/api/v1/key");
+    await providerById("mistral").validate("mistral_test");
+    assert.equal(String(request), "https://api.mistral.ai/v1/models");
   } finally {
     globalThis.fetch = originalFetch;
   }
-});
-
-test("Jev cannot be selected as Kairo's active coding model", () => {
-  assert.throws(
-    () => createProvider({ provider: "openrouter", model: "~typesafe/jev-latest" }, "or_test", []),
-    /Jev is a decision model/,
-  );
 });

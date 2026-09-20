@@ -29,9 +29,11 @@ export class OpenRouterProvider implements ModelProvider {
     onText: (chunk: string) => void,
     onProgress?: (event: ProviderProgress) => void,
     systemInstruction = modelSystemInstruction,
+    toolsEnabled = true,
   ): Promise<ModelTurn> {
     return recoverProvider(
-      (markContent) => this.streamOnce(messages, onText, markContent, systemInstruction),
+      (markContent) =>
+        this.streamOnce(messages, onText, markContent, systemInstruction, toolsEnabled),
       onProgress,
       undefined,
       "OpenRouter",
@@ -44,6 +46,7 @@ export class OpenRouterProvider implements ModelProvider {
     onText: (chunk: string) => void,
     markContent: () => void,
     systemInstruction: string,
+    toolsEnabled: boolean,
   ): Promise<ModelTurn> {
     const stream = (await this.client.chat.send({
       chatRequest: {
@@ -53,12 +56,16 @@ export class OpenRouterProvider implements ModelProvider {
           { role: "system", content: systemInstruction },
           ...messages.map((message) => this.message(message)),
         ] as ChatMessages[],
-        tools: this.tools.map(({ name, description, parameters }) => ({
-          type: "function" as const,
-          function: { name, description, parameters },
-        })),
-        toolChoice: "auto",
-        parallelToolCalls: false,
+        ...(toolsEnabled
+          ? {
+              tools: this.tools.map(({ name, description, parameters }) => ({
+                type: "function" as const,
+                function: { name, description, parameters },
+              })),
+              toolChoice: "auto" as const,
+              parallelToolCalls: false,
+            }
+          : {}),
       },
     })) as AsyncIterable<ChatStreamChunk>;
     let text = "";
