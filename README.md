@@ -1,24 +1,39 @@
 # Kairo
 
-Kairo is a terminal coding agent for a local repository. Think “one careful OpenCode-style agent”: it explores the codebase, proposes changes, asks before doing anything mutating, and helps verify the result.
+Kairo is a terminal coding agent for a local repository. Think one careful, OpenCode-style agent: it understands the codebase, plans or implements a change, asks before doing anything mutating, and verifies the result.
 
-It is intentionally focused on making one agent dependable before adding fancy orchestration.
+The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe workspace tools, resumable sessions, useful traces, and honest verification state.
 
 ## What it does
 
-- Runs in an interactive terminal UI with streaming responses and approval prompts.
-- Profiles JavaScript/TypeScript repositories, finds relevant files, and keeps context bounded.
-- Reads files and searches freely inside the chosen workspace; edits, writes, and shell commands need approval.
-- Suggests focused checks after edits, tracks verification, and can make a bounded repair attempt when a check fails.
-- Saves resumable local sessions and metadata-only traces. No raw source, prompts, model responses, or command output are stored in traces.
-- Supports Gemini, Groq, and Mistral credentials. `/auto` can choose an available model and fall back after a quota failure; manually chosen models stay manual.
-- Includes deterministic and live evaluation commands for measuring the agent loop over time.
+- Runs in a full-screen Ink TUI with streaming responses, a task timeline, slash-command palette, and approval cards.
+- Profiles JavaScript and TypeScript repositories, ranks relevant files, and keeps model context bounded.
+- Reads and searches freely inside the workspace. Edits, writes, and arbitrary shell commands require approval.
+- Recommends focused checks after changes and can make bounded repair attempts when verification fails.
+- Saves resumable sessions, plans, checkpoints, and metadata-only task traces.
+- Supports Gemini, Groq, and Mistral coding models, with manual or optional Jev-powered routing.
+- Includes deterministic and live evaluations for measuring the agent loop over time.
 
-Kairo is not a full-screen TUI, plugin host, worktree manager, or multi-agent system yet. That is deliberate.
+Kairo deliberately remains a single-agent tool. It is not a multi-agent orchestrator, plugin platform, or worktree manager.
+
+## Jev and automatic routing
+
+[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) is Kairo’s optional decision and safety layer. It is **not** a coding model and does not generate source code. Gemini, Groq, or Mistral still perform the actual repository work.
+
+Open `/jev` in the TUI to add a TypeSafe API key and control four independent features:
+
+- **Task routing** distinguishes conversation, direct answers, repository work, and requests that should become a read-only plan.
+- **Safety context** assesses proposed operations while Kairo’s local approval and workspace rules remain authoritative.
+- **Recovery advice** helps choose whether a failed check needs a focused repair, broader context, or escalation.
+- **Safe autonomy** may skip a prompt only for a high-confidence, low-risk verification command that Kairo already discovered from the repository. It never grants autonomous file writes or arbitrary shell access.
+
+`/auto` separately toggles automatic model selection. When enabled, Jev classifies each BUILD request as `fast`, `balanced`, or `strong`, then Kairo chooses from models whose credentials are available locally. Decisions below the `0.85` confidence threshold, unavailable tiers, or Jev errors fall back to your manually selected model. Quota failures can fall through to another available model.
+
+Auto routing is opt-in. `/models` always puts you back in manual mode, and an explicit PLAN request is never silently upgraded into implementation. The footer only shows `AUTO` or `JEV` when those features are enabled.
 
 ## Quick start
 
-You’ll need Node.js 24.21+, pnpm, and an API key for Gemini, Groq, or Mistral. `kairo auth login` uses the macOS Keychain; elsewhere, use the provider environment variable.
+You’ll need Node.js 24.21+, pnpm, and an API key for Gemini, Groq, or Mistral.
 
 ```bash
 pnpm install
@@ -26,35 +41,42 @@ pnpm build
 node dist/interface/cli/index.js .
 ```
 
-After installing the package, start it in any repository with:
+After installing the package, start Kairo in any repository with:
 
 ```bash
 kairo [workspace]
 ```
 
-For a one-off local key, skip Keychain storage:
+The first-run flow can validate and store provider credentials in the macOS Keychain. Environment variables also work for one-off use:
 
 ```bash
-GEMINI_API_KEY=your_key_here node dist/interface/cli/index.js .
+GEMINI_API_KEY=your_key_here kairo .
+GROQ_API_KEY=your_key_here kairo .
+MISTRAL_API_KEY=your_key_here kairo .
 ```
 
-## Using it
+## TUI workflow
 
-Type normally to give Kairo a task. Type `/` in a session for the command palette.
+Type a request normally, or type `/` to open the command palette. Arrow keys move through matches; Tab completes commands that need arguments and runs commands that do not.
 
-- `/models` picks a model; `/auto` returns to automatic routing.
-- `/plan` switches to a read-only planning mode. Toggle it again to build.
-- `/status`, `/trace [task-id]`, and `/history` show task and session activity.
-- `/verify <command>` runs a check through the regular approval flow.
-- `/jev` configures the optional TypeSafe Jev decision layer. It can route requests and suggest recovery, but it never writes code or bypasses workspace restrictions. Its only optional autonomy is a high-confidence, low-risk repository-discovered verification command.
+- `/plan` toggles read-only planning. `/build` implements the latest saved plan.
+- `/models` chooses a coding model and disables Auto. `/auto` toggles Jev-powered automatic routing.
+- `/jev` manages the Jev credential, routing, safety, recovery, and autonomy features.
+- `/new`, `/resume [session-id]`, and `/history` manage saved sessions.
+- `/status`, `/trace [task-id]`, and `/changes` explain what happened.
+- `/verify <command>` runs an explicit check through the approval gate; `/compact` saves a context checkpoint.
+- `/cancel`, `/logout`, `/help`, and `/quit` handle the remaining session controls.
 
-Press `y` or Enter to approve an action; press `n` or Escape to deny it. Reads are immediate. Every edit, write, and arbitrary command still asks first.
+Press `y` or Enter to approve an action; press `n` or Escape to deny it. Use `Ctrl+O` to expand or collapse the task activity timeline.
+
+Every successful edit invalidates older verification. A task that changed files is not complete until its latest eligible check passes.
 
 ## CLI essentials
 
 ```bash
 # Credentials
 kairo auth login [gemini|groq|mistral]
+kairo auth logout [gemini|groq|mistral]
 kairo auth status
 
 # Saved sessions
@@ -62,16 +84,20 @@ kairo sessions list
 kairo resume <session-id>
 
 # Agent-loop evaluations
-kairo eval                 # deterministic fixtures
-kairo eval jev             # compare fixed Jev-off/Jev-on fixtures
-kairo eval live            # live Gemini + DeepEval fixtures
-kairo eval self --trials 3 # real provider runs against Kairo snapshots
+kairo eval
+kairo eval jev
+kairo eval live
+kairo eval self --trials 3
 kairo eval history
+kairo eval show <run-id>
 kairo eval baseline set <run-id>
+kairo eval baseline show
 kairo eval compare <run-id>
 ```
 
-`kairo eval` is a repeatable plumbing check, not a test of model intelligence. `eval self` is the capability suite: it uses isolated snapshots, seeds defects, requires Kairo to finish verified, and then runs hidden graders. Evaluation history stays sanitized—only IDs, counters, timing, pass state, and failure categories are saved.
+`kairo eval` checks deterministic plumbing. `eval jev` uses a local stub to exercise Jev integration; it is not a live latency or quality benchmark. `eval self` is the real-provider capability suite: it creates isolated Kairo snapshots, seeds defects, requires a verified result, and runs independent hidden graders.
+
+Evaluation history and task traces are sanitized. They store IDs, operation names, timing, outcomes, counters, and verification metadata—not prompts, model responses, source contents, credentials, or raw command output.
 
 ## Development
 
@@ -80,10 +106,10 @@ pnpm check
 pnpm test
 ```
 
-The code is split into `domain`, `application`, `infrastructure`, and `interface/cli`. The core loop is bounded, workspace-confined, and approval-gated; a successful command counts as verification, not automatic proof that the task is correct.
+The code is split into `domain`, `application`, `infrastructure`, and `interface/cli`. The core loop is bounded, workspace-confined, approval-gated, and designed so a successful command is evidence—not automatic proof that the task is correct.
 
 ## Direction
 
-1. Keep the single-agent loop reliable: safe tools, repair, verification, and useful traces.
-2. Improve evaluation coverage with realistic broken-repo tasks and measured reliability.
-3. Later: local providers, evidence-based routing, and specialized child agents.
+1. Keep the single-agent loop dependable: safer tools, better repair, stronger verification, and useful traces.
+2. Expand realistic broken-repository evaluations and measure reliability, cost, and latency.
+3. Add local providers and better evidence-based routing without weakening manual control.
