@@ -38,6 +38,34 @@ test("workspace tools read, edit, truncate, and reject escapes", async () => {
     (await tools.execute({ id: "3", name: "search_files", args: { query: "three" } })).output,
     /three/,
   );
+  const rootListings = await Promise.all(
+    [{}, { path: "" }, { path: "   " }, { path: "." }].map((args, index) =>
+      tools.execute({ id: `list-root-${index}`, name: "list_files", args }),
+    ),
+  );
+  assert.ok(rootListings.every((result) => result.ok && result.output.includes("src/a.txt")));
+  assert.match(
+    (
+      await tools.execute({
+        id: "search-root",
+        name: "search_files",
+        args: { query: "three", path: "" },
+      })
+    ).output,
+    /three/,
+  );
+  assert.equal(
+    (await tools.execute({ id: "empty-read", name: "read_file", args: { path: "" } })).ok,
+    false,
+  );
+  assert.equal(
+    (await tools.execute({ id: "empty-query", name: "search_files", args: { query: "" } })).ok,
+    false,
+  );
+  assert.equal(
+    (await tools.execute({ id: "outside-list", name: "list_files", args: { path: "/" } })).ok,
+    false,
+  );
   assert.equal(
     (await tools.execute({ id: "4", name: "read_file", args: { path: "../outside" } })).ok,
     false,

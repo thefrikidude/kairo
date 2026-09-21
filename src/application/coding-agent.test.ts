@@ -31,6 +31,36 @@ class FakeProvider implements ModelProvider {
     return { text: "done", toolCalls: [] };
   }
 }
+
+test("an empty optional list path is a successful workspace inspection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-empty-directory-path-"));
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create(root);
+    let turn = 0;
+    const agent = new CodingAgent(
+      {
+        async stream(): Promise<ModelTurn> {
+          turn += 1;
+          return turn === 1
+            ? { text: "", toolCalls: [{ id: "list", name: "list_files", args: { path: "" } }] }
+            : { text: "The workspace is empty.", toolCalls: [] };
+        },
+      },
+      store,
+      await WorkspaceTools.create(root),
+      new Deny(),
+      definitions,
+    );
+    await agent.run(session.id, "what is inside this folder", () => {});
+    const task = agent.status(session.id)!;
+    assert.equal(task.status, "completed");
+    assert.notEqual(task.error, "Too many consecutive tool failures.");
+  } finally {
+    store.close();
+  }
+});
+
 class Deny implements ApprovalPolicy {
   async approve(_call: ToolCall, _description: string): Promise<boolean> {
     return false;

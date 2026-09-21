@@ -41,7 +41,8 @@ export const definitions: ToolDefinition[] = [
   },
   {
     name: "list_files",
-    description: "List workspace files under an optional directory.",
+    description:
+      "List workspace files under an optional relative directory. Omit path or use an empty path to list the workspace root.",
     mutating: false,
     parameters: { type: "object", properties: { path: { type: "string" } } },
   },
@@ -71,7 +72,8 @@ export const definitions: ToolDefinition[] = [
   },
   {
     name: "search_files",
-    description: "Search UTF-8 workspace files for literal text.",
+    description:
+      "Search UTF-8 workspace files for literal text under an optional relative directory. Omit path or use an empty path to search the workspace root.",
     mutating: false,
     parameters: {
       type: "object",
@@ -155,6 +157,14 @@ export class WorkspaceTools implements ToolExecutor {
       return candidate;
     }
   }
+  /** Resolves an optional directory, treating a blank value as the workspace root. */
+  private directoryPath(input: unknown): Promise<string> {
+    const path =
+      input === undefined || input === null || (typeof input === "string" && !input.trim())
+        ? "."
+        : input;
+    return this.filePath(path);
+  }
   /** Produces the exact action text shown in the terminal approval prompt. */
   description(call: ToolCall): string {
     return call.name === "run_command"
@@ -168,7 +178,7 @@ export class WorkspaceTools implements ToolExecutor {
         case "list_files":
           return {
             ok: true,
-            output: await this.list(await this.filePath(call.args.path ?? ".")),
+            output: await this.list(await this.directoryPath(call.args.path)),
           };
         case "read_file":
           return {
@@ -185,7 +195,7 @@ export class WorkspaceTools implements ToolExecutor {
             ok: true,
             output: await this.search(
               String(call.args.query ?? ""),
-              await this.filePath(call.args.path ?? "."),
+              await this.directoryPath(call.args.path),
             ),
           };
         case "write_file": {
