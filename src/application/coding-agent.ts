@@ -155,7 +155,7 @@ export class CodingAgent {
       verificationExitCode: undefined,
       verificationDiscovered: this.isDiscoveredVerification(task.sessionId, command),
       verificationSelection: this.verificationPlanner.selectionForCommand(
-        this.store.repositoryProfile(task.sessionId),
+        this.store.repositorySnapshot(task.sessionId),
         command,
         "manual",
       ),
@@ -538,7 +538,7 @@ export class CodingAgent {
     });
     if (isVerification && task.verificationSelection?.command !== String(call.args.command ?? "")) {
       const selection = this.verificationPlanner.selectionForCommand(
-        this.store.repositoryProfile(task.sessionId),
+        this.store.repositorySnapshot(task.sessionId),
         String(call.args.command ?? ""),
         "model",
       );
@@ -596,7 +596,7 @@ export class CodingAgent {
           "\n[Jev escalated failed verification for manual review. Use /verify <command> when ready.]\n",
         );
       } else if (decision?.value === "broaden") {
-        const profile = this.store.repositoryProfile(task.sessionId);
+        const profile = this.store.repositorySnapshot(task.sessionId);
         const selection =
           profile && task.verificationSelection
             ? this.verificationPlanner.broader(profile, task.verificationSelection)
@@ -802,7 +802,7 @@ export class CodingAgent {
   private isDiscoveredVerification(sessionId: string, command: string): boolean {
     return (
       this.store
-        .repositoryProfile(sessionId)
+        .repositorySnapshot(sessionId)
         ?.verificationCandidates.some((candidate) => candidate.command === command) ?? false
     );
   }
@@ -814,7 +814,7 @@ export class CodingAgent {
   ): Promise<"none" | "ran" | "denied"> {
     if (!task.changedFiles.length) return "none";
     const latestRepair = this.store.repairAttempts(task.id).at(-1);
-    const profile = this.store.repositoryProfile(task.sessionId);
+    const profile = this.store.repositorySnapshot(task.sessionId);
     const selection: VerificationSelection | undefined =
       task.verificationPassed === true &&
       task.verificationSelection?.label === "typecheck" &&

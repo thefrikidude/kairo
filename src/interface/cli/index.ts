@@ -269,8 +269,8 @@ async function main(): Promise<void> {
   const config = await loadConfig();
   const tools = await WorkspaceTools.create(workspace);
   const active = session || store.create(workspace);
-  if (!store.repositoryProfile(active.id))
-    store.saveRepositoryProfile(active.id, await new RepositoryProfiler().profile(tools.root));
+  if (!store.repositorySnapshot(active.id))
+    store.saveRepositorySnapshot(active.id, await new RepositoryProfiler().profile(tools.root));
   await runRepl(
     (approval, selection, apiKey, jev, jevFeatures) =>
       new CodingAgent(

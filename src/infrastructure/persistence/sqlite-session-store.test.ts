@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { SqliteSessionStore } from "./sqlite-session-store.js";
-import type { RepositoryProfile } from "../../domain/models.js";
+import type { RepositorySnapshot } from "../../domain/models.js";
 
 test("sessions persist messages and sort by latest activity", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kairo-store-"));
@@ -61,11 +61,22 @@ test("saved planning artifacts survive a store restart and remain discoverable",
   }
 });
 
-test("repository profiles persist for resumed sessions", async () => {
+test("repository snapshots persist for resumed sessions", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kairo-profile-store-"));
   const path = join(dir, "sessions.sqlite");
-  const profile: RepositoryProfile = {
+  const snapshot: RepositorySnapshot = {
+    schemaVersion: 1,
     root: "/workspace",
+    fingerprint: { value: "abc", kind: "git", head: "123" },
+    entries: [],
+    ecosystems: ["node"],
+    changedPaths: [],
+    instructionFiles: [],
+    documentationFiles: [],
+    manifestFiles: ["package.json"],
+    ciFiles: [],
+    buildFiles: [],
+    truncated: false,
     packageManager: "pnpm",
     scripts: { test: "node --test" },
     configFiles: ["tsconfig.json"],
@@ -79,11 +90,43 @@ test("repository profiles persist for resumed sessions", async () => {
   };
   const first = await SqliteSessionStore.open(path);
   const session = first.create("/workspace");
-  first.saveRepositoryProfile(session.id, profile);
+  first.saveRepositorySnapshot(session.id, snapshot);
   first.close();
   const restarted = await SqliteSessionStore.open(path);
-  assert.deepEqual(restarted.repositoryProfile(session.id), profile);
+  assert.deepEqual(restarted.repositorySnapshot(session.id), snapshot);
   restarted.close();
+});
+
+test("legacy repository profiles normalize into stale snapshots", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  const session = store.create("/workspace");
+  const database = (store as unknown as { db: Database.Database }).db;
+  database
+    .prepare(
+      "INSERT INTO repository_profiles(session_id, profile_json, updated_at) VALUES (?, ?, ?)",
+    )
+    .run(
+      session.id,
+      JSON.stringify({
+        root: "/workspace",
+        packageManager: "unknown",
+        scripts: {},
+        configFiles: [],
+        sourceRoots: [],
+        testRoots: [],
+        ignoredPaths: [],
+        indexedFiles: [],
+        files: [],
+        verificationCandidates: [],
+        createdAt: 1,
+      }),
+      1,
+    );
+  const snapshot = store.repositorySnapshot(session.id)!;
+  assert.equal(snapshot.schemaVersion, 1);
+  assert.equal(snapshot.fingerprint.value, "legacy-stale");
+  assert.deepEqual(snapshot.entries, []);
+  store.close();
 });
 
 test("repair attempts persist failure evidence for an interrupted task", async () => {

@@ -15,7 +15,7 @@ export class ContextManager {
     if (this.store.messageCount(sessionId) >= AUTO_COMPACT_AFTER) this.compact(sessionId, task);
     const checkpoint = this.store.latestCheckpoint(sessionId);
     const recent = this.cleanStart(this.store.recentMessages(sessionId, MODEL_MESSAGE_LIMIT));
-    const profile = this.store.repositoryProfile(sessionId);
+    const profile = this.store.repositorySnapshot(sessionId);
     const repositoryContext = profile && {
       role: "user" as const,
       content: this.profileContext(task, profile),
@@ -80,7 +80,7 @@ export class ContextManager {
   /** Renders repository facts and ranked files as concise model guidance. */
   private profileContext(
     task: Task,
-    profile: NonNullable<ReturnType<TaskStore["repositoryProfile"]>>,
+    profile: NonNullable<ReturnType<TaskStore["repositorySnapshot"]>>,
   ): string {
     const relevantFiles = this.selector.select(this.retrievalQuery(task), profile);
     return [

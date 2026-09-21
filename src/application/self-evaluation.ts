@@ -357,7 +357,7 @@ async function runScenario(
     try {
       const session = store.create(workspace);
       const tools = await WorkspaceTools.create(workspace);
-      store.saveRepositoryProfile(session.id, await new RepositoryProfiler().profile(workspace));
+      store.saveRepositorySnapshot(session.id, await new RepositoryProfiler().profile(workspace));
       const agent = new CodingAgent(
         createProvider(
           { provider: options.provider, model: options.model },

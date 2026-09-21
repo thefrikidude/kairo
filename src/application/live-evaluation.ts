@@ -85,7 +85,7 @@ async function runObservedScenario(
     try {
       const session = store.create(root);
       const tools = await WorkspaceTools.create(root);
-      store.saveRepositoryProfile(session.id, await new RepositoryProfiler().profile(root));
+      store.saveRepositorySnapshot(session.id, await new RepositoryProfiler().profile(root));
       const agent = new CodingAgent(
         new GeminiProvider(options.apiKey, options.model, definitions),
         store,

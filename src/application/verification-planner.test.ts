@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { RepositoryProfile } from "../domain/models.js";
+import type { RepositorySnapshot } from "../domain/models.js";
 import { VerificationPlanner } from "./verification-planner.js";
 
 const planner = new VerificationPlanner();
 const profile: Pick<
-  RepositoryProfile,
+  RepositorySnapshot,
   "sourceRoots" | "testRoots" | "configFiles" | "verificationCandidates"
 > = {
   sourceRoots: ["src"],

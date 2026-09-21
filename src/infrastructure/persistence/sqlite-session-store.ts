@@ -5,7 +5,7 @@ import type {
   Message,
   TaskEvent,
   RepairAttempt,
-  RepositoryProfile,
+  RepositorySnapshot,
   Task,
   TaskStatus,
   TaskMode,
@@ -502,20 +502,37 @@ export class SqliteSessionStore {
       ).id,
     );
   }
-  /** Upserts the session's bounded repository intelligence profile. */
-  saveRepositoryProfile(sessionId: string, profile: RepositoryProfile): void {
+  /** Upserts the session's bounded, derived repository snapshot. */
+  saveRepositorySnapshot(sessionId: string, snapshot: RepositorySnapshot): void {
     this.db
       .prepare(
         "INSERT INTO repository_profiles(session_id, profile_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET profile_json=excluded.profile_json, updated_at=excluded.updated_at",
       )
-      .run(sessionId, JSON.stringify(profile), Date.now());
+      .run(sessionId, JSON.stringify(snapshot), Date.now());
   }
-  /** Reads the saved profile so a resumed session does not need to rediscover files. */
-  repositoryProfile(sessionId: string): RepositoryProfile | undefined {
+  /** Reads current snapshots and normalizes legacy profiles as stale snapshots. */
+  repositorySnapshot(sessionId: string): RepositorySnapshot | undefined {
     const row = this.db
       .prepare("SELECT profile_json FROM repository_profiles WHERE session_id=?")
       .get(sessionId) as { profile_json: string } | undefined;
-    return row ? (JSON.parse(row.profile_json) as RepositoryProfile) : undefined;
+    if (!row) return undefined;
+    const value = JSON.parse(row.profile_json) as Partial<RepositorySnapshot>;
+    if (value.schemaVersion === 1 && value.fingerprint && Array.isArray(value.entries))
+      return value as RepositorySnapshot;
+    return {
+      ...(value as Omit<RepositorySnapshot, "schemaVersion" | "fingerprint">),
+      schemaVersion: 1,
+      fingerprint: { value: "legacy-stale", kind: "filesystem" },
+      entries: value.entries ?? [],
+      ecosystems: value.ecosystems ?? [],
+      changedPaths: value.changedPaths ?? [],
+      instructionFiles: value.instructionFiles ?? [],
+      documentationFiles: value.documentationFiles ?? [],
+      manifestFiles: value.manifestFiles ?? [],
+      ciFiles: value.ciFiles ?? [],
+      buildFiles: value.buildFiles ?? [],
+      truncated: value.truncated ?? false,
+    } as RepositorySnapshot;
   }
   /** Persists one verification failure that started an agent repair cycle. */
   recordRepairAttempt(attempt: RepairAttempt): void {

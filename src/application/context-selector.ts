@@ -1,4 +1,4 @@
-import type { RepositoryProfile } from "../domain/models.js";
+import type { RepositorySnapshot } from "../domain/models.js";
 
 const STOP_WORDS = new Set([
   "the",
@@ -17,7 +17,7 @@ const STOP_WORDS = new Set([
 
 export class ContextSelector {
   /** Returns the highest-scoring repository files for a task or verification failure. */
-  select(task: string, profile: RepositoryProfile, limit = 12): string[] {
+  select(task: string, profile: RepositorySnapshot, limit = 12): string[] {
     const terms = this.terms(task);
     const files = profile.files?.length
       ? profile.files
@@ -49,7 +49,7 @@ export class ContextSelector {
   private score(
     file: { path: string; terms: string[]; symbols: string[]; relatedFiles: string[] },
     terms: string[],
-    profile: RepositoryProfile,
+    profile: RepositorySnapshot,
     direct: Set<string>,
   ): number {
     const relationshipScore = file.relatedFiles.some((path) => direct.has(path)) ? 3 : 0;
@@ -59,7 +59,7 @@ export class ContextSelector {
   private directScore(
     file: { path: string; terms: string[]; symbols: string[] },
     terms: string[],
-    profile: RepositoryProfile,
+    profile: RepositorySnapshot,
   ): number {
     const lower = file.path.toLowerCase();
     const pathScore = terms.reduce((score, term) => score + (lower.includes(term) ? 4 : 0), 0);

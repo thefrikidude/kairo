@@ -1,10 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ContextSelector } from "./context-selector.js";
-import type { RepositoryProfile } from "../domain/models.js";
+import type { RepositorySnapshot } from "../domain/models.js";
 
-const profile: RepositoryProfile = {
+const profile: RepositorySnapshot = {
+  schemaVersion: 1,
   root: "/workspace",
+  fingerprint: { value: "test", kind: "filesystem" },
+  entries: [],
+  ecosystems: ["node"],
+  changedPaths: [],
+  instructionFiles: [],
+  documentationFiles: ["README.md"],
+  manifestFiles: [],
+  ciFiles: [],
+  buildFiles: [],
+  truncated: false,
   packageManager: "pnpm",
   scripts: {},
   configFiles: [],
@@ -24,7 +35,7 @@ test("ranks task-relevant source and test files ahead of unrelated files", () =>
 });
 
 test("uses source terms, symbols, and relationships to rank code beyond filenames", () => {
-  const richProfile: RepositoryProfile = {
+  const richProfile: RepositorySnapshot = {
     ...profile,
     indexedFiles: ["src/login.ts", "src/validation.ts", "tests/login.test.ts"],
     files: [

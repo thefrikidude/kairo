@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, posix, relative } from "node:path";
-import type { RepositoryFile, RepositoryProfile } from "../../domain/models.js";
+import type { RepositoryFile, RepositorySnapshot } from "../../domain/models.js";
 import { VerificationPlanner } from "../../application/verification-planner.js";
 
 const DEFAULT_IGNORES = [".git", "node_modules", "dist", "build", "coverage", ".next", ".kairo"];
@@ -22,7 +22,7 @@ const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs",
 
 export class RepositoryProfiler {
   /** Builds a bounded JavaScript/TypeScript workspace profile for a new session. */
-  async profile(root: string): Promise<RepositoryProfile> {
+  async profile(root: string): Promise<RepositorySnapshot> {
     const [packageJson, gitignore] = await Promise.all([
       this.readPackage(root),
       this.readGitignore(root),
@@ -44,8 +44,19 @@ export class RepositoryProfiler {
             : "unknown";
     const files = await this.indexFiles(root, ignoredPaths);
     const scripts = this.scripts(packageJson);
-    const profile: RepositoryProfile = {
+    const profile: RepositorySnapshot = {
+      schemaVersion: 1,
       root,
+      fingerprint: { value: "unrefreshed", kind: "filesystem" },
+      entries: [],
+      ecosystems: packageJson ? ["node"] : [],
+      changedPaths: [],
+      instructionFiles: [],
+      documentationFiles: [],
+      manifestFiles: packageJson ? ["package.json"] : [],
+      ciFiles: [],
+      buildFiles: [],
+      truncated: false,
       packageName: typeof packageJson?.name === "string" ? packageJson.name : undefined,
       packageManager,
       scripts,

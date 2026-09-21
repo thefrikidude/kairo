@@ -1,6 +1,6 @@
 import type {
   FailureEvidence,
-  RepositoryProfile,
+  RepositorySnapshot,
   VerificationCandidate,
   VerificationSelection,
 } from "../domain/models.js";
@@ -15,7 +15,7 @@ const labels: Array<[VerificationCandidate["label"], string[]]> = [
 export class VerificationPlanner {
   /** Converts recognized package scripts into safe, ordered verification suggestions. */
   candidates(
-    profile: Pick<RepositoryProfile, "packageManager" | "scripts">,
+    profile: Pick<RepositorySnapshot, "packageManager" | "scripts">,
   ): VerificationCandidate[] {
     const runner = profile.packageManager === "unknown" ? "npm run" : profile.packageManager;
     const candidate: VerificationCandidate[] = [];
@@ -35,7 +35,7 @@ export class VerificationPlanner {
   /** Selects the narrowest known check that plausibly covers changed or failing files. */
   select(
     profile: Pick<
-      RepositoryProfile,
+      RepositorySnapshot,
       "sourceRoots" | "testRoots" | "configFiles" | "verificationCandidates"
     >,
     changedFiles: string[],
@@ -102,7 +102,7 @@ export class VerificationPlanner {
 
   /** Labels a command chosen outside the recommender without rejecting manual or model fallback. */
   selectionForCommand(
-    profile: Pick<RepositoryProfile, "verificationCandidates"> | undefined,
+    profile: Pick<RepositorySnapshot, "verificationCandidates"> | undefined,
     command: string,
     source: Exclude<VerificationSelection["source"], "recommended">,
   ): VerificationSelection {
@@ -118,7 +118,7 @@ export class VerificationPlanner {
 
   /** Returns a broader project check only after a focused recommendation has passed. */
   broader(
-    profile: Pick<RepositoryProfile, "verificationCandidates">,
+    profile: Pick<RepositorySnapshot, "verificationCandidates">,
     completed: VerificationSelection,
   ): VerificationSelection | undefined {
     const candidate = profile.verificationCandidates.find(

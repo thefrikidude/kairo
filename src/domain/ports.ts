@@ -85,8 +85,11 @@ export interface TaskStore {
   latestCheckpoint(sessionId: string): ContextCheckpoint | undefined;
   messageCount(sessionId: string): number;
   lastMessageId(sessionId: string): number;
-  saveRepositoryProfile(sessionId: string, profile: import("./models.js").RepositoryProfile): void;
-  repositoryProfile(sessionId: string): import("./models.js").RepositoryProfile | undefined;
+  saveRepositorySnapshot(
+    sessionId: string,
+    snapshot: import("./models.js").RepositorySnapshot,
+  ): void;
+  repositorySnapshot(sessionId: string): import("./models.js").RepositorySnapshot | undefined;
   recordRepairAttempt(attempt: RepairAttempt): void;
   repairAttempts(taskId: string): RepairAttempt[];
 }

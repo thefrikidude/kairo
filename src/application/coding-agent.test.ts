@@ -579,8 +579,19 @@ test("model operations record provider and model attribution", async () => {
 });
 
 function saveVerificationProfile(store: SqliteSessionStore, sessionId: string, root: string): void {
-  store.saveRepositoryProfile(sessionId, {
+  store.saveRepositorySnapshot(sessionId, {
+    schemaVersion: 1,
     root,
+    fingerprint: { value: "test", kind: "filesystem" },
+    entries: [],
+    ecosystems: ["node"],
+    changedPaths: [],
+    instructionFiles: [],
+    documentationFiles: [],
+    manifestFiles: ["package.json"],
+    ciFiles: [],
+    buildFiles: [],
+    truncated: false,
     packageManager: "pnpm",
     scripts: { test: "test -f a.txt" },
     configFiles: [],
@@ -693,8 +704,19 @@ test("a passing project typecheck is followed once by project tests", async () =
   await mkdir(join(root, "src"));
   const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
   const session = store.create(root);
-  store.saveRepositoryProfile(session.id, {
+  store.saveRepositorySnapshot(session.id, {
+    schemaVersion: 1,
     root,
+    fingerprint: { value: "test", kind: "filesystem" },
+    entries: [],
+    ecosystems: ["node"],
+    changedPaths: [],
+    instructionFiles: [],
+    documentationFiles: [],
+    manifestFiles: ["package.json"],
+    ciFiles: [],
+    buildFiles: [],
+    truncated: false,
     packageManager: "pnpm",
     scripts: {},
     configFiles: [],

@@ -29,8 +29,19 @@ test("context begins with the persisted repository profile and verification guid
   const store = await SqliteSessionStore.open(join(dir, "sessions.sqlite"));
   const session = store.create("/workspace");
   const task = store.startTask(session.id, "Fix login validation");
-  store.saveRepositoryProfile(session.id, {
+  store.saveRepositorySnapshot(session.id, {
+    schemaVersion: 1,
     root: "/workspace",
+    fingerprint: { value: "test", kind: "filesystem" },
+    entries: [],
+    ecosystems: ["node"],
+    changedPaths: [],
+    instructionFiles: [],
+    documentationFiles: [],
+    manifestFiles: ["package.json"],
+    ciFiles: [],
+    buildFiles: [],
+    truncated: false,
     packageManager: "pnpm",
     scripts: { test: "node --test" },
     configFiles: ["tsconfig.json"],

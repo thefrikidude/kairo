@@ -69,6 +69,7 @@ export interface VerificationCandidate {
   /** Discovery metadata explains a recommendation without retaining source or output. */
   scope?: "focused" | "broad";
   reason?: string;
+  evidence?: RepositoryEvidence[];
 }
 
 /** Records why one safe verification command was selected for a task. */
@@ -88,8 +89,51 @@ export interface RepositoryFile {
   relatedFiles: string[];
 }
 
-export interface RepositoryProfile {
+export type RepositoryFileKind =
+  | "instruction"
+  | "manifest"
+  | "ci"
+  | "build"
+  | "documentation"
+  | "source"
+  | "test"
+  | "config"
+  | "other";
+
+export interface RepositoryEntry {
+  path: string;
+  kind: RepositoryFileKind;
+  size: number;
+  mtimeMs: number;
+  contentHash?: string;
+}
+
+export interface RepositoryFingerprint {
+  value: string;
+  kind: "git" | "filesystem";
+  gitRoot?: string;
+  branch?: string;
+  head?: string;
+}
+
+export interface RepositoryEvidence {
+  path: string;
+  kind: "manifest" | "lockfile" | "config" | "ci" | "build";
+}
+
+export interface RepositorySnapshot {
+  schemaVersion: 1;
   root: string;
+  fingerprint: RepositoryFingerprint;
+  entries: RepositoryEntry[];
+  ecosystems: string[];
+  changedPaths: string[];
+  instructionFiles: string[];
+  documentationFiles: string[];
+  manifestFiles: string[];
+  ciFiles: string[];
+  buildFiles: string[];
+  truncated: boolean;
   packageName?: string;
   packageManager: "npm" | "pnpm" | "yarn" | "bun" | "unknown";
   scripts: Record<string, string>;
