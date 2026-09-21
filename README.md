@@ -7,7 +7,7 @@ The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe 
 ## What it does
 
 - Runs in a full-screen Ink TUI with streaming responses, a task timeline, slash-command palette, and approval cards.
-- Profiles JavaScript and TypeScript repositories, ranks relevant files, and keeps model context bounded.
+- Builds a language-neutral repository snapshot, enriches JavaScript/TypeScript structure, ranks relevant files, and keeps model context bounded.
 - Reads and searches freely inside the workspace. Edits, writes, and arbitrary shell commands require approval.
 - Recommends focused checks after changes and can make bounded repair attempts when verification fails.
 - Saves resumable sessions, plans, checkpoints, and metadata-only task traces.
@@ -30,6 +30,24 @@ Open `/jev` in the TUI to add a TypeSafe API key and control four independent fe
 `/auto` separately toggles automatic model selection. When enabled, Jev classifies each BUILD request as `fast`, `balanced`, or `strong`, then Kairo chooses from models whose credentials are available locally. Decisions below the `0.85` confidence threshold, unavailable tiers, or Jev errors fall back to your manually selected model. Quota failures can fall through to another available model.
 
 Auto routing is opt-in. `/models` always puts you back in manual mode, and an explicit PLAN request is never silently upgraded into implementation. The footer only shows `AUTO` or `JEV` when those features are enabled.
+
+## Repository awareness
+
+Kairo starts with a deterministic, language-neutral snapshot instead of assuming every project is JavaScript or TypeScript. In a Git repository it inventories tracked and untracked, non-ignored files with `git ls-files`. Outside Git it uses a bounded recursive walk. Symlinked directories, dependencies, generated output, binary content, and workspace escapes are excluded from content inspection.
+
+The snapshot records derived metadata for up to 20,000 files:
+
+- file paths, size, modification time, and role such as source, test, manifest, CI, build, documentation, configuration, or agent instruction;
+- detected ecosystems from manifests for Node, Python, Go, Rust, JVM, Ruby, PHP, Elixir, and .NET repositories;
+- Git root, branch, HEAD, and changed paths when available;
+- common source/test roots and existing JavaScript/TypeScript symbols, imports, and test relationships;
+- Node verification commands discovered from `package.json`, with the manifest and package-manager lockfile recorded as evidence.
+
+Kairo recognizes root and nested `AGENTS.md` and `CLAUDE.md` files, `.github/copilot-instructions.md`, and `.cursor/rules/**`. Applicable instruction text is read only for the current model request: root rules are always considered, while nested rules are included only for selected files under their directory. Each file is capped at 16 KiB and the complete instruction budget is 32 KiB.
+
+Snapshots are versioned and fingerprinted. Kairo checks freshness when a session starts or resumes and before each model turn after tool activity. Branch, HEAD, working-tree, inventory, or high-signal control-file changes rebuild stale metadata automatically. Old repository profiles are treated as stale and rebuilt once.
+
+Only derived metadata is persisted in SQLite. Source text, instruction contents, README contents, diffs, and command output are not stored in the snapshot. Manifests, CI files, build files, and documentation are surfaced as paths so the agent can inspect the relevant evidence on demand.
 
 ## Quick start
 
@@ -111,5 +129,7 @@ The code is split into `domain`, `application`, `infrastructure`, and `interface
 ## Direction
 
 1. Keep the single-agent loop dependable: safer tools, better repair, stronger verification, and useful traces.
-2. Expand realistic broken-repository evaluations and measure reliability, cost, and latency.
-3. Add local providers and better evidence-based routing without weakening manual control.
+2. Add evidence-backed Python, Go, Rust, JVM, and other verification adapters without guessing commands from prose.
+3. Add a lightweight repository graph, then Tree-sitter enrichment and on-demand LSP queries where deterministic retrieval needs stronger semantics.
+4. Expand realistic broken-repository evaluations and measure reliability, cost, and latency before considering embeddings or a graph database.
+5. Add local providers and better evidence-based routing without weakening manual control.
