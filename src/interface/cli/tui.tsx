@@ -275,30 +275,6 @@ function EmptyState({
   );
 }
 
-function ActivityLine({
-  busy,
-  pendingApproval,
-}: {
-  busy: "idle" | "planning" | "acting" | "verifying" | "cancelled";
-  pendingApproval?: PendingApproval;
-}): React.JSX.Element {
-  if (pendingApproval)
-    return (
-      <Text bold color="yellow">
-        ! Approval needed — your choice is required to continue
-      </Text>
-    );
-  if (busy === "idle") return <Text color="gray">Ready</Text>;
-  return (
-    <LoadingIndicator
-      color={busy === "verifying" ? "cyan" : "yellow"}
-      label={
-        busy === "planning" ? "Generating plan" : busy === "verifying" ? "Verifying" : "Working"
-      }
-    />
-  );
-}
-
 function WorkspaceBar({
   workspace,
   repo,
@@ -1061,11 +1037,6 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         ) : (
           <EmptyState mode={mode} workspace={active.workspace} repo={repo} />
         )}
-        {busy !== "idle" || pendingApproval ? (
-          <Box marginTop={1} paddingX={1}>
-            <ActivityLine busy={busy} pendingApproval={pendingApproval} />
-          </Box>
-        ) : null}
       </Box>
       {pendingApproval ? (
         <ApprovalCard pending={pendingApproval} />
