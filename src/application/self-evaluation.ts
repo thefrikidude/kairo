@@ -110,8 +110,8 @@ export const selfEvaluationScenarios: SelfEvaluationScenario[] = [
       replacement(
         workspace,
         "src/infrastructure/repository/repository-profiler.ts",
-        'names.has("bun.lockb") || names.has("bun.lock")',
-        'names.has("bun.lockb")',
+        'paths.has("bun.lockb") || paths.has("bun.lock")',
+        'paths.has("bun.lockb")',
       ),
     async verify(workspace) {
       const fixture = await mkdtemp(join(tmpdir(), "kairo-bun-grader-"));

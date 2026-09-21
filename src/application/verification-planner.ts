@@ -15,7 +15,8 @@ const labels: Array<[VerificationCandidate["label"], string[]]> = [
 export class VerificationPlanner {
   /** Converts recognized package scripts into safe, ordered verification suggestions. */
   candidates(
-    profile: Pick<RepositorySnapshot, "packageManager" | "scripts">,
+    profile: Pick<RepositorySnapshot, "packageManager" | "scripts"> &
+      Partial<Pick<RepositorySnapshot, "manifestFiles">>,
   ): VerificationCandidate[] {
     const runner = profile.packageManager === "unknown" ? "npm run" : profile.packageManager;
     const candidate: VerificationCandidate[] = [];
@@ -27,9 +28,31 @@ export class VerificationPlanner {
           command: runner === "npm run" ? `npm run ${script}` : `${runner} ${script}`,
           scope: "broad",
           reason: `Discovered ${script} package script.`,
+          evidence: [
+            {
+              path:
+                profile.manifestFiles?.find((path) => path.endsWith("package.json")) ??
+                "package.json",
+              kind: "manifest",
+            },
+            ...(profile.packageManager === "unknown"
+              ? []
+              : [{ path: this.lockfile(profile.packageManager), kind: "lockfile" as const }]),
+          ],
         });
     }
     return candidate;
+  }
+
+  private lockfile(
+    packageManager: Exclude<RepositorySnapshot["packageManager"], "unknown">,
+  ): string {
+    return {
+      npm: "package-lock.json",
+      pnpm: "pnpm-lock.yaml",
+      yarn: "yarn.lock",
+      bun: "bun.lock",
+    }[packageManager];
   }
 
   /** Selects the narrowest known check that plausibly covers changed or failing files. */

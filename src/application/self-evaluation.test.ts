@@ -18,7 +18,7 @@ const seededMarkers: Record<string, { path: string; missing: string }> = {
   },
   "bun-lockfile-discovery": {
     path: "src/infrastructure/repository/repository-profiler.ts",
-    missing: '|| names.has("bun.lock")',
+    missing: '|| paths.has("bun.lock")',
   },
   "context-relationship-ranking": {
     path: "src/application/context-selector.ts",

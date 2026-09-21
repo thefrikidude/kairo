@@ -18,7 +18,7 @@ import {
 } from "../../infrastructure/providers/provider-registry.js";
 import { SqliteSessionStore } from "../../infrastructure/persistence/sqlite-session-store.js";
 import { WorkspaceTools, definitions } from "../../infrastructure/tools/workspace-tools.js";
-import { RepositoryProfiler } from "../../infrastructure/repository/repository-profiler.js";
+import { RepositoryAwareness } from "../../infrastructure/repository/repository-awareness.js";
 import { CodingAgent } from "../../application/coding-agent.js";
 import { runRepl } from "./repl.js";
 import { runEvaluationSuite, runJevEvaluationSuite } from "../../application/evaluation-harness.js";
@@ -269,8 +269,7 @@ async function main(): Promise<void> {
   const config = await loadConfig();
   const tools = await WorkspaceTools.create(workspace);
   const active = session || store.create(workspace);
-  if (!store.repositorySnapshot(active.id))
-    store.saveRepositorySnapshot(active.id, await new RepositoryProfiler().profile(tools.root));
+  await new RepositoryAwareness(store).ensureFresh(active.id, tools.root);
   await runRepl(
     (approval, selection, apiKey, jev, jevFeatures) =>
       new CodingAgent(
