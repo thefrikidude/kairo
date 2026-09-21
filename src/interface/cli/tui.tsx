@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { basename } from "node:path";
 import { Box, render, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ModelSelection, TaskStatus, ToolCall } from "../../domain/models.js";
 import type { ApprovalPolicy, CredentialStore, JevFeatures } from "../../domain/ports.js";
 import { ProviderError } from "../../domain/provider-error.js";
@@ -36,7 +38,7 @@ import {
 
 export type InteractionMode = "build" | "plan";
 
-type TranscriptEntry = {
+export type TranscriptEntry = {
   id: number;
   kind: "user" | "assistant" | "system" | "error";
   text: string;
@@ -50,8 +52,28 @@ type TaskAgentRoute = {
   fallbacks: AvailableModel[];
 };
 
+export type RepositoryStatus = { branch?: string; changedFiles: number };
+export type ActivityItem = {
+  id: number;
+  label: string;
+  status: "running" | "done" | "failed";
+};
+
+const colors = {
+  accent: "#7dd3fc",
+  accentSoft: "#a5b4fc",
+  muted: "#64748b",
+  textSoft: "#94a3b8",
+  success: "#4ade80",
+  warning: "#fbbf24",
+  danger: "#fb7185",
+  jev: "#c084fc",
+} as const;
+
 export const slashCommands = [
+  { name: "/help", description: "Show commands and shortcuts" },
   { name: "/plan", description: "Toggle read-only planning mode" },
+  { name: "/build", description: "Build the latest saved plan" },
   { name: "/models", description: "Choose a model" },
   { name: "/auto", description: "Toggle Jev automatic model routing" },
   { name: "/jev", description: "Manage the Jev safety advisor" },
@@ -67,6 +89,40 @@ export const slashCommands = [
   { name: "/logout", description: "Remove the active provider credential" },
   { name: "/quit", description: "Exit Kairo" },
 ] as const;
+
+/** Reads only compact repository metadata for the header. */
+export function repositoryStatus(workspace: string): RepositoryStatus {
+  const git = process.platform === "darwin" ? "/usr/bin/git" : "git";
+  const run = (args: string[]) =>
+    execFileSync(git, args, {
+      cwd: workspace,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2_000,
+    }).trim();
+  try {
+    const branch = run(["branch", "--show-current"]) || undefined;
+    const status = run(["status", "--short", "--untracked-files=normal"]);
+    return { branch, changedFiles: status ? status.split("\n").length : 0 };
+  } catch {
+    return { changedFiles: 0 };
+  }
+}
+
+function friendlyToolName(name: string): string {
+  return (
+    {
+      list_files: "Scanning workspace",
+      read_file: "Reading file",
+      read_file_range: "Reading file section",
+      search_files: "Searching code",
+      write_file: "Writing file",
+      edit_file: "Editing file",
+      run_command: "Running command",
+      submit_plan: "Saving plan",
+    }[name] ?? name.replaceAll("_", " ")
+  );
+}
 
 /** Finds palette entries while the user is typing a slash-command name. */
 export function matchingSlashCommands(input: string): readonly (typeof slashCommands)[number][] {
@@ -114,7 +170,11 @@ export function interactionModeAfterTask(
 }
 
 export function ModeBadge({ mode }: { mode: InteractionMode }): React.JSX.Element {
-  return <Text color={mode === "plan" ? "yellow" : "green"}>{mode.toUpperCase()}</Text>;
+  return (
+    <Text bold color={mode === "plan" ? "yellow" : "green"}>
+      {mode === "plan" ? "PLAN" : "BUILD"}
+    </Text>
+  );
 }
 
 function entryColor(entry: TranscriptEntry): string | undefined {
@@ -122,6 +182,223 @@ function entryColor(entry: TranscriptEntry): string | undefined {
   if (entry.kind === "error") return "red";
   if (entry.kind === "system") return "yellow";
   return undefined;
+}
+
+function entryLabel(kind: TranscriptEntry["kind"]): string {
+  return { user: "YOU", assistant: "KAIRO", system: "SYSTEM", error: "ERROR" }[kind];
+}
+
+/** A compact chat row that keeps requests, answers, and operational notices distinct. */
+export function TranscriptRow({ entry }: { entry: TranscriptEntry }): React.JSX.Element {
+  const color = entryColor(entry);
+  const isConversation = entry.kind === "user" || entry.kind === "assistant";
+  return (
+    <Box flexDirection="column" marginTop={isConversation ? 1 : 0}>
+      <Text bold color={color} dimColor={entry.kind === "system"}>
+        {entryLabel(entry.kind)}
+      </Text>
+      <Box paddingLeft={1}>
+        <Text color={color} wrap="wrap">
+          {entry.text || "Thinking…"}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+export function BrandMark(): React.JSX.Element {
+  return (
+    <Box flexDirection="column" alignItems="center">
+      <Text bold color={colors.accent}>
+        {"██╗  ██╗ █████╗ ██╗██████╗  ██████╗"}
+      </Text>
+      <Text bold color={colors.accent}>
+        {"██║ ██╔╝██╔══██╗██║██╔══██╗██╔═══██╗"}
+      </Text>
+      <Text bold color={colors.accentSoft}>
+        {"█████╔╝ ███████║██║██████╔╝██║   ██║"}
+      </Text>
+      <Text bold color={colors.accentSoft}>
+        {"██╔═██╗ ██╔══██║██║██╔══██╗██║   ██║"}
+      </Text>
+      <Text bold color={colors.accentSoft}>
+        {"██║  ██╗██║  ██║██║██║  ██║╚██████╔╝"}
+      </Text>
+      <Text color={colors.muted}>{"╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝"}</Text>
+    </Box>
+  );
+}
+
+function EmptyState({
+  mode,
+  workspace,
+  repo,
+}: {
+  mode: InteractionMode;
+  workspace: string;
+  repo: RepositoryStatus;
+}): React.JSX.Element {
+  return (
+    <Box flexDirection="column" alignItems="center" marginTop={2} marginBottom={1}>
+      <BrandMark />
+      <Box marginTop={1}>
+        <Text bold color={colors.textSoft}>
+          dependable coding, right in your terminal
+        </Text>
+      </Box>
+      <Box marginTop={1}>
+        <Text color={colors.muted}>{basename(workspace)}</Text>
+        {repo.branch ? <Text color={colors.muted}> · {repo.branch}</Text> : null}
+        {repo.changedFiles ? (
+          <Text color={colors.warning}> · {repo.changedFiles} changed</Text>
+        ) : null}
+      </Box>
+      <Box flexDirection="column" marginTop={2}>
+        {[
+          ["/plan", "inspect first, change nothing"],
+          ["/models", "choose the coding model"],
+          ["/resume", "continue previous work"],
+          ["/help", "see every command"],
+        ].map(([command, description]) => (
+          <Box key={command}>
+            <Text bold color={colors.accent}>
+              {command.padEnd(11)}
+            </Text>
+            <Text color={colors.textSoft}>{description}</Text>
+          </Box>
+        ))}
+      </Box>
+      <Box marginTop={1}>
+        <Text color={colors.muted}>
+          {mode === "plan" ? "Read-only planning is active" : "Describe an outcome to begin"}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+export function TaskTimeline({
+  items,
+  expanded,
+}: {
+  items: ActivityItem[];
+  expanded: boolean;
+}): React.JSX.Element | null {
+  if (!items.length) return null;
+  const visible = expanded ? items : items.slice(-4);
+  const hidden = items.length - visible.length;
+  return (
+    <Box
+      borderStyle="round"
+      borderColor={colors.muted}
+      flexDirection="column"
+      marginTop={1}
+      paddingX={1}
+    >
+      <Box justifyContent="space-between">
+        <Text bold color={colors.textSoft}>
+          TASK ACTIVITY
+        </Text>
+        <Text color={colors.muted}>{expanded ? "ctrl+o collapse" : "ctrl+o expand"}</Text>
+      </Box>
+      {hidden > 0 ? <Text color={colors.muted}> … {hidden} earlier steps</Text> : null}
+      {visible.map((item) => (
+        <Text
+          key={item.id}
+          color={
+            item.status === "failed"
+              ? colors.danger
+              : item.status === "running"
+                ? colors.warning
+                : colors.textSoft
+          }
+        >
+          {item.status === "done" ? "  ✓" : item.status === "failed" ? "  ×" : "  ●"} {item.label}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+function ActivityLine({
+  busy,
+  activity,
+  pendingApproval,
+}: {
+  busy: "idle" | "planning" | "acting" | "verifying" | "cancelled";
+  activity?: string;
+  pendingApproval?: PendingApproval;
+}): React.JSX.Element {
+  if (pendingApproval)
+    return (
+      <Text bold color="yellow">
+        ! Approval needed — your choice is required to continue
+      </Text>
+    );
+  if (busy === "idle") return <Text color="gray">Ready</Text>;
+  return <Text color={busy === "verifying" ? "cyan" : "yellow"}>● {activity ?? "Working"}</Text>;
+}
+
+function WorkspaceBar({
+  workspace,
+  repo,
+  model,
+}: {
+  workspace: string;
+  repo: RepositoryStatus;
+  model: ModelSelection;
+}): React.JSX.Element {
+  return (
+    <Box borderStyle="round" borderColor={colors.muted} paddingX={1} justifyContent="space-between">
+      <Box>
+        <Text bold color={colors.accent}>
+          KAIRO
+        </Text>
+        <Text color={colors.textSoft}> · {basename(workspace)}</Text>
+        {repo.branch ? <Text color={colors.muted}> · {repo.branch}</Text> : null}
+        {repo.changedFiles ? (
+          <Text color={colors.warning}> · {repo.changedFiles} changed</Text>
+        ) : null}
+      </Box>
+      <Text color={colors.muted}>
+        {model.provider}/{model.model}
+      </Text>
+    </Box>
+  );
+}
+
+function ApprovalCard({ pending }: { pending: PendingApproval }): React.JSX.Element {
+  const [summary, ...details] = pending.description.split("\n");
+  const command = summary.startsWith("Run command");
+  return (
+    <Box
+      borderStyle="round"
+      borderColor={colors.warning}
+      flexDirection="column"
+      marginTop={1}
+      paddingX={1}
+    >
+      <Box justifyContent="space-between">
+        <Text bold color={colors.warning}>
+          REVIEW ACTION
+        </Text>
+        <Text bold color={colors.danger}>
+          {command ? "COMMAND" : "WRITE"}
+        </Text>
+      </Box>
+      <Text color={colors.textSoft}>{summary}</Text>
+      {details.length ? <Text>{details.join("\n")}</Text> : null}
+      <Box marginTop={1}>
+        <Text bold color={colors.success}>
+          y / Enter allow
+        </Text>
+        <Text color={colors.muted}> · </Text>
+        <Text bold color={colors.danger}>
+          n / Esc deny
+        </Text>
+      </Box>
+    </Box>
+  );
 }
 
 export interface KairoTuiProps {
@@ -147,6 +424,7 @@ export interface KairoTuiProps {
 export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const { exit } = useApp();
   const [active, setActive] = useState(props.session);
+  const [repo, setRepo] = useState(() => repositoryStatus(props.session.workspace));
   const [selection, setSelection] = useState(props.initialSelection);
   const [apiKey, setApiKey] = useState<string | undefined>(props.initialApiKey);
   const [jevKey, setJevKey] = useState<string | undefined>(props.initialJevKey);
@@ -161,6 +439,9 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     "idle",
   );
   const [activity, setActivity] = useState<string>();
+  const [taskActivity, setTaskActivity] = useState<ActivityItem[]>([]);
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const activityId = useRef(0);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval>();
   const [modelPicker, setModelPicker] = useState(false);
   const [modelIndex, setModelIndex] = useState(0);
@@ -281,6 +562,28 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     setEntries((current) =>
       current.map((entry) =>
         entry.id === entryId ? { ...entry, text: entry.text + chunk } : entry,
+      ),
+    );
+  }, []);
+  const beginTaskActivity = useCallback((label: string) => {
+    setActivityExpanded(false);
+    setTaskActivity([{ id: activityId.current++, label, status: "running" }]);
+  }, []);
+  const advanceTaskActivity = useCallback(
+    (label: string, status: ActivityItem["status"] = "running") => {
+      setTaskActivity((current) => [
+        ...current.map((item) =>
+          item.status === "running" ? { ...item, status: "done" as const } : item,
+        ),
+        { id: activityId.current++, label, status },
+      ]);
+    },
+    [],
+  );
+  const finishTaskActivity = useCallback((failed = false) => {
+    setTaskActivity((current) =>
+      current.map((item) =>
+        item.status === "running" ? { ...item, status: failed ? "failed" : "done" } : item,
       ),
     );
   }, []);
@@ -493,6 +796,9 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       const entryId = entries.length + 1;
       setEntries((current) => [...current, { id: entryId, kind: "assistant", text: "" }]);
       setBusy(taskMode === "plan" ? "planning" : "acting");
+      beginTaskActivity(
+        taskMode === "plan" ? "Understanding the planning request" : "Understanding the request",
+      );
       setActivity(
         taskMode === "plan"
           ? "Planning"
@@ -510,12 +816,24 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         }
         const tool = /^\n\[Tool] ([^\n]+)\n$/.exec(chunk);
         if (tool) {
+          advanceTaskActivity(friendlyToolName(tool[1]));
           setActivity(
             `${taskMode === "plan" || routedToPlan ? "Planning" : "Working"} · ${tool[1]}…`,
           );
           return;
         }
-        if (/^\n\[(Plan saved|Verification passed)]\n$/.test(chunk)) return;
+        if (chunk === "\n[Plan saved]\n") {
+          advanceTaskActivity("Plan saved — ready to build", "done");
+          return;
+        }
+        if (chunk === "\n[Verification passed]\n") {
+          advanceTaskActivity("Verification passed", "done");
+          return;
+        }
+        if (chunk === "\n[Verification failed]\n") {
+          advanceTaskActivity("Verification failed", "failed");
+          return;
+        }
         appendStream(entryId, chunk);
       };
       try {
@@ -564,9 +882,13 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         if (task?.mode === "planning" && task.plan) append("system", formatPlan(task.plan));
         if ((task?.status as TaskStatus | undefined) === "cancelled")
           append("system", "Task cancelled.");
+        finishTaskActivity(task?.status === "failed");
+        setRepo(repositoryStatus(active.workspace));
         setActivity(undefined);
         setBusy("idle");
       } catch (error) {
+        finishTaskActivity(true);
+        setRepo(repositoryStatus(active.workspace));
         setActivity(undefined);
         setBusy("idle");
         // CodingAgent already rendered and persisted a terminal task failure. Avoid echoing it.
@@ -576,13 +898,17 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     },
     [
       active.id,
+      active.workspace,
+      advanceTaskActivity,
       agent,
       append,
       appendStream,
       approval,
       autoModelRouting,
+      beginTaskActivity,
       classifyInteraction,
       entries.length,
+      finishTaskActivity,
       jevFeatures,
       jevKey,
       props,
@@ -605,9 +931,26 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         line = selectedCommand.name;
       }
       setInput("");
+      if (line === "/help") {
+        return append(
+          "system",
+          slashCommands
+            .map((command) => `${command.name.padEnd(10)} ${command.description}`)
+            .join("\n"),
+        );
+      }
       if (line === "/plan") {
         const next = interactionModeAfterCommand(mode, line);
         setMode(next);
+        return;
+      }
+      if (line === "/build") {
+        setMode("build");
+        const latest = agent?.status(active.id);
+        if (latest?.status === "planned" && latest.plan) {
+          append("system", "Building the saved plan.");
+          await runTask("Implement the saved plan and verify the result.", "build");
+        }
         return;
       }
       if (line === "/quit" || line === "/exit") return exit();
@@ -615,6 +958,9 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         const next = props.store.create(active.workspace);
         setActive(next);
         setMode("build");
+        setEntries([]);
+        setTaskActivity([]);
+        setRepo(repositoryStatus(next.workspace));
         return append("system", `New session: ${next.id} — BUILD mode.`);
       }
       if (line === "/history") {
@@ -664,6 +1010,8 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           if (!next) return append("error", "Session not found.");
           setActive(next);
           setMode("build");
+          setTaskActivity([]);
+          setRepo(repositoryStatus(next.workspace));
           return append("system", `Resumed ${next.id} — BUILD mode.`);
         }
         if (!agent) return append("error", "No active credential.");
@@ -681,12 +1029,16 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       if (line.startsWith("/verify ")) {
         if (!agent) return append("error", "No active credential.");
         setBusy("verifying");
+        beginTaskActivity("Running verification");
         try {
           await agent.verify(active.id, line.slice(8).trim(), (chunk) =>
             append("assistant", chunk),
           );
+          finishTaskActivity(false);
+          setRepo(repositoryStatus(active.workspace));
           setBusy("idle");
         } catch (error) {
+          finishTaskActivity(true);
           setBusy("idle");
           append("error", `Kairo: ${(error as Error).message}`);
         }
@@ -750,8 +1102,10 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       active,
       agent,
       append,
+      beginTaskActivity,
       busy,
       exit,
+      finishTaskActivity,
       mode,
       autoModelRouting,
       jevEnabled,
@@ -769,6 +1123,12 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   );
 
   useInput((inputKey, key) => {
+    if (key.ctrl && inputKey.toLowerCase() === "o" && taskActivity.length) {
+      setActivityExpanded((current) => !current);
+    }
+  });
+
+  useInput((inputKey, key) => {
     if (pendingApproval || modelPicker || jevPanel || !commandMatches.length) return;
     if (key.upArrow) return setCommandIndex((current) => Math.max(0, current - 1));
     if (key.downArrow)
@@ -784,34 +1144,38 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     }
   });
 
+  const visibleEntries = entries.slice(-8);
+  const hiddenEntries = entries.length - visibleEntries.length;
+  const terminalHeight = process.stdout.rows ? Math.max(20, process.stdout.rows - 1) : undefined;
+  const activeModel = routedSelection ?? selection;
+
   return (
-    <Box flexDirection="column">
-      <Box borderStyle="round" borderColor={mode === "plan" ? "yellow" : "green"} paddingX={1}>
-        <Text bold>Kairo</Text>
-        <Text>
-          {" "}
-          {active.workspace} · {active.id}
-        </Text>
-      </Box>
-      <Box flexDirection="column" marginTop={1}>
-        {entries.map((entry) => (
-          <Text key={entry.id} color={entryColor(entry)} wrap="wrap">
-            {entry.kind === "user" ? "> " : ""}
-            {entry.text || "…"}
-          </Text>
-        ))}
-      </Box>
-      <Box marginTop={1}>
-        <Text color={pendingApproval ? "yellow" : "gray"}>
-          {pendingApproval ? "Approval required" : (activity ?? `Status: ${busy}`)}
-        </Text>
+    <Box flexDirection="column" minHeight={terminalHeight}>
+      {entries.length ? (
+        <WorkspaceBar workspace={active.workspace} repo={repo} model={activeModel} />
+      ) : null}
+      <Box flexDirection="column" flexGrow={1}>
+        {entries.length ? (
+          <Box flexDirection="column" marginTop={1}>
+            {hiddenEntries > 0 ? (
+              <Text color={colors.muted}> … {hiddenEntries} earlier messages hidden</Text>
+            ) : null}
+            {visibleEntries.map((entry) => (
+              <TranscriptRow key={entry.id} entry={entry} />
+            ))}
+          </Box>
+        ) : (
+          <EmptyState mode={mode} workspace={active.workspace} repo={repo} />
+        )}
+        <TaskTimeline items={taskActivity} expanded={activityExpanded} />
+        {busy !== "idle" || pendingApproval ? (
+          <Box marginTop={1} paddingX={1}>
+            <ActivityLine busy={busy} activity={activity} pendingApproval={pendingApproval} />
+          </Box>
+        ) : null}
       </Box>
       {pendingApproval ? (
-        <Box borderStyle="single" borderColor="yellow" flexDirection="column" paddingX={1}>
-          <Text bold>Approval required</Text>
-          <Text>{pendingApproval.description}</Text>
-          <Text>Allow? [y/N]</Text>
-        </Box>
+        <ApprovalCard pending={pendingApproval} />
       ) : credentialModel ? (
         <Box borderStyle="single" borderColor="cyan" flexDirection="column" paddingX={1}>
           <Text bold>{providerById(credentialModel.provider).name} API key</Text>
@@ -887,17 +1251,41 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       ) : (
         <Box flexDirection="column">
           {commandMatches.length ? (
-            <Box borderStyle="single" borderColor="cyan" flexDirection="column" paddingX={1}>
+            <Box
+              borderStyle="round"
+              borderColor={colors.accent}
+              flexDirection="column"
+              marginTop={1}
+              paddingX={1}
+            >
+              <Text bold color={colors.accent}>
+                COMMANDS
+              </Text>
               {commandMatches.map((command, index) => (
-                <Text key={command.name} color={index === commandIndex ? "cyan" : undefined}>
+                <Text
+                  key={command.name}
+                  color={index === commandIndex ? colors.accent : colors.textSoft}
+                  bold={index === commandIndex}
+                >
                   {index === commandIndex ? "›" : " "} {command.name.padEnd(10)}{" "}
                   {command.description}
                 </Text>
               ))}
-              <Text color="gray">↑/↓ choose · Enter or Tab select</Text>
+              <Text color={colors.muted}>↑/↓ navigate · Tab complete · Enter run</Text>
             </Box>
           ) : null}
-          <Box borderStyle="round" borderColor={mode === "plan" ? "yellow" : "green"} paddingX={1}>
+          <Box
+            borderStyle="round"
+            borderColor={mode === "plan" ? colors.warning : colors.accentSoft}
+            marginTop={1}
+            paddingX={1}
+            minHeight={3}
+            alignItems="center"
+          >
+            <Text color={colors.accent} bold>
+              {">"}
+            </Text>
+            <Text> </Text>
             <TextInput
               value={input}
               onChange={(value) => {
@@ -917,18 +1305,26 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           </Box>
           <Box paddingX={1} justifyContent="space-between">
             <Box>
+              <Text color={colors.muted}>enter send · / commands</Text>
+              {taskActivity.length ? <Text color={colors.muted}> · ctrl+o activity</Text> : null}
+            </Box>
+            <Text color={colors.textSoft}>
+              {activeModel.provider}/{activeModel.model}
+            </Text>
+          </Box>
+          <Box paddingX={1} justifyContent="space-between">
+            <Box>
               <ModeBadge mode={mode} />
-              <Text color="gray">
+              <Text color={colors.muted}>
                 {" "}
-                · {autoModelRouting ? "AUTO → " : ""}
-                {(routedSelection ?? selection).provider}/{(routedSelection ?? selection).model}
+                · {autoModelRouting ? "Auto routing" : "Manual model"}
               </Text>
             </Box>
             {autoModelRouting || jevEnabled ? (
               <Box>
-                {autoModelRouting ? <Text color="cyan">AUTO</Text> : null}
-                {autoModelRouting && jevEnabled ? <Text color="gray"> · </Text> : null}
-                {jevEnabled ? <Text color="magenta">JEV</Text> : null}
+                {autoModelRouting ? <Text color={colors.accent}>AUTO</Text> : null}
+                {autoModelRouting && jevEnabled ? <Text color={colors.muted}> · </Text> : null}
+                {jevEnabled ? <Text color={colors.jev}>JEV</Text> : null}
               </Box>
             ) : null}
           </Box>

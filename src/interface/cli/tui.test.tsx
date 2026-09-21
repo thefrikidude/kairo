@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { render } from "ink-testing-library";
 import {
+  BrandMark,
   ModeBadge,
+  TaskTimeline,
+  TranscriptRow,
   TuiApproval,
   interactionModeAfterCommand,
   interactionModeAfterTask,
@@ -27,6 +30,47 @@ test("mode badge renders the active plan and build states", () => {
   assert.match(view.lastFrame() ?? "", /PLAN/);
   view.rerender(<ModeBadge mode="build" />);
   assert.match(view.lastFrame() ?? "", /BUILD/);
+});
+
+test("brand mark renders the large Kairo start-screen identity", () => {
+  const view = render(<BrandMark />);
+  const frame = view.lastFrame() ?? "";
+  assert.match(frame, /██/);
+  assert.equal(frame.split("\n").length, 6);
+});
+
+test("task timeline collapses old tool activity and preserves the active step", () => {
+  const items = [
+    { id: 1, label: "Understanding request", status: "done" as const },
+    { id: 2, label: "Scanning workspace", status: "done" as const },
+    { id: 3, label: "Reading file", status: "done" as const },
+    { id: 4, label: "Editing file", status: "done" as const },
+    { id: 5, label: "Running verification", status: "running" as const },
+  ];
+  const view = render(<TaskTimeline items={items} expanded={false} />);
+  assert.match(view.lastFrame() ?? "", /1 earlier steps/);
+  assert.doesNotMatch(view.lastFrame() ?? "", /Understanding request/);
+  assert.match(view.lastFrame() ?? "", /Running verification/);
+
+  view.rerender(<TaskTimeline items={items} expanded />);
+  assert.match(view.lastFrame() ?? "", /Understanding request/);
+});
+
+test("transcript rows clearly separate the speaker from the message", () => {
+  const view = render(
+    <TranscriptRow entry={{ id: 1, kind: "assistant", text: "I found the failing test." }} />,
+  );
+  assert.match(view.lastFrame() ?? "", /KAIRO/);
+  assert.match(view.lastFrame() ?? "", /I found the failing test\./);
+
+  view.rerender(<TranscriptRow entry={{ id: 2, kind: "user", text: "Fix it" }} />);
+  assert.match(view.lastFrame() ?? "", /YOU/);
+  assert.match(view.lastFrame() ?? "", /Fix it/);
+});
+
+test("an empty assistant row communicates active streaming", () => {
+  const view = render(<TranscriptRow entry={{ id: 1, kind: "assistant", text: "" }} />);
+  assert.match(view.lastFrame() ?? "", /Thinking…/);
 });
 
 test("model picker lists every registered model", () => {
