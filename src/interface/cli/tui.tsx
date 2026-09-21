@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { basename } from "node:path";
 import { Box, render, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelSelection, TaskStatus, ToolCall } from "../../domain/models.js";
 import type { ApprovalPolicy, CredentialStore, JevFeatures } from "../../domain/ports.js";
 import { ProviderError } from "../../domain/provider-error.js";
@@ -198,11 +198,30 @@ export function TranscriptRow({ entry }: { entry: TranscriptEntry }): React.JSX.
         {entryLabel(entry.kind)}
       </Text>
       <Box paddingLeft={1}>
-        <Text color={color} wrap="wrap">
-          {entry.text || "Thinking…"}
-        </Text>
+        {entry.kind === "assistant" && !entry.text ? (
+          <LoadingIndicator label="Generating response" />
+        ) : (
+          <Text color={color} wrap="wrap">
+            {entry.text}
+          </Text>
+        )}
       </Box>
     </Box>
+  );
+}
+
+function LoadingIndicator({ label, color = "yellow" }: { label: string; color?: string }) {
+  const frames = ["◐", "◓", "◑", "◒"];
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setFrame((current) => (current + 1) % frames.length), 120);
+    timer.unref();
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <Text color={color}>
+      {frames[frame]} {label}…
+    </Text>
   );
 }
 
@@ -336,7 +355,12 @@ function ActivityLine({
       </Text>
     );
   if (busy === "idle") return <Text color="gray">Ready</Text>;
-  return <Text color={busy === "verifying" ? "cyan" : "yellow"}>● {activity ?? "Working"}</Text>;
+  return (
+    <LoadingIndicator
+      color={busy === "verifying" ? "cyan" : "yellow"}
+      label={activity ?? "Working"}
+    />
+  );
 }
 
 function WorkspaceBar({
@@ -781,6 +805,15 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
 
   const runTask = useCallback(
     async (request: string, requestedMode: InteractionMode) => {
+      // Render optimistically before routing can make a network request through Jev.
+      append("user", request);
+      setBusy(requestedMode === "plan" ? "planning" : "acting");
+      beginTaskActivity(
+        requestedMode === "plan"
+          ? "Understanding the planning request"
+          : "Understanding the request",
+      );
+      setActivity(requestedMode === "plan" ? "Planning" : "Understanding request");
       const interaction =
         requestedMode === "build" || autoModelRouting
           ? await classifyInteraction(request)
@@ -788,17 +821,21 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       const taskMode =
         autoModelRouting && interaction ? autoInteractionMode(interaction.intent) : requestedMode;
       if (autoModelRouting && taskMode !== mode) setMode(taskMode);
-      append("user", request);
-      if (interaction?.intent === "conversation")
+      setBusy(taskMode === "plan" ? "planning" : "acting");
+      if (interaction?.intent === "conversation") {
+        finishTaskActivity(false);
+        setActivity(undefined);
+        setBusy("idle");
         return append("assistant", interaction.localResponse ?? "How can I help?");
-      if (!agent)
+      }
+      if (!agent) {
+        finishTaskActivity(true);
+        setActivity(undefined);
+        setBusy("idle");
         return append("error", "No active credential. Use /models to add a provider API key.");
+      }
       const entryId = entries.length + 1;
       setEntries((current) => [...current, { id: entryId, kind: "assistant", text: "" }]);
-      setBusy(taskMode === "plan" ? "planning" : "acting");
-      beginTaskActivity(
-        taskMode === "plan" ? "Understanding the planning request" : "Understanding the request",
-      );
       setActivity(
         taskMode === "plan"
           ? "Planning"

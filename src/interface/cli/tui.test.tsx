@@ -68,9 +68,10 @@ test("transcript rows clearly separate the speaker from the message", () => {
   assert.match(view.lastFrame() ?? "", /Fix it/);
 });
 
-test("an empty assistant row communicates active streaming", () => {
+test("an empty assistant row renders an animated response indicator", () => {
   const view = render(<TranscriptRow entry={{ id: 1, kind: "assistant", text: "" }} />);
-  assert.match(view.lastFrame() ?? "", /Thinking…/);
+  assert.match(view.lastFrame() ?? "", /Generating response/);
+  view.unmount();
 });
 
 test("model picker lists every registered model", () => {
