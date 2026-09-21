@@ -2,6 +2,7 @@ import { ContextManager } from "./context-manager.js";
 import { FailureAnalyzer } from "./failure-analyzer.js";
 import { VerificationPlanner } from "./verification-planner.js";
 import { conversationSystemInstruction } from "./model-system-instruction.js";
+import { RepositoryAwareness } from "../infrastructure/repository/repository-awareness.js";
 import type {
   Message,
   Task,
@@ -54,6 +55,7 @@ export class CodingAgent {
       recovery: true,
       autonomy: false,
     },
+    private readonly repositoryAwareness?: RepositoryAwareness,
   ) {
     this.context = new ContextManager(store);
   }
@@ -395,7 +397,8 @@ export class CodingAgent {
 
   /** Records model latency even when streaming fails; partial operations remain visible after restart. */
   private async modelTurn(task: Task, onText: (text: string) => void): Promise<ModelTurn> {
-    const messages = this.context.prepare(task.sessionId, task);
+    await this.repositoryAwareness?.ensureFresh(task.sessionId, this.tools.root);
+    const messages = await this.context.prepare(task.sessionId, task);
     const operationId = crypto.randomUUID();
     const modelName = this.modelSelection
       ? `${this.modelSelection.provider}/${this.modelSelection.model}`

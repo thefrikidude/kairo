@@ -269,7 +269,8 @@ async function main(): Promise<void> {
   const config = await loadConfig();
   const tools = await WorkspaceTools.create(workspace);
   const active = session || store.create(workspace);
-  await new RepositoryAwareness(store).ensureFresh(active.id, tools.root);
+  const repositoryAwareness = new RepositoryAwareness(store);
+  await repositoryAwareness.ensureFresh(active.id, tools.root);
   await runRepl(
     (approval, selection, apiKey, jev, jevFeatures) =>
       new CodingAgent(
@@ -281,6 +282,7 @@ async function main(): Promise<void> {
         selection,
         jev,
         jevFeatures,
+        repositoryAwareness,
       ),
     store,
     active,

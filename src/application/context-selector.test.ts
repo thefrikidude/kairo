@@ -69,3 +69,22 @@ test("uses source terms, symbols, and relationships to rank code beyond filename
   assert.equal(selected[0], "src/validation.ts");
   assert.ok(selected.indexOf("src/login.ts") < selected.indexOf("tests/login.test.ts"));
 });
+
+test("prioritizes changed files and relevant repository control files", () => {
+  const snapshot: RepositorySnapshot = {
+    ...profile,
+    changedPaths: ["src/payments.ts"],
+    entries: [
+      { path: "src/payments.ts", kind: "source", size: 1, mtimeMs: 1 },
+      { path: "package.json", kind: "manifest", size: 1, mtimeMs: 1 },
+      { path: ".github/workflows/ci.yml", kind: "ci", size: 1, mtimeMs: 1 },
+    ],
+    indexedFiles: ["src/payments.ts", "package.json", ".github/workflows/ci.yml"],
+  };
+  const changed = new ContextSelector().select("Investigate the current change", snapshot);
+  assert.equal(changed[0], "src/payments.ts");
+  const dependency = new ContextSelector().select("Update a package dependency", snapshot);
+  assert.equal(dependency[0], "package.json");
+  const pipeline = new ContextSelector().select("Repair the CI workflow", snapshot);
+  assert.equal(pipeline[0], ".github/workflows/ci.yml");
+});

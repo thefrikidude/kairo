@@ -8,6 +8,7 @@ import { taskMetrics } from "./task-metrics.js";
 import { ProviderError } from "../domain/provider-error.js";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
 import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-tools.js";
+import { RepositoryAwareness } from "../infrastructure/repository/repository-awareness.js";
 import type { ModelTurn, Message, ToolCall } from "../domain/models.js";
 import type { ApprovalPolicy, JevSafetyAdvisor, ModelProvider } from "../domain/ports.js";
 
@@ -576,6 +577,27 @@ test("model operations record provider and model attribution", async () => {
   } finally {
     store.close();
   }
+});
+
+test("repository awareness refreshes between model turns after an edit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-agent-awareness-"));
+  const store = await SqliteSessionStore.open(":memory:");
+  const session = store.create(root);
+  const awareness = new RepositoryAwareness(store);
+  const agent = new CodingAgent(
+    new FakeProvider(),
+    store,
+    await WorkspaceTools.create(root),
+    new Allow(),
+    definitions,
+    undefined,
+    undefined,
+    { routing: true, safety: true, recovery: true, autonomy: false },
+    awareness,
+  );
+  await agent.run(session.id, "create a file", () => {});
+  assert.ok(store.repositorySnapshot(session.id)?.entries.some((entry) => entry.path === "a.txt"));
+  store.close();
 });
 
 function saveVerificationProfile(store: SqliteSessionStore, sessionId: string, root: string): void {

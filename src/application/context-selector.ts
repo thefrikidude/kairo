@@ -19,15 +19,20 @@ export class ContextSelector {
   /** Returns the highest-scoring repository files for a task or verification failure. */
   select(task: string, profile: RepositorySnapshot, limit = 12): string[] {
     const terms = this.terms(task);
-    const files = profile.files?.length
-      ? profile.files
-      : profile.indexedFiles.map((path) => ({
-          path,
-          terms: [],
-          symbols: [],
-          imports: [],
-          relatedFiles: [],
-        }));
+    const structural = new Map((profile.files ?? []).map((file) => [file.path, file]));
+    const inventory = profile.entries?.length
+      ? profile.entries
+      : profile.indexedFiles.map((path) => ({ path, kind: "other" as const }));
+    const files = inventory.map((entry) => ({
+      ...(structural.get(entry.path) ?? {
+        path: entry.path,
+        terms: [],
+        symbols: [],
+        imports: [],
+        relatedFiles: [],
+      }),
+      kind: entry.kind,
+    }));
     const direct = new Set(
       files.filter((file) => this.directScore(file, terms, profile) > 0).map((file) => file.path),
     );
@@ -47,7 +52,13 @@ export class ContextSelector {
   }
   /** Adds graph proximity to a file's direct lexical and structural relevance. */
   private score(
-    file: { path: string; terms: string[]; symbols: string[]; relatedFiles: string[] },
+    file: {
+      path: string;
+      terms: string[];
+      symbols: string[];
+      relatedFiles: string[];
+      kind: RepositorySnapshot["entries"][number]["kind"];
+    },
     terms: string[],
     profile: RepositorySnapshot,
     direct: Set<string>,
@@ -57,7 +68,12 @@ export class ContextSelector {
   }
   /** Scores paths, file text, symbols, and source/test roles independently. */
   private directScore(
-    file: { path: string; terms: string[]; symbols: string[] },
+    file: {
+      path: string;
+      terms: string[];
+      symbols: string[];
+      kind: RepositorySnapshot["entries"][number]["kind"];
+    },
     terms: string[],
     profile: RepositorySnapshot,
   ): number {
@@ -73,6 +89,19 @@ export class ContextSelector {
     );
     const sourceScore = profile.sourceRoots.some((root) => lower.startsWith(`${root}/`)) ? 1 : 0;
     const testScore = profile.testRoots.some((root) => lower.startsWith(`${root}/`)) ? 1 : 0;
-    return pathScore + contentScore + symbolScore + sourceScore + testScore;
+    const changedScore = profile.changedPaths?.includes(file.path) ? 8 : 0;
+    const kindTerms: Partial<Record<typeof file.kind, string[]>> = {
+      instruction: ["instruction", "agent", "rule", "convention"],
+      manifest: ["dependency", "package", "manifest", "setup", "install"],
+      ci: ["ci", "pipeline", "workflow", "action"],
+      build: ["build", "docker", "make", "task"],
+      documentation: ["documentation", "docs", "readme", "architecture"],
+      test: ["test", "spec", "verify"],
+      config: ["config", "configuration", "setting"],
+    };
+    const kindScore = terms.some((term) => kindTerms[file.kind]?.includes(term)) ? 3 : 0;
+    return (
+      pathScore + contentScore + symbolScore + sourceScore + testScore + changedScore + kindScore
+    );
   }
 }

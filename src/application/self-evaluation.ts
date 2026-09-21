@@ -282,11 +282,9 @@ export const selfEvaluationScenarios: SelfEvaluationScenario[] = [
         const module = await import(
           pathToFileURL(join(workspace, "dist/application/context-manager.js")).href
         );
-        const brief = new module.ContextManager(store)
-          .prepare(session.id, task)
-          .find((message: { content: string }) =>
-            message.content.startsWith("Repair attempt"),
-          )?.content;
+        const brief = (await new module.ContextManager(store).prepare(session.id, task)).find(
+          (message: { content: string }) => message.content.startsWith("Repair attempt"),
+        )?.content;
         if (!brief?.includes("Evidence: Expected true | received false"))
           throw new Error("The repair brief did not preserve evidence.");
       } finally {

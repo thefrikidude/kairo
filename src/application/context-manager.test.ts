@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ContextManager } from "./context-manager.js";
@@ -17,7 +17,7 @@ test("context compacts long history into a durable checkpoint", async () => {
       content: `message ${index}`,
       createdAt: index,
     });
-  const messages = new ContextManager(store).prepare(session.id, task);
+  const messages = await new ContextManager(store).prepare(session.id, task);
   assert.ok(store.latestCheckpoint(session.id));
   assert.ok(messages.length <= 33);
   assert.match(messages[0]!.content, /Context checkpoint/);
@@ -53,9 +53,73 @@ test("context begins with the persisted repository profile and verification guid
     verificationCandidates: [{ label: "test", command: "pnpm test" }],
     createdAt: 1,
   });
-  const messages = new ContextManager(store).prepare(session.id, task);
+  const messages = await new ContextManager(store).prepare(session.id, task);
   assert.match(messages[0]!.content, /Package manager: pnpm/);
   assert.match(messages[0]!.content, /Available verification: test = pnpm test/);
   assert.match(messages[0]!.content, /src\/login.ts/);
+  store.close();
+});
+
+test("context loads root and applicable nested instructions transiently", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-instruction-context-"));
+  await Promise.all([
+    mkdir(join(root, "services", "api"), { recursive: true }),
+    mkdir(join(root, "unrelated"), { recursive: true }),
+    mkdir(join(root, ".github"), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(join(root, "AGENTS.md"), "Always run focused tests."),
+    writeFile(join(root, "services", "AGENTS.md"), "Use the service conventions."),
+    writeFile(join(root, "unrelated", "AGENTS.md"), "UNRELATED SECRET"),
+    writeFile(join(root, ".github", "copilot-instructions.md"), `${"x".repeat(20_000)}TAIL_MARKER`),
+  ]);
+  const store = await SqliteSessionStore.open(":memory:");
+  const session = store.create(root);
+  const task = store.startTask(session.id, "Fix services api login");
+  store.saveRepositorySnapshot(session.id, {
+    schemaVersion: 1,
+    root,
+    fingerprint: { value: "test", kind: "filesystem" },
+    entries: [
+      { path: "AGENTS.md", kind: "instruction", size: 25, mtimeMs: 1 },
+      { path: "services/AGENTS.md", kind: "instruction", size: 28, mtimeMs: 1 },
+      { path: "unrelated/AGENTS.md", kind: "instruction", size: 16, mtimeMs: 1 },
+      {
+        path: ".github/copilot-instructions.md",
+        kind: "instruction",
+        size: 20_011,
+        mtimeMs: 1,
+      },
+      { path: "services/api/login.py", kind: "source", size: 1, mtimeMs: 1 },
+    ],
+    ecosystems: ["python"],
+    changedPaths: [],
+    instructionFiles: [
+      "AGENTS.md",
+      ".github/copilot-instructions.md",
+      "services/AGENTS.md",
+      "unrelated/AGENTS.md",
+    ],
+    documentationFiles: [],
+    manifestFiles: [],
+    ciFiles: [],
+    buildFiles: [],
+    truncated: false,
+    packageManager: "unknown",
+    scripts: {},
+    configFiles: [],
+    sourceRoots: ["services"],
+    testRoots: [],
+    ignoredPaths: [],
+    indexedFiles: ["services/api/login.py"],
+    files: [],
+    verificationCandidates: [],
+    createdAt: 1,
+  });
+  const messages = await new ContextManager(store).prepare(session.id, task);
+  assert.match(messages[0]!.content, /Always run focused tests/);
+  assert.match(messages[0]!.content, /Use the service conventions/);
+  assert.doesNotMatch(messages[0]!.content, /UNRELATED SECRET|TAIL_MARKER/);
+  assert.doesNotMatch(JSON.stringify(store.repositorySnapshot(session.id)), /focused tests/);
   store.close();
 });
