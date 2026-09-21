@@ -1,6 +1,8 @@
 # Kairo
+<img width="1159" height="677" alt="Screenshot 2026-09-21 at 12 02 14 PM" src="https://github.com/user-attachments/assets/85024d79-f167-4f9d-a80a-3c2fccb74bba" />
 
-Kairo is a terminal coding agent for a local repository. Think one careful, OpenCode-style agent: it understands the codebase, plans or implements a change, asks before doing anything mutating, and verifies the result.
+
+Kairo is a terminal coding agent for a local repository. It understands the codebase, plans or implements a change, asks before doing anything mutating, and verifies the result.
 
 The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe workspace tools, resumable sessions, useful traces, and honest verification state.
 
@@ -13,8 +15,6 @@ The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe 
 - Saves resumable sessions, plans, checkpoints, and metadata-only task traces.
 - Supports Gemini, Groq, and Mistral coding models, with manual or optional Jev-powered routing.
 - Includes deterministic and live evaluations for measuring the agent loop over time.
-
-Kairo deliberately remains a single-agent tool. It is not a multi-agent orchestrator, plugin platform, or worktree manager.
 
 ## Jev and automatic routing
 
