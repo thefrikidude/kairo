@@ -8,6 +8,7 @@ import { render } from "ink-testing-library";
 import {
   BrandMark,
   changedFileReview,
+  inlineDiff,
   ModeBadge,
   TranscriptRow,
   TuiApproval,
@@ -83,6 +84,11 @@ test("changed-file review shows the working-tree patch for a file Kairo touched"
     assert.match(review.diff, /-export const value = 1;/);
     assert.match(review.diff, /\+export const value = 2;/);
     assert.equal(review.unavailable, undefined);
+
+    await rm(join(workspace, "app.ts"));
+    const deleted = changedFileReview(workspace, "app.ts");
+    assert.match(deleted.diff, /deleted file mode/);
+    assert.match(deleted.diff, /-export const value = 1;/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -100,6 +106,60 @@ test("changed-file review renders untracked files as additions", async () => {
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
+});
+
+test("inline diffs retain Codex-style line metadata and change counts", () => {
+  const diff = inlineDiff({
+    path: "hello.txt",
+    diff: [
+      "diff --git a/hello.txt b/hello.txt",
+      "index 1111111..2222222 100644",
+      "--- a/hello.txt",
+      "+++ b/hello.txt",
+      "@@ -1,2 +1,3 @@",
+      " moonlit circuits",
+      "-old signal",
+      "+new signal",
+      "+violet sky",
+      "",
+    ].join("\n"),
+  });
+
+  assert.ok(diff);
+  assert.equal(diff.path, "hello.txt");
+  assert.equal(diff.additions, 2);
+  assert.equal(diff.deletions, 1);
+  assert.deepEqual(diff.hunks[0]?.lines, [
+    { kind: "context", oldLine: 1, newLine: 1, text: "moonlit circuits" },
+    { kind: "deletion", oldLine: 2, text: "old signal" },
+    { kind: "addition", newLine: 2, text: "new signal" },
+    { kind: "addition", newLine: 3, text: "violet sky" },
+  ]);
+});
+
+test("inline diffs retain every line in a long patch", () => {
+  const additions = Array.from({ length: 300 }, (_, index) => `+line ${index + 1}`);
+  const diff = inlineDiff({
+    path: "long.txt",
+    diff: [
+      "diff --git a/long.txt b/long.txt",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/long.txt",
+      "@@ -0,0 +1,300 @@",
+      ...additions,
+      "",
+    ].join("\n"),
+  });
+
+  assert.ok(diff);
+  assert.equal(diff.additions, 300);
+  assert.equal(diff.hunks[0]?.lines.length, 300);
+  assert.deepEqual(diff.hunks[0]?.lines.at(-1), {
+    kind: "addition",
+    newLine: 300,
+    text: "line 300",
+  });
 });
 
 test("model picker lists every registered model", () => {

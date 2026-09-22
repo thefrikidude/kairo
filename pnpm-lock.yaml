@@ -31,6 +31,9 @@ importers:
       ink-text-input:
         specifier: ^6.0.0
         version: 6.0.0(ink@7.1.1(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
+      parse-diff:
+        specifier: 0.12.0
+        version: 0.12.0
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -2150,6 +2153,12 @@ packages:
         integrity: sha512-qBGxg/7Q3Kl9Wfhrz2Z74UnvnHTXLNG6jmKJFeBvP2+y4lV7So+7SR62+Zd47JvdrCkX+nDcnr0ObPzek/+6RA==,
       }
 
+  parse-diff@0.12.0:
+    resolution:
+      {
+        integrity: sha512-2Xr5mW4Bqd4CqYq2zttfw/RZraK+KcRuJvNkJzbDk3ea67Ap525XeTvBdtDE5tigJMVzIx/DMUzsShAf6+5SCA==,
+      }
+
   patch-console@2.0.0:
     resolution:
       {
@@ -3986,6 +3995,8 @@ snapshots:
       retry: 0.13.1
 
   papaparse@5.7.0: {}
+
+  parse-diff@0.12.0: {}
 
   patch-console@2.0.0: {}
 

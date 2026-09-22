@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 import { Box, render, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
+import parseDiff from "parse-diff";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ModelSelection, Task, TaskStatus, ToolCall } from "../../domain/models.js";
 import type { ApprovalPolicy, CredentialStore, JevFeatures } from "../../domain/ports.js";
@@ -58,6 +59,19 @@ export type ChangedFileReview = {
   path: string;
   diff: string;
   unavailable?: string;
+};
+export type InlineDiffLine = {
+  kind: "context" | "addition" | "deletion";
+  oldLine?: number;
+  newLine?: number;
+  text: string;
+};
+export type InlineDiffHunk = { header: string; lines: InlineDiffLine[] };
+export type InlineDiff = {
+  path: string;
+  additions: number;
+  deletions: number;
+  hunks: InlineDiffHunk[];
 };
 const colors = {
   accent: "#7dd3fc",
@@ -282,31 +296,92 @@ function LoadingIndicator({ label, color = "yellow" }: { label: string; color?: 
   );
 }
 
-function diffLineColor(line: string): string | undefined {
-  if (line.startsWith("+++")) return colors.success;
-  if (line.startsWith("---")) return colors.danger;
-  if (line.startsWith("+")) return colors.success;
-  if (line.startsWith("-")) return colors.danger;
-  if (line.startsWith("@@")) return colors.accent;
-  return undefined;
+/** Converts a Git patch into the line-oriented model used by Kairo's terminal review view. */
+export function inlineDiff(review: ChangedFileReview): InlineDiff | undefined {
+  const file = parseDiff(review.diff)[0];
+  if (!file) return undefined;
+  return {
+    path: review.path,
+    additions: file.additions,
+    deletions: file.deletions,
+    hunks: file.chunks.map((chunk) => ({
+      header: chunk.content,
+      lines: chunk.changes.map((change) => {
+        if (change.type === "add")
+          return { kind: "addition", newLine: change.ln, text: change.content.slice(1) };
+        if (change.type === "del")
+          return { kind: "deletion", oldLine: change.ln, text: change.content.slice(1) };
+        return {
+          kind: "context",
+          oldLine: change.ln1,
+          newLine: change.ln2,
+          text: change.content.slice(1),
+        };
+      }),
+    })),
+  };
+}
+
+function lineNumberWidth(diff: InlineDiff): number {
+  const largest = Math.max(
+    1,
+    ...diff.hunks.flatMap((hunk) =>
+      hunk.lines.flatMap((line) => [line.oldLine ?? 0, line.newLine ?? 0]),
+    ),
+  );
+  return String(largest).length;
+}
+
+function InlineDiffLineRow({
+  line,
+  width,
+}: {
+  line: InlineDiffLine;
+  width: number;
+}): React.JSX.Element {
+  const isAddition = line.kind === "addition";
+  const isDeletion = line.kind === "deletion";
+  const marker = isAddition ? "+" : isDeletion ? "-" : " ";
+  const number = isDeletion ? line.oldLine : line.newLine;
+  const foreground = isAddition ? "#86efac" : isDeletion ? "#fca5a5" : undefined;
+  const background = isAddition ? "#14532d" : isDeletion ? "#450a0a" : undefined;
+  return (
+    <Box>
+      <Text color={foreground}>{marker}</Text>
+      <Text color={colors.muted}> {String(number ?? "").padStart(width)} </Text>
+      <Text color={foreground} backgroundColor={background} wrap="wrap">
+        {line.text || " "}
+      </Text>
+    </Box>
+  );
 }
 
 function DiffPreview({ review }: { review: ChangedFileReview }): React.JSX.Element {
-  const lines = review.diff.split("\n");
-  const maxLines = 240;
-  const visibleLines = lines.slice(0, maxLines);
+  const diff = inlineDiff(review);
   return (
     <Box flexDirection="column">
       {review.unavailable ? <Text color={colors.warning}>{review.unavailable}</Text> : null}
-      {review.diff
-        ? visibleLines.map((line, index) => (
-            <Text key={`${index}-${line}`} color={diffLineColor(line)} wrap="truncate-end">
-              {line || " "}
-            </Text>
-          ))
-        : null}
-      {lines.length > maxLines ? (
-        <Text color={colors.muted}>… preview truncated after {maxLines} lines</Text>
+      {diff ? (
+        <>
+          <Text bold color={colors.textSoft}>
+            Edited {diff.path} <Text color={colors.success}>(+{diff.additions}</Text>{" "}
+            <Text color={colors.danger}>-{diff.deletions})</Text>
+          </Text>
+          {diff.hunks.map((hunk, hunkIndex) => (
+            <Box key={`${hunkIndex}-${hunk.header}`} flexDirection="column">
+              <Text color={colors.muted}>{hunk.header}</Text>
+              {hunk.lines.map((line, lineIndex) => (
+                <InlineDiffLineRow
+                  key={`${hunkIndex}-${lineIndex}-${line.text}`}
+                  line={line}
+                  width={lineNumberWidth(diff)}
+                />
+              ))}
+            </Box>
+          ))}
+        </>
+      ) : review.diff ? (
+        <Text>{review.diff}</Text>
       ) : null}
     </Box>
   );
