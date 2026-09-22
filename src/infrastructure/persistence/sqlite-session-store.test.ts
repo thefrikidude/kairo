@@ -34,6 +34,23 @@ test("active tasks recover as interrupted after restart", async () => {
   restarted.close();
 });
 
+test("task-scoped write approvals persist for a resumed task", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-approval-scope-"));
+  const path = join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(path);
+  const session = first.create("/workspace");
+  const task = first.startTask(session.id, "Update hello.txt");
+  first.updateTask(task.id, { approvedWritePaths: ["hello.txt"] });
+  first.close();
+
+  const restarted = await SqliteSessionStore.open(path);
+  try {
+    assert.deepEqual(restarted.task(task.id)?.approvedWritePaths, ["hello.txt"]);
+  } finally {
+    restarted.close();
+  }
+});
+
 test("saved planning artifacts survive a store restart and remain discoverable", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kairo-plan-store-"));
   const path = join(dir, "sessions.sqlite");

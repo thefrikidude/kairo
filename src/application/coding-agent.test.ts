@@ -371,6 +371,63 @@ class Allow implements ApprovalPolicy {
     return true;
   }
 }
+
+test("a task-file approval skips only later writes to that same file", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    const approvals: string[] = [];
+    const executions: string[] = [];
+    let turns = 0;
+    const agent = new CodingAgent(
+      {
+        async stream(): Promise<ModelTurn> {
+          turns += 1;
+          return turns === 1
+            ? {
+                text: "",
+                toolCalls: [
+                  { id: "write-a", name: "write_file", args: { path: "a.txt", content: "one" } },
+                  {
+                    id: "edit-a",
+                    name: "edit_file",
+                    args: { path: "a.txt", oldText: "one", newText: "two" },
+                  },
+                  { id: "write-b", name: "write_file", args: { path: "b.txt", content: "three" } },
+                  { id: "command", name: "run_command", args: { command: "echo verify" } },
+                ],
+              }
+            : { text: "done", toolCalls: [] };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "Change workspace",
+        async execute(call) {
+          executions.push(call.id);
+          return { ok: true, output: "ok" };
+        },
+      },
+      {
+        async approve(call) {
+          approvals.push(call.id);
+          return call.id === "write-a" ? "task_file" : true;
+        },
+      },
+      definitions,
+    );
+
+    await agent.run(session.id, "Update a.txt", () => {});
+
+    assert.deepEqual(approvals, ["write-a", "write-b", "command"]);
+    assert.deepEqual(executions, ["write-a", "edit-a", "write-b", "command"]);
+    assert.deepEqual(store.latestTask(session.id)?.approvedWritePaths, ["a.txt"]);
+  } finally {
+    store.close();
+  }
+});
+
 class DenyCommands implements ApprovalPolicy {
   async approve(call: ToolCall, _description: string): Promise<boolean> {
     return call.name !== "run_command";

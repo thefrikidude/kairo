@@ -65,6 +65,7 @@ export interface TaskStore {
         | "mode"
         | "plan"
         | "changedFiles"
+        | "approvedWritePaths"
         | "verificationCommand"
         | "verificationOutput"
         | "verificationPassed"
@@ -95,8 +96,11 @@ export interface TaskStore {
 }
 
 export interface ApprovalPolicy {
-  approve(call: ToolCall, description: string): Promise<boolean>;
+  approve(call: ToolCall, description: string): Promise<ApprovalDecision>;
 }
+
+/** `task_file` authorizes later writes only to the same normalized path in the current task. */
+export type ApprovalDecision = boolean | "task_file";
 export interface CredentialStore {
   get(provider: CredentialId): Promise<string | undefined>;
   save(provider: CredentialId, value: string): Promise<void>;

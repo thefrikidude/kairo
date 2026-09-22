@@ -1,6 +1,7 @@
 import { ContextManager } from "./context-manager.js";
 import { FailureAnalyzer } from "./failure-analyzer.js";
 import { VerificationPlanner } from "./verification-planner.js";
+import { relative, resolve } from "node:path";
 import { conversationSystemInstruction } from "./model-system-instruction.js";
 import { RepositoryAwareness } from "../infrastructure/repository/repository-awareness.js";
 import type {
@@ -499,10 +500,24 @@ export class CodingAgent {
           outcome: "jev-low-risk-discovered-verification",
         });
         onText(`\n[Jev autonomously approved discovered verification]\n`);
+      } else if (this.taskScopedWritePath(task, call)) {
+        approved = true;
+        this.event(task, {
+          kind: "approval",
+          operationId: call.id,
+          outcome: "task-file-scope",
+        });
       } else {
         const description = await this.approvalDescription(task, call);
         const approvalStarted = performance.now();
-        approved = await this.approval.approve(call, description);
+        const decision = await this.approval.approve(call, description);
+        approved = decision !== false;
+        const scopedPath = this.normalizedWritePath(call);
+        if (decision === "task_file" && scopedPath) {
+          task = this.store.updateTask(task.id, {
+            approvedWritePaths: [...new Set([...task.approvedWritePaths, scopedPath])],
+          });
+        }
         this.event(task, {
           kind: "approval",
           operationId: call.id,
@@ -645,6 +660,21 @@ export class CodingAgent {
       createdAt: Date.now(),
     });
     return result;
+  }
+
+  /** Returns a normalized relative path only for scoped file writes inside the active workspace. */
+  private normalizedWritePath(call: ToolCall): string | undefined {
+    if (call.name !== "write_file" && call.name !== "edit_file") return undefined;
+    if (typeof call.args.path !== "string" || !call.args.path.trim()) return undefined;
+    const absolute = resolve(this.tools.root, call.args.path);
+    const path = relative(this.tools.root, absolute);
+    return path && !path.startsWith("..") && !path.includes("../") ? path : undefined;
+  }
+
+  /** Checks a persisted, user-granted path scope without extending it to commands or other files. */
+  private taskScopedWritePath(task: Task, call: ToolCall): string | undefined {
+    const path = this.normalizedWritePath(call);
+    return path && task.approvedWritePaths.includes(path) ? path : undefined;
   }
 
   /** Auto-authorizes only known verification after a high-confidence low-risk Jev assessment. */

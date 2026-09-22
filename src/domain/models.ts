@@ -193,6 +193,8 @@ export interface Task {
   status: TaskStatus;
   plan?: TaskPlan;
   changedFiles: string[];
+  /** User-approved write paths, scoped to this task and never applied to commands. */
+  approvedWritePaths: string[];
   verificationCommand?: string;
   verificationOutput?: string;
   verificationPassed?: boolean;

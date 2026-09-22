@@ -6,7 +6,12 @@ import TextInput from "ink-text-input";
 import parseDiff from "parse-diff";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ModelSelection, Task, TaskStatus, ToolCall } from "../../domain/models.js";
-import type { ApprovalPolicy, CredentialStore, JevFeatures } from "../../domain/ports.js";
+import type {
+  ApprovalDecision,
+  ApprovalPolicy,
+  CredentialStore,
+  JevFeatures,
+} from "../../domain/ports.js";
 import { ProviderError } from "../../domain/provider-error.js";
 import { CodingAgent } from "../../application/coding-agent.js";
 import {
@@ -46,7 +51,11 @@ export type TranscriptEntry = {
   text: string;
 };
 
-type PendingApproval = { description: string; resolve: (approved: boolean) => void };
+type PendingApproval = {
+  call: ToolCall;
+  description: string;
+  resolve: (decision: ApprovalDecision) => void;
+};
 export type ModelOption = ModelSelection & { label: string };
 type TaskAgentRoute = {
   agent: CodingAgent;
@@ -219,8 +228,8 @@ export function modelOptions(): ModelOption[] {
 /** Bridges the agent's approval port to the active Ink application. */
 export class TuiApproval implements ApprovalPolicy {
   constructor(private readonly request: (pending: PendingApproval) => void) {}
-  async approve(_call: ToolCall, description: string): Promise<boolean> {
-    return new Promise<boolean>((resolve) => this.request({ description, resolve }));
+  async approve(call: ToolCall, description: string): Promise<ApprovalDecision> {
+    return new Promise<ApprovalDecision>((resolve) => this.request({ call, description, resolve }));
   }
 }
 
@@ -545,6 +554,10 @@ function WorkspaceBar({
 function ApprovalCard({ pending }: { pending: PendingApproval }): React.JSX.Element {
   const [summary, ...details] = pending.description.split("\n");
   const command = summary.startsWith("Run command");
+  const scopedWrite =
+    (pending.call.name === "write_file" || pending.call.name === "edit_file") &&
+    typeof pending.call.args.path === "string" &&
+    Boolean(pending.call.args.path.trim());
   return (
     <Box
       borderStyle="round"
@@ -564,13 +577,29 @@ function ApprovalCard({ pending }: { pending: PendingApproval }): React.JSX.Elem
       <Text color={colors.textSoft}>{summary}</Text>
       {details.length ? <Text>{details.join("\n")}</Text> : null}
       <Box marginTop={1}>
-        <Text bold color={colors.success}>
-          y / Enter allow
-        </Text>
-        <Text color={colors.muted}> · </Text>
-        <Text bold color={colors.danger}>
-          n / Esc deny
-        </Text>
+        {scopedWrite ? (
+          <>
+            <Text bold color={colors.success}>
+              y / Enter allow this file for task
+            </Text>
+            <Text color={colors.muted}> · </Text>
+            <Text color={colors.textSoft}>o allow once</Text>
+            <Text color={colors.muted}> · </Text>
+            <Text bold color={colors.danger}>
+              n / Esc deny
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text bold color={colors.success}>
+              y / Enter allow
+            </Text>
+            <Text color={colors.muted}> · </Text>
+            <Text bold color={colors.danger}>
+              n / Esc deny
+            </Text>
+          </>
+        )}
       </Box>
     </Box>
   );
@@ -739,18 +768,31 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     );
   }, []);
   const answerApproval = useCallback(
-    (approved: boolean) => {
+    (decision: ApprovalDecision) => {
       if (!pendingApproval) return;
       setPendingApproval(undefined);
-      append("system", approved ? "Approved action." : "Denied action.");
-      pendingApproval.resolve(approved);
+      append(
+        "system",
+        decision === "task_file"
+          ? `Approved writes to ${String(pendingApproval.call.args.path)} for this task.`
+          : decision
+            ? "Approved action."
+            : "Denied action.",
+      );
+      pendingApproval.resolve(decision);
     },
     [append, pendingApproval],
   );
 
   useInput((inputKey, key) => {
     if (!pendingApproval) return;
-    if (inputKey.toLowerCase() === "y" || key.return) answerApproval(true);
+    const scopedWrite =
+      (pendingApproval.call.name === "write_file" || pendingApproval.call.name === "edit_file") &&
+      typeof pendingApproval.call.args.path === "string" &&
+      Boolean(pendingApproval.call.args.path.trim());
+    if (inputKey.toLowerCase() === "y" || key.return)
+      answerApproval(scopedWrite ? "task_file" : true);
+    if (inputKey.toLowerCase() === "o" && scopedWrite) answerApproval(true);
     if (inputKey.toLowerCase() === "n" || key.escape) answerApproval(false);
   });
 
