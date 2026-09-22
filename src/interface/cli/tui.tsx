@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { basename } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, relative, resolve } from "node:path";
 import { Box, render, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ModelSelection, TaskStatus, ToolCall } from "../../domain/models.js";
+import type { ModelSelection, Task, TaskStatus, ToolCall } from "../../domain/models.js";
 import type { ApprovalPolicy, CredentialStore, JevFeatures } from "../../domain/ports.js";
 import { ProviderError } from "../../domain/provider-error.js";
 import { CodingAgent } from "../../application/coding-agent.js";
@@ -53,6 +54,11 @@ type TaskAgentRoute = {
 };
 
 export type RepositoryStatus = { branch?: string; changedFiles: number };
+export type ChangedFileReview = {
+  path: string;
+  diff: string;
+  unavailable?: string;
+};
 const colors = {
   accent: "#7dd3fc",
   accentSoft: "#a5b4fc",
@@ -101,6 +107,78 @@ export function repositoryStatus(workspace: string): RepositoryStatus {
   } catch {
     return { changedFiles: 0 };
   }
+}
+
+/** Returns an exit-code-tolerant Git command result; `git diff` uses exit code 1 for changes. */
+function gitOutput(workspace: string, args: string[]): string | undefined {
+  const git = process.platform === "darwin" ? "/usr/bin/git" : "git";
+  try {
+    return execFileSync(git, args, {
+      cwd: workspace,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 2_000,
+    });
+  } catch (error) {
+    const output = (error as { stdout?: string | Buffer }).stdout;
+    return typeof output === "string" ? output : output?.toString();
+  }
+}
+
+function gitSucceeds(workspace: string, args: string[]): boolean {
+  const git = process.platform === "darwin" ? "/usr/bin/git" : "git";
+  try {
+    execFileSync(git, args, {
+      cwd: workspace,
+      stdio: "ignore",
+      timeout: 2_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Builds a reviewable working-tree patch for a file Kairo touched. This deliberately uses the
+ * current Git state rather than claiming to isolate just the agent's edits.
+ */
+export function changedFileReview(workspace: string, path: string): ChangedFileReview {
+  const absolute = resolve(workspace, path);
+  const workspaceRelative = relative(workspace, absolute);
+  if (
+    workspaceRelative.startsWith("..") ||
+    workspaceRelative === "" ||
+    workspaceRelative.includes("../")
+  )
+    return { path, diff: "", unavailable: "This path is outside the active workspace." };
+
+  const tracked = gitSucceeds(workspace, ["ls-files", "--error-unmatch", "--", path]);
+  if (tracked && gitSucceeds(workspace, ["rev-parse", "--verify", "HEAD"])) {
+    const diff = gitOutput(workspace, ["diff", "--no-ext-diff", "--unified=3", "HEAD", "--", path]);
+    if (diff !== undefined) return { path, diff };
+  }
+  if (existsSync(absolute)) {
+    const diff = gitOutput(workspace, [
+      "diff",
+      "--no-index",
+      "--unified=3",
+      "--",
+      "/dev/null",
+      path,
+    ]);
+    if (diff) return { path, diff };
+    try {
+      return {
+        path,
+        diff: readFileSync(absolute, "utf8"),
+        unavailable: "No Git diff is available; showing the current file instead.",
+      };
+    } catch {
+      // Fall through to a short, actionable empty state.
+    }
+  }
+  return { path, diff: "", unavailable: "No current Git diff is available for this file." };
 }
 
 /** Finds palette entries while the user is typing a slash-command name. */
@@ -201,6 +279,92 @@ function LoadingIndicator({ label, color = "yellow" }: { label: string; color?: 
     <Text color={color}>
       {frames[frame]} {label}…
     </Text>
+  );
+}
+
+function diffLineColor(line: string): string | undefined {
+  if (line.startsWith("+++")) return colors.success;
+  if (line.startsWith("---")) return colors.danger;
+  if (line.startsWith("+")) return colors.success;
+  if (line.startsWith("-")) return colors.danger;
+  if (line.startsWith("@@")) return colors.accent;
+  return undefined;
+}
+
+function DiffPreview({ review }: { review: ChangedFileReview }): React.JSX.Element {
+  const lines = review.diff.split("\n");
+  const maxLines = 240;
+  const visibleLines = lines.slice(0, maxLines);
+  return (
+    <Box flexDirection="column">
+      {review.unavailable ? <Text color={colors.warning}>{review.unavailable}</Text> : null}
+      {review.diff
+        ? visibleLines.map((line, index) => (
+            <Text key={`${index}-${line}`} color={diffLineColor(line)} wrap="truncate-end">
+              {line || " "}
+            </Text>
+          ))
+        : null}
+      {lines.length > maxLines ? (
+        <Text color={colors.muted}>… preview truncated after {maxLines} lines</Text>
+      ) : null}
+    </Box>
+  );
+}
+
+function ChangesPanel({
+  workspace,
+  files,
+  selected,
+}: {
+  workspace: string;
+  files: string[];
+  selected: number;
+}): React.JSX.Element {
+  const selectedPath = files[selected];
+  const review = selectedPath ? changedFileReview(workspace, selectedPath) : undefined;
+  return (
+    <Box
+      borderStyle="round"
+      borderColor={colors.accent}
+      flexDirection="column"
+      marginTop={1}
+      paddingX={1}
+    >
+      <Box justifyContent="space-between">
+        <Text bold color={colors.accent}>
+          CHANGES · {files.length}
+        </Text>
+        <Text color={colors.muted}>working-tree diff</Text>
+      </Box>
+      <Text color={colors.textSoft}>
+        Files Kairo touched in this task. Git may include earlier local edits.
+      </Text>
+      <Box flexDirection="column" marginTop={1}>
+        {files.map((file, index) => (
+          <Text
+            key={file}
+            color={index === selected ? colors.accent : colors.textSoft}
+            bold={index === selected}
+          >
+            {index === selected ? "›" : " "} {file}
+          </Text>
+        ))}
+      </Box>
+      {review ? (
+        <Box
+          borderStyle="single"
+          borderColor={colors.muted}
+          flexDirection="column"
+          marginTop={1}
+          paddingX={1}
+        >
+          <Text bold>{review.path}</Text>
+          <DiffPreview review={review} />
+        </Box>
+      ) : null}
+      <Text color={colors.muted}>↑/↓ select · n/p next file · Esc close</Text>
+    </Box>
   );
 }
 
@@ -374,6 +538,8 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const [busy, setBusy] = useState<"idle" | "planning" | "acting" | "verifying" | "cancelled">(
     "idle",
   );
+  const [changesTask, setChangesTask] = useState<Task>();
+  const [changesIndex, setChangesIndex] = useState(0);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval>();
   const [modelPicker, setModelPicker] = useState(false);
   const [modelIndex, setModelIndex] = useState(0);
@@ -511,6 +677,16 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     if (!pendingApproval) return;
     if (inputKey.toLowerCase() === "y" || key.return) answerApproval(true);
     if (inputKey.toLowerCase() === "n" || key.escape) answerApproval(false);
+  });
+
+  useInput((inputKey, key) => {
+    if (!changesTask) return;
+    if (key.escape) return setChangesTask(undefined);
+    const fileCount = changesTask.changedFiles.length;
+    if (key.upArrow || inputKey.toLowerCase() === "p")
+      return setChangesIndex((current) => Math.max(0, current - 1));
+    if (key.downArrow || inputKey.toLowerCase() === "n")
+      return setChangesIndex((current) => Math.min(fileCount - 1, current + 1));
   });
 
   const saveJevCredential = useCallback(
@@ -769,6 +945,10 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         }
         const task = taskAgent.status(active.id);
         setMode((current) => interactionModeAfterTask(current, task?.mode));
+        if (task?.changedFiles.length) {
+          setChangesIndex(0);
+          setChangesTask(task);
+        }
         if (task?.mode === "planning" && task.plan) append("system", formatPlan(task.plan));
         if ((task?.status as TaskStatus | undefined) === "cancelled")
           append("system", "Task cancelled.");
@@ -842,6 +1022,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         setActive(next);
         setMode("build");
         setEntries([]);
+        setChangesTask(undefined);
         setRepo(repositoryStatus(next.workspace));
         return append("system", `New session: ${next.id} — BUILD mode.`);
       }
@@ -856,6 +1037,10 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       }
       if (line === "/status" || line === "/changes") {
         const task = agent?.status(active.id);
+        if (line === "/changes" && task?.changedFiles.length) {
+          setChangesIndex(0);
+          return setChangesTask(task);
+        }
         return append(
           "system",
           !task
@@ -999,7 +1184,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   );
 
   useInput((inputKey, key) => {
-    if (pendingApproval || modelPicker || jevPanel || !commandMatches.length) return;
+    if (changesTask || pendingApproval || modelPicker || jevPanel || !commandMatches.length) return;
     if (key.upArrow) return setCommandIndex((current) => Math.max(0, current - 1));
     if (key.downArrow)
       return setCommandIndex((current) => Math.min(commandMatches.length - 1, current + 1));
@@ -1038,7 +1223,13 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           <EmptyState mode={mode} workspace={active.workspace} repo={repo} />
         )}
       </Box>
-      {pendingApproval ? (
+      {changesTask ? (
+        <ChangesPanel
+          workspace={active.workspace}
+          files={changesTask.changedFiles}
+          selected={changesIndex}
+        />
+      ) : pendingApproval ? (
         <ApprovalCard pending={pendingApproval} />
       ) : credentialModel ? (
         <Box borderStyle="single" borderColor="cyan" flexDirection="column" paddingX={1}>
@@ -1164,7 +1355,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
                     : "Ask Kairo to implement…"
                   : "Task in progress…"
               }
-              focus={busy === "idle"}
+              focus={busy === "idle" && !changesTask}
             />
           </Box>
           <Box paddingX={1} justifyContent="space-between">

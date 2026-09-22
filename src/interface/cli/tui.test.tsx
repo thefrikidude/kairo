@@ -1,8 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { render } from "ink-testing-library";
 import {
   BrandMark,
+  changedFileReview,
   ModeBadge,
   TranscriptRow,
   TuiApproval,
@@ -11,6 +16,13 @@ import {
   matchingSlashCommands,
   modelOptions,
 } from "./tui.js";
+
+function git(workspace: string, args: string[]): void {
+  execFileSync(process.platform === "darwin" ? "/usr/bin/git" : "git", args, {
+    cwd: workspace,
+    stdio: "ignore",
+  });
+}
 
 test("plan command toggles the live interaction mode", () => {
   assert.equal(interactionModeAfterCommand("build", "/plan"), "plan");
@@ -54,6 +66,40 @@ test("an empty assistant row renders an animated response indicator", () => {
   const view = render(<TranscriptRow entry={{ id: 1, kind: "assistant", text: "" }} />);
   assert.match(view.lastFrame() ?? "", /Generating response/);
   view.unmount();
+});
+
+test("changed-file review shows the working-tree patch for a file Kairo touched", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "kairo-changes-"));
+  try {
+    git(workspace, ["init"]);
+    git(workspace, ["config", "user.email", "kairo@example.test"]);
+    git(workspace, ["config", "user.name", "Kairo Test"]);
+    await writeFile(join(workspace, "app.ts"), "export const value = 1;\n");
+    git(workspace, ["add", "app.ts"]);
+    git(workspace, ["commit", "-m", "initial"]);
+    await writeFile(join(workspace, "app.ts"), "export const value = 2;\n");
+
+    const review = changedFileReview(workspace, "app.ts");
+    assert.match(review.diff, /-export const value = 1;/);
+    assert.match(review.diff, /\+export const value = 2;/);
+    assert.equal(review.unavailable, undefined);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("changed-file review renders untracked files as additions", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "kairo-changes-"));
+  try {
+    git(workspace, ["init"]);
+    await writeFile(join(workspace, "new.txt"), "created by Kairo\n");
+
+    const review = changedFileReview(workspace, "new.txt");
+    assert.match(review.diff, /\+created by Kairo/);
+    assert.equal(review.unavailable, undefined);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("model picker lists every registered model", () => {
