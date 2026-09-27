@@ -1,6 +1,6 @@
 {
   "name": "@mrace07/kairo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A terminal coding agent for local repositories, with approval-gated tools and verification.",
   "keywords": [
     "ai",
