@@ -4,7 +4,6 @@
 
 <img width="1159" height="677" alt="Screenshot 2026-09-21 at 12 02 14 PM" src="https://github.com/user-attachments/assets/85024d79-f167-4f9d-a80a-3c2fccb74bba" />
 
-
 Kairo is a terminal coding agent for a local repository. It understands the codebase, plans or implements a change, asks before doing anything mutating, and verifies the result.
 
 The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe workspace tools, resumable sessions, useful traces, and honest verification state.
@@ -32,7 +31,7 @@ Open `/jev` in the TUI to add a TypeSafe API key and control four independent fe
 
 `/auto` separately toggles automatic model selection. When enabled, Jev classifies each BUILD request as `fast`, `balanced`, or `strong`, then Kairo chooses from models whose credentials are available locally. Decisions below the `0.85` confidence threshold, unavailable tiers, or Jev errors fall back to your manually selected model. Quota failures can fall through to another available model.
 
-Auto routing is opt-in. `/models` always puts you back in manual mode, and an explicit PLAN request is never silently upgraded into implementation. The footer only shows `AUTO` or `JEV` when those features are enabled.
+Auto routing is opt-in. `/model` always puts you back in manual mode, and an explicit PLAN request is never silently upgraded into implementation. The footer only shows `AUTO` or `JEV` when those features are enabled.
 
 ## Repository awareness
 
@@ -81,12 +80,12 @@ MISTRAL_API_KEY=your_key_here kairo .
 
 Type a request normally, or type `/` to open the command palette. Arrow keys move through matches; Tab completes commands that need arguments and runs commands that do not.
 
-- `/plan` toggles read-only planning. `/build` implements the latest saved plan.
-- `/models` chooses a coding model and disables Auto. `/auto` toggles Jev-powered automatic routing.
+- `/plan` toggles read-only planning.
+- `/model` chooses a coding model and disables Auto. `/auto` toggles Jev-powered automatic routing.
 - `/jev` manages the Jev credential, routing, safety, recovery, and autonomy features.
-- `/new`, `/resume [session-id]`, and `/history` manage saved sessions.
+- `/new`, `/resume [session-id]`, and `/sessions` manage saved sessions.
 - `/status`, `/trace [task-id]`, and `/changes` explain what happened.
-- `/verify <command>` runs an explicit check through the approval gate; `/compact` saves a context checkpoint.
+- `/compact` saves a context checkpoint.
 - `/cancel`, `/logout`, `/help`, and `/quit` handle the remaining session controls.
 
 Press `y` or Enter to approve an action; press `n` or Escape to deny it. Use `Ctrl+O` to expand or collapse the task activity timeline.
@@ -118,6 +117,8 @@ kairo eval compare <run-id>
 ```
 
 `kairo eval` checks deterministic plumbing. `eval jev` uses a local stub to exercise Jev integration; it is not a live latency or quality benchmark. `eval self` is the real-provider capability suite: it creates isolated Kairo snapshots, seeds defects, requires a verified result, and runs independent hidden graders.
+
+`kairo eval live` uses DeepEval and is available from a Kairo source checkout after `pnpm install`; it is kept out of the global npm install to reduce runtime dependencies.
 
 Evaluation history and task traces are sanitized. They store IDs, operation names, timing, outcomes, counters, and verification metadata—not prompts, model responses, source contents, credentials, or raw command output.
 

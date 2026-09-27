@@ -175,10 +175,10 @@ test("model picker lists every registered model", () => {
   );
 });
 
-test("slash-command palette filters names and hides after an argument begins", () => {
+test("slash-command palette filters supported names and hides after an argument begins", () => {
   assert.deepEqual(
     matchingSlashCommands("/ver").map((command) => command.name),
-    ["/verify"],
+    [],
   );
   assert.deepEqual(matchingSlashCommands("/resume session-id"), []);
   assert.deepEqual(

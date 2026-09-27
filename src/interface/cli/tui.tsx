@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { Box, render, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import parseDiff from "parse-diff";
@@ -96,17 +96,15 @@ const colors = {
 export const slashCommands = [
   { name: "/help", description: "Show commands and shortcuts" },
   { name: "/plan", description: "Toggle read-only planning mode" },
-  { name: "/build", description: "Build the latest saved plan" },
-  { name: "/models", description: "Choose a model" },
+  { name: "/model", description: "Choose a model" },
   { name: "/auto", description: "Toggle Jev automatic model routing" },
   { name: "/jev", description: "Manage the Jev safety advisor" },
   { name: "/new", description: "Start a new session" },
   { name: "/resume", description: "Continue a task or open a session", acceptsArgument: true },
-  { name: "/history", description: "List saved sessions" },
+  { name: "/sessions", description: "List saved sessions" },
   { name: "/status", description: "Show the latest task status" },
   { name: "/trace", description: "Show task trace", acceptsArgument: true },
   { name: "/changes", description: "Show changed files" },
-  { name: "/verify", description: "Run a verification command", acceptsArgument: true },
   { name: "/compact", description: "Save a context checkpoint" },
   { name: "/cancel", description: "Cancel the current task" },
   { name: "/logout", description: "Remove the active provider credential" },
@@ -214,7 +212,7 @@ function commandInput(command: (typeof slashCommands)[number]): string {
   return `${command.name}${"acceptsArgument" in command && command.acceptsArgument ? " " : ""}`;
 }
 
-/** Flattens the supported provider registry into the options shown by `/models`. */
+/** Flattens the supported provider registry into the options shown by `/model`. */
 export function modelOptions(): ModelOption[] {
   return providerRegistry.flatMap((provider) =>
     provider.models.map((model) => ({
@@ -493,7 +491,7 @@ function EmptyState({
         </Text>
       </Box>
       <Box marginTop={1}>
-        <Text color={colors.muted}>{basename(workspace)}</Text>
+        <Text color={colors.muted}>Workspace: {workspace}</Text>
         {repo.branch ? <Text color={colors.muted}> · {repo.branch}</Text> : null}
         {repo.changedFiles ? (
           <Text color={colors.warning}> · {repo.changedFiles} changed</Text>
@@ -502,7 +500,7 @@ function EmptyState({
       <Box flexDirection="column" marginTop={2}>
         {[
           ["/plan", "inspect first, change nothing"],
-          ["/models", "choose the coding model"],
+          ["/model", "choose the coding model"],
           ["/resume", "continue previous work"],
           ["/help", "see every command"],
         ].map(([command, description]) => (
@@ -538,7 +536,7 @@ function WorkspaceBar({
         <Text bold color={colors.accent}>
           KAIRO
         </Text>
-        <Text color={colors.textSoft}> · {basename(workspace)}</Text>
+        <Text color={colors.textSoft}> · {workspace}</Text>
         {repo.branch ? <Text color={colors.muted}> · {repo.branch}</Text> : null}
         {repo.changedFiles ? (
           <Text color={colors.warning}> · {repo.changedFiles} changed</Text>
@@ -1001,7 +999,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       }
       if (!agent) {
         setBusy("idle");
-        return append("error", "No active credential. Use /models to add a provider API key.");
+        return append("error", "No active credential. Use /model to choose a configured provider.");
       }
       const entryId = entries.length + 1;
       setEntries((current) => [...current, { id: entryId, kind: "assistant", text: "" }]);
@@ -1124,15 +1122,6 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         setMode(next);
         return;
       }
-      if (line === "/build") {
-        setMode("build");
-        const latest = agent?.status(active.id);
-        if (latest?.status === "planned" && latest.plan) {
-          append("system", "Building the saved plan.");
-          await runTask("Implement the saved plan and verify the result.", "build");
-        }
-        return;
-      }
       if (line === "/quit" || line === "/exit") return exit();
       if (line === "/new") {
         const next = props.store.create(active.workspace);
@@ -1143,7 +1132,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         setRepo(repositoryStatus(next.workspace));
         return append("system", `New session: ${next.id} — BUILD mode.`);
       }
-      if (line === "/history") {
+      if (line === "/sessions") {
         return append(
           "system",
           props.store
@@ -1209,21 +1198,6 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         }
         return;
       }
-      if (line.startsWith("/verify ")) {
-        if (!agent) return append("error", "No active credential.");
-        setBusy("verifying");
-        try {
-          await agent.verify(active.id, line.slice(8).trim(), (chunk) =>
-            append("assistant", chunk),
-          );
-          setRepo(repositoryStatus(active.workspace));
-          setBusy("idle");
-        } catch (error) {
-          setBusy("idle");
-          append("error", `Kairo: ${(error as Error).message}`);
-        }
-        return;
-      }
       if (line === "/auto") {
         if (!autoModelRouting && (!jevEnabled || !jevKey))
           return append(
@@ -1241,7 +1215,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
             : `Manual model selection enabled: ${selection.provider}/${selection.model}.`,
         );
       }
-      if (line === "/models") {
+      if (line === "/model") {
         const selected = models.findIndex(
           (item) => item.provider === selection.provider && item.model === selection.model,
         );
@@ -1257,12 +1231,12 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         setJevPanel(true);
         return;
       }
-      if (line === "/model" || line.startsWith("/model ")) {
+      if (line.startsWith("/model ")) {
         const [provider, ...modelParts] = line.slice(6).trim().split(/\s+/);
         if (!provider || !modelParts.length || !isProviderId(provider))
           return append(
             "system",
-            `Current model: ${selection.provider}/${selection.model}\nUse: /model <gemini|groq|mistral> <model-id>`,
+            `Current model: ${selection.provider}/${selection.model}\nChoose a model from the picker or use /model <provider> <model-id>.`,
           );
         const next = { provider, model: modelParts.join(" ") };
         await chooseModel(next);
