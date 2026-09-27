@@ -1,4 +1,7 @@
 # Kairo
+
+[![npm version](https://img.shields.io/npm/v/%40mrace07%2Fkairo)](https://www.npmjs.com/package/@mrace07/kairo)
+
 <img width="1159" height="677" alt="Screenshot 2026-09-21 at 12 02 14 PM" src="https://github.com/user-attachments/assets/85024d79-f167-4f9d-a80a-3c2fccb74bba" />
 
 
@@ -49,23 +52,24 @@ Snapshots are versioned and fingerprinted. Kairo checks freshness when a session
 
 Only derived metadata is persisted in SQLite. Source text, instruction contents, README contents, diffs, and command output are not stored in the snapshot. Manifests, CI files, build files, and documentation are surfaced as paths so the agent can inspect the relevant evidence on demand.
 
-## Quick start
+## Install and quick start
 
-You’ll need Node.js 24.21+, pnpm, and an API key for Gemini, Groq, or Mistral.
+You’ll need Node.js 24.21+ and an API key for Gemini, Groq, or Mistral.
 
-```bash
-pnpm install
-pnpm build
-node dist/interface/cli/index.js .
-```
-
-After installing the package, start Kairo in any repository with:
+Install Kairo globally from npm:
 
 ```bash
-kairo [workspace]
+npm install --global @mrace07/kairo
 ```
 
-The first-run flow can validate and store provider credentials in the macOS Keychain. Environment variables also work for one-off use:
+Then start it in a repository:
+
+```bash
+cd your-project
+kairo .
+```
+
+On first run, Kairo helps you choose a provider and can store its credential in the macOS Keychain. You can also configure one with an environment variable for a single run:
 
 ```bash
 GEMINI_API_KEY=your_key_here kairo .
@@ -118,6 +122,18 @@ kairo eval compare <run-id>
 Evaluation history and task traces are sanitized. They store IDs, operation names, timing, outcomes, counters, and verification metadata—not prompts, model responses, source contents, credentials, or raw command output.
 
 ## Development
+
+To run Kairo from a local checkout:
+
+```bash
+git clone https://github.com/thefrikidude/kairo.git
+cd kairo
+pnpm install
+pnpm build
+node dist/interface/cli/index.js .
+```
+
+Run checks with:
 
 ```bash
 pnpm check
