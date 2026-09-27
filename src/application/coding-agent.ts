@@ -30,6 +30,7 @@ import type {
 const MAX_MODEL_TURNS = 20;
 const MAX_TOOL_CALLS = 40;
 const MAX_CONSECUTIVE_FAILURES = 3;
+const MAX_AUTOMATIC_RECOVERIES = 2;
 const MAX_IDENTICAL_CALLS = 2;
 // A small cap prevents an agent from repeatedly editing a workspace without converging.
 const MAX_REPAIR_ATTEMPTS = 2;
@@ -150,6 +151,7 @@ export class CodingAgent {
   async verify(sessionId: string, command: string, onText: (text: string) => void): Promise<void> {
     let task = this.store.latestTask(sessionId);
     if (!task) throw new Error("Start a task before running verification.");
+    const repairCount = this.store.repairAttempts(task.id).length;
     task = this.store.updateTask(task.id, {
       status: "verifying",
       verificationCommand: command,
@@ -170,14 +172,35 @@ export class CodingAgent {
       args: { command, verification: true },
     };
     const result = await this.executeTool(task, call, onText);
-    task = this.store.updateTask(task.id, {
-      verificationOutput: result.output,
-      verificationPassed: result.ok,
-      verificationExitCode: result.exitCode ?? null,
-      status: result.ok ? "completed" : "failed",
-      error: result.ok ? undefined : result.output,
+    task = this.store.task(task.id)!;
+    if (result.ok || task.verificationPassed === true) {
+      this.store.updateTask(task.id, {
+        status: "completed",
+        error: undefined,
+      });
+      onText("\n[Verification passed]\n");
+      return;
+    }
+    if (result.output === "User denied this action.") {
+      this.store.updateTask(task.id, { status: "verification_required", error: undefined });
+      onText("\n[Verification not run. The task is still awaiting verification.]\n");
+      return;
+    }
+    if (task.status === "verification_required") {
+      onText("\n[Verification failed. Review the result before continuing.]\n");
+      return;
+    }
+    if (this.store.repairAttempts(task.id).length > repairCount && task.changedFiles.length) {
+      task = this.store.updateTask(task.id, { status: "acting", error: undefined });
+      onText("\n[Verification failed — starting a focused repair.]\n");
+      await this.executeTask(task, undefined, onText);
+      return;
+    }
+    this.store.updateTask(task.id, {
+      status: "failed",
+      error: result.output,
     });
-    onText(result.ok ? "\n[Verification passed]\n" : "\n[Verification failed]\n");
+    onText("\n[Verification failed]\n");
   }
 
   /** Executes bounded model and tool turns for one task. */
@@ -198,10 +221,28 @@ export class CodingAgent {
     const calls = new Map<string, number>();
     let toolCalls = 0;
     let failures = 0;
+    let recoveryAttempts = 0;
+    let latestToolFailure: string | undefined;
+    const requestRecovery = (): boolean => {
+      if (recoveryAttempts >= MAX_AUTOMATIC_RECOVERIES) return false;
+      recoveryAttempts += 1;
+      this.save(task.sessionId, {
+        role: "user",
+        content: [
+          `Automatic recovery attempt ${recoveryAttempts}/${MAX_AUTOMATIC_RECOVERIES}: recent tool operations failed.`,
+          "Use the latest tool result to diagnose the cause. Do not repeat the same failing action or guess at fixes.",
+          "Inspect relevant files or configuration, then try a different bounded action. If the blocker needs user input, a credential, or an unavailable external service, stop and state exactly what is needed. Never claim the task is complete while the failure remains unresolved.",
+        ].join("\n"),
+        createdAt: Date.now(),
+      });
+      failures = 0;
+      onText(`\n[Tool failure — automatic recovery ${recoveryAttempts}/${MAX_AUTOMATIC_RECOVERIES}]\n`);
+      return true;
+    };
     try {
       const maxTurns = task.mode === "planning" ? MAX_PLANNING_MODEL_TURNS : MAX_MODEL_TURNS;
       const maxToolCalls = task.mode === "planning" ? MAX_PLANNING_TOOL_CALLS : MAX_TOOL_CALLS;
-      for (let turn = 0; turn < maxTurns; turn += 1) {
+      turnLoop: for (let turn = 0; turn < maxTurns; turn += 1) {
         if (this.store.task(task.id)?.status === "cancelled") {
           onText("\nTask cancelled.\n");
           return;
@@ -214,6 +255,14 @@ export class CodingAgent {
             createdAt: Date.now(),
           });
         if (!result.toolCalls.length) {
+          if (latestToolFailure) {
+            if (requestRecovery()) continue turnLoop;
+            return this.fail(
+              task,
+              "Tool failures remained unresolved after automatic recovery. Review the latest tool result, fix any environment blocker, then resume the task.",
+              onText,
+            );
+          }
           if (task.mode === "planning") {
             // PLAN mode can also answer a greeting or conceptual question. A plan is
             // durable only after submit_plan, but plain conversational text is not an
@@ -235,7 +284,7 @@ export class CodingAgent {
           task = this.finish(task);
           if (task.status === "verification_required")
             onText(
-              "\nChanges were made but no successful verification command ran. Use `/verify <command>`.\n",
+              "\nChanges were made but no successful check ran. Ask Kairo to run the relevant project check.\n",
             );
           return;
         }
@@ -254,9 +303,21 @@ export class CodingAgent {
             onText(`\nKairo couldn't complete this task: ${task.error}\n`);
             return;
           }
-          failures = outcome.ok ? 0 : failures + 1;
-          if (failures >= MAX_CONSECUTIVE_FAILURES)
-            return this.fail(task, "Too many consecutive tool failures.", onText);
+          if (outcome.ok) {
+            failures = 0;
+            latestToolFailure = undefined;
+          } else if (outcome.output !== "User denied this action.") {
+            failures += 1;
+            latestToolFailure = outcome.output;
+          }
+          if (failures >= MAX_CONSECUTIVE_FAILURES) {
+            if (requestRecovery()) continue turnLoop;
+            return this.fail(
+              task,
+              "Too many tool operations failed and automatic recovery was exhausted. Review the latest tool result, fix any environment blocker, then resume the task.",
+              onText,
+            );
+          }
         }
       }
       this.fail(task, "Model-turn limit reached.", onText);
@@ -611,7 +672,7 @@ export class CodingAgent {
           error: "Jev recommends manual verification review before further repair.",
         });
         onText(
-          "\n[Jev escalated failed verification for manual review. Use /verify <command> when ready.]\n",
+          "\n[Jev escalated failed verification for manual review. Ask Kairo to run a check when ready.]\n",
         );
       } else if (decision?.value === "broaden") {
         const profile = this.store.repositorySnapshot(task.sessionId);
@@ -889,7 +950,7 @@ export class CodingAgent {
     );
     if (result.output === "User denied this action.") {
       this.store.updateTask(task.id, { status: "verification_required" });
-      onText("\n[Verification recommendation declined. Use /verify <command> when ready.]\n");
+      onText("\n[Verification recommendation declined. Ask Kairo to run a check when ready.]\n");
       return "denied";
     }
     return "ran";
