@@ -13,15 +13,9 @@ importers:
       "@openrouter/sdk":
         specifier: ^1.2.145
         version: 1.2.145
-      "@sentry/node":
-        specifier: 10.37.0
-        version: 10.37.0
       better-sqlite3:
         specifier: ^12.0.0
         version: 12.11.1
-      deepeval:
-        specifier: 0.9.14
-        version: 0.9.14(@google/genai@1.52.0)(@types/react@19.3.0)(debug@4.4.3)(ws@8.21.3)
       groq-sdk:
         specifier: 1.6.0
         version: 1.6.0
@@ -47,6 +41,9 @@ importers:
       "@types/react":
         specifier: ^19.3.0
         version: 19.3.0
+      deepeval:
+        specifier: 0.9.14
+        version: 0.9.14(@google/genai@1.52.0)(@types/react@19.3.0)(debug@4.4.3)(ws@8.21.3)
       ink-testing-library:
         specifier: ^4.0.0
         version: 4.0.0(@types/react@19.3.0)

@@ -1,10 +1,6 @@
 import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EvaluationDataset, Golden } from "deepeval/dataset";
-import { TaskCompletionMetric } from "deepeval/metrics";
-import { GeminiModel } from "deepeval/models";
-import { SpanType, observe, updateCurrentSpan } from "deepeval/tracing";
 import type { LiveEvaluationResult, Message, ToolCall } from "../domain/models.js";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
 import { GeminiProvider } from "../infrastructure/providers/gemini-provider.js";
@@ -27,6 +23,12 @@ export type LiveEvaluationOptions = {
 export async function runLiveEvaluationSuite(
   options: LiveEvaluationOptions,
 ): Promise<LiveEvaluationResult[]> {
+  const [{ EvaluationDataset, Golden }, { TaskCompletionMetric }, { GeminiModel }] =
+    await Promise.all([
+      import("deepeval/dataset"),
+      import("deepeval/metrics"),
+      import("deepeval/models"),
+    ]);
   const dataset = new EvaluationDataset({
     goldens: evaluationScenarios.map(
       (scenario) =>
@@ -78,6 +80,7 @@ async function runObservedScenario(
   prompt: string,
   options: LiveEvaluationOptions,
 ): Promise<LiveEvaluationResult> {
+  const { SpanType, observe, updateCurrentSpan } = await import("deepeval/tracing");
   const root = await mkdtemp(join(tmpdir(), `kairo-live-eval-${scenario.id}-`));
   try {
     await cp(join(fixtures, scenario.id), root, { recursive: true });

@@ -22,7 +22,6 @@ import { RepositoryAwareness } from "../../infrastructure/repository/repository-
 import { CodingAgent } from "../../application/coding-agent.js";
 import { runRepl } from "./repl.js";
 import { runEvaluationSuite, runJevEvaluationSuite } from "../../application/evaluation-harness.js";
-import { runLiveEvaluationSuite } from "../../application/live-evaluation.js";
 import { runSelfEvaluationSuite } from "../../application/self-evaluation.js";
 import {
   formatEvaluationReport,
@@ -133,6 +132,20 @@ async function main(): Promise<void> {
       return;
     }
     if (args[1] === "live") {
+      let runLiveEvaluationSuite: (typeof import("../../application/live-evaluation.js"))["runLiveEvaluationSuite"];
+      try {
+        ({ runLiveEvaluationSuite } = await import("../../application/live-evaluation.js"));
+      } catch (error) {
+        const missingEvaluationDependency =
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "ERR_MODULE_NOT_FOUND" &&
+          /deepeval/.test(error.message);
+        if (!missingEvaluationDependency) throw error;
+        throw new Error(
+          "`kairo eval live` is a development command and requires Kairo's development dependencies. Run it from a Kairo checkout after `pnpm install`.",
+        );
+      }
       const key = await credentials.get("gemini");
       if (!key)
         throw new Error(
