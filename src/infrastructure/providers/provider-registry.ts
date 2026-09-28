@@ -3,6 +3,7 @@ import type { ModelProvider, ToolDefinition } from "../../domain/ports.js";
 import { GeminiProvider } from "./gemini-provider.js";
 import { GroqProvider } from "./groq-provider.js";
 import { MistralProvider } from "./mistral-provider.js";
+import { OpenRouterProvider } from "./openrouter-provider.js";
 
 export interface ProviderDescriptor {
   id: ProviderId;
@@ -84,6 +85,27 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
         }),
       ),
   },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    environmentVariable: "OPENROUTER_API_KEY",
+    models: [
+      {
+        id: "openrouter/free",
+        label: "OpenRouter Free Router",
+        tier: "balanced",
+        recommended: true,
+      },
+    ],
+    create: (apiKey, model, tools) => new OpenRouterProvider(apiKey, model, tools),
+    validate: async (apiKey) =>
+      validateResponse(
+        "OpenRouter",
+        await fetch("https://openrouter.ai/api/v1/key", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }),
+      ),
+  },
 ] as const;
 
 /** Narrows untrusted CLI/config text to a registered provider identifier. */
@@ -102,5 +124,9 @@ export function createProvider(
   apiKey: string,
   tools: ToolDefinition[],
 ): ModelProvider {
+  if (selection.provider === "openrouter" && /(^|\/)jev(?:-|$)/i.test(selection.model))
+    throw new Error(
+      "Jev is a decision model, not a Kairo coding model. Choose a coding model from OpenRouter.",
+    );
   return providerById(selection.provider).create(apiKey, selection.model, tools);
 }

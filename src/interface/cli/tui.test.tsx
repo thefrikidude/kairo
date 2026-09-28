@@ -171,6 +171,7 @@ test("model picker lists every registered model", () => {
       "groq/openai/gpt-oss-20b",
       "mistral/mistral-small-latest",
       "mistral/mistral-medium-latest",
+      "openrouter/openrouter/free",
     ],
   );
 });

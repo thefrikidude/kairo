@@ -74,7 +74,10 @@ On first run, Kairo helps you choose a provider and can store its credential in 
 GEMINI_API_KEY=your_key_here kairo .
 GROQ_API_KEY=your_key_here kairo .
 MISTRAL_API_KEY=your_key_here kairo .
+OPENROUTER_API_KEY=your_key_here kairo .
 ```
+
+OpenRouter is available as a provider. Kairo lists `openrouter/free` as its default model route; use `/model openrouter <model-id>` to select another OpenRouter model. OpenRouter’s free router chooses among free models that support the request’s required features, including tool calling. See the [OpenRouter model catalog](https://openrouter.ai/models) for model IDs.
 
 ## TUI workflow
 
@@ -96,8 +99,8 @@ Every successful edit invalidates older verification. A task that changed files 
 
 ```bash
 # Credentials
-kairo auth login [gemini|groq|mistral]
-kairo auth logout [gemini|groq|mistral]
+kairo auth login [gemini|groq|mistral|openrouter]
+kairo auth logout [gemini|groq|mistral|openrouter]
 kairo auth status
 
 # Saved sessions

@@ -8,12 +8,14 @@ const services: Record<CredentialId, string> = {
   gemini: "dev.kairo.gemini",
   groq: "dev.kairo.groq",
   mistral: "dev.kairo.mistral",
+  openrouter: "dev.kairo.openrouter",
   jev: "dev.kairo.jev",
 };
 const environment: Record<CredentialId, string> = {
   gemini: "GEMINI_API_KEY",
   groq: "GROQ_API_KEY",
   mistral: "MISTRAL_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
   jev: "TYPESAFE_API_KEY",
 };
 type KeychainCommand = (file: string, args: string[]) => Promise<{ stdout: string }>;
