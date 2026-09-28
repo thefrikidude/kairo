@@ -956,14 +956,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     (decision: ApprovalDecision) => {
       if (!pendingApproval) return;
       setPendingApproval(undefined);
-      append(
-        "system",
-        decision === "task_file"
-          ? `Approved writes to ${String(pendingApproval.call.args.path)} for this task.`
-          : decision
-            ? "Approved action."
-            : "Denied action.",
-      );
+      if (decision === false) append("system", "Denied action.");
       pendingApproval.resolve(decision);
     },
     [append, pendingApproval],
