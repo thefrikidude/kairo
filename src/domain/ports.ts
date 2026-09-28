@@ -21,6 +21,7 @@ export interface ModelProvider {
     onProgress?: (event: import("./provider-error.js").ProviderProgress) => void,
     systemInstruction?: string,
     toolsEnabled?: boolean,
+    signal?: AbortSignal,
   ): Promise<ModelTurn>;
 }
 
@@ -34,7 +35,7 @@ export interface ToolDefinition {
 export interface ToolExecutor {
   readonly root: string;
   description(call: ToolCall): string;
-  execute(call: ToolCall): Promise<ToolResult>;
+  execute(call: ToolCall, signal?: AbortSignal): Promise<ToolResult>;
 }
 
 export interface TaskStore {

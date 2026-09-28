@@ -40,6 +40,7 @@ const planningTools = new Set(["list_files", "read_file", "read_file_range", "se
 
 export class CodingAgent {
   private readonly context: ContextManager;
+  private readonly activeControllers = new Map<string, AbortController>();
   private readonly failureAnalyzer = new FailureAnalyzer();
   private readonly verificationPlanner = new VerificationPlanner();
   /** Creates the coordinator with its model, durable state, tools, and approval boundary. */
@@ -133,6 +134,7 @@ export class CodingAgent {
   /** Marks the active task as cancelled so later model turns cannot continue it. */
   cancel(sessionId: string): Task | undefined {
     const task = this.store.latestTask(sessionId);
+    this.activeControllers.get(sessionId)?.abort();
     return (
       task &&
       this.store.updateTask(task.id, {
@@ -209,6 +211,9 @@ export class CodingAgent {
     initialInput: string | undefined,
     onText: (text: string) => void,
   ): Promise<void> {
+    if (this.store.task(initialTask.id)?.status === "cancelled") return;
+    const controller = new AbortController();
+    this.activeControllers.set(initialTask.sessionId, controller);
     let task = this.store.updateTask(initialTask.id, {
       status: initialTask.mode === "planning" ? "planning" : "acting",
     });
@@ -236,7 +241,9 @@ export class CodingAgent {
         createdAt: Date.now(),
       });
       failures = 0;
-      onText(`\n[Tool failure — automatic recovery ${recoveryAttempts}/${MAX_AUTOMATIC_RECOVERIES}]\n`);
+      onText(
+        `\n[Tool failure — automatic recovery ${recoveryAttempts}/${MAX_AUTOMATIC_RECOVERIES}]\n`,
+      );
       return true;
     };
     try {
@@ -247,7 +254,11 @@ export class CodingAgent {
           onText("\nTask cancelled.\n");
           return;
         }
-        const result = await this.modelTurn(task, onText);
+        const result = await this.modelTurn(task, onText, controller.signal);
+        if (controller.signal.aborted || this.store.task(task.id)?.status === "cancelled") {
+          onText("\nTask cancelled.\n");
+          return;
+        }
         if (result.text)
           this.save(task.sessionId, {
             role: "model",
@@ -296,8 +307,12 @@ export class CodingAgent {
           calls.set(fingerprint, count);
           if (count > MAX_IDENTICAL_CALLS)
             return this.fail(task, `Repeated identical tool call blocked: ${call.name}.`, onText);
-          const outcome = await this.executeTool(task, call, onText);
+          const outcome = await this.executeTool(task, call, onText, controller.signal);
           task = this.store.task(task.id)!;
+          if (controller.signal.aborted || task.status === "cancelled") {
+            onText("\nTask cancelled.\n");
+            return;
+          }
           if (task.status === "planned" || task.status === "verification_required") return;
           if (task.status === "failed") {
             onText(`\nKairo couldn't complete this task: ${task.error}\n`);
@@ -322,8 +337,15 @@ export class CodingAgent {
       }
       this.fail(task, "Model-turn limit reached.", onText);
     } catch (error) {
+      if (controller.signal.aborted || this.store.task(task.id)?.status === "cancelled") {
+        onText("\nTask cancelled.\n");
+        return;
+      }
       this.fail(task, `Model error: ${(error as Error).message}`, onText);
       throw error;
+    } finally {
+      if (this.activeControllers.get(initialTask.sessionId) === controller)
+        this.activeControllers.delete(initialTask.sessionId);
     }
   }
 
@@ -351,14 +373,16 @@ export class CodingAgent {
     task: Task,
     call: ToolCall,
     onText: (text: string) => void,
+    signal?: AbortSignal,
   ): Promise<ToolResult> {
+    signal ??= this.activeControllers.get(task.sessionId)?.signal;
     this.event(task, {
       kind: "tool_requested",
       operationId: call.id,
       name: call.name.slice(0, 120),
     });
-    if (task.mode === "planning") return this.executePlanningTool(task, call, onText);
-    return this.executeApprovedTool(task, call, onText);
+    if (task.mode === "planning") return this.executePlanningTool(task, call, onText, signal);
+    return this.executeApprovedTool(task, call, onText, signal);
   }
 
   /** Keeps planning tasks read-only and accepts their final artifact without a workspace call. */
@@ -366,6 +390,7 @@ export class CodingAgent {
     task: Task,
     call: ToolCall,
     onText: (text: string) => void,
+    signal?: AbortSignal,
   ): Promise<ToolResult> {
     if (call.name === "submit_plan") {
       this.save(task.sessionId, {
@@ -405,7 +430,7 @@ export class CodingAgent {
         "Planning mode allows only repository reads and submit_plan; no edits or commands ran.",
         false,
       );
-    return this.executeApprovedTool(task, call, onText);
+    return this.executeApprovedTool(task, call, onText, signal);
   }
 
   /** Validates persisted plan data rather than trusting provider-produced tool arguments. */
@@ -458,7 +483,11 @@ export class CodingAgent {
   }
 
   /** Records model latency even when streaming fails; partial operations remain visible after restart. */
-  private async modelTurn(task: Task, onText: (text: string) => void): Promise<ModelTurn> {
+  private async modelTurn(
+    task: Task,
+    onText: (text: string) => void,
+    signal?: AbortSignal,
+  ): Promise<ModelTurn> {
     await this.repositoryAwareness?.ensureFresh(task.sessionId, this.tools.root);
     const messages = await this.context.prepare(task.sessionId, task);
     const operationId = crypto.randomUUID();
@@ -493,6 +522,8 @@ export class CodingAgent {
             );
         },
         this.instruction(task),
+        true,
+        signal,
       );
       this.event(task, {
         kind: "model_finished",
@@ -537,6 +568,7 @@ export class CodingAgent {
     task: Task,
     call: ToolCall,
     onText: (text: string) => void,
+    signal?: AbortSignal,
   ): Promise<ToolResult> {
     const definition = this.toolDefinitions.find((item) => item.name === call.name);
     const isVerification =
@@ -596,7 +628,7 @@ export class CodingAgent {
     const started = performance.now();
     let result: ToolResult;
     try {
-      result = await this.tools.execute(call);
+      result = await this.tools.execute(call, signal);
     } catch (error) {
       this.event(task, {
         kind: "tool_finished",

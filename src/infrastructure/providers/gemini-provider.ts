@@ -24,6 +24,7 @@ export class GeminiProvider implements ModelProvider {
     onProgress?: (event: ProviderProgress) => void,
     systemInstruction = modelSystemInstruction,
     toolsEnabled = true,
+    signal?: AbortSignal,
   ): Promise<ModelTurn> {
     return recoverProvider(
       (markContent) =>
@@ -36,10 +37,13 @@ export class GeminiProvider implements ModelProvider {
           markContent,
           systemInstruction,
           toolsEnabled,
+          signal,
         ),
       onProgress,
       undefined,
       "Gemini",
+      true,
+      signal,
     );
   }
   /** Performs one stream; received calls prevent automatic replay even before execution. */
@@ -49,6 +53,7 @@ export class GeminiProvider implements ModelProvider {
     markContent: () => void,
     systemInstruction: string,
     toolsEnabled: boolean,
+    signal?: AbortSignal,
   ): Promise<ModelTurn> {
     const contents = messages.map((message) => {
       if (message.role === "tool")
@@ -81,6 +86,7 @@ export class GeminiProvider implements ModelProvider {
       contents: contents as never,
       config: {
         systemInstruction,
+        abortSignal: signal,
         ...(toolsEnabled
           ? {
               tools: [

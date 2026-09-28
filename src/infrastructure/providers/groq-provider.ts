@@ -26,13 +26,16 @@ export class GroqProvider implements ModelProvider {
     onProgress?: (event: ProviderProgress) => void,
     systemInstruction = modelSystemInstruction,
     toolsEnabled = true,
+    signal?: AbortSignal,
   ): Promise<ModelTurn> {
     return recoverProvider(
       (markContent) =>
-        this.streamOnce(messages, onText, markContent, systemInstruction, toolsEnabled),
+        this.streamOnce(messages, onText, markContent, systemInstruction, toolsEnabled, signal),
       onProgress,
       undefined,
       "Groq",
+      true,
+      signal,
     );
   }
 
@@ -43,25 +46,29 @@ export class GroqProvider implements ModelProvider {
     markContent: () => void,
     systemInstruction: string,
     toolsEnabled: boolean,
+    signal?: AbortSignal,
   ): Promise<ModelTurn> {
-    const stream = await this.client.chat.completions.create({
-      model: this.model,
-      stream: true,
-      messages: [
-        { role: "system", content: systemInstruction },
-        ...messages.map((message) => this.message(message)),
-      ] as never,
-      ...(toolsEnabled
-        ? {
-            tools: this.tools.map(({ name, description, parameters }) => ({
-              type: "function" as const,
-              function: { name, description, parameters },
-            })) as never,
-            tool_choice: "auto" as const,
-            parallel_tool_calls: false,
-          }
-        : {}),
-    });
+    const stream = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        stream: true,
+        messages: [
+          { role: "system", content: systemInstruction },
+          ...messages.map((message) => this.message(message)),
+        ] as never,
+        ...(toolsEnabled
+          ? {
+              tools: this.tools.map(({ name, description, parameters }) => ({
+                type: "function" as const,
+                function: { name, description, parameters },
+              })) as never,
+              tool_choice: "auto" as const,
+              parallel_tool_calls: false,
+            }
+          : {}),
+      },
+      { signal },
+    );
     let text = "";
     const pending = new Map<number, PendingToolCall>();
     for await (const chunk of stream) {

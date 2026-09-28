@@ -30,14 +30,16 @@ export class OpenRouterProvider implements ModelProvider {
     onProgress?: (event: ProviderProgress) => void,
     systemInstruction = modelSystemInstruction,
     toolsEnabled = true,
+    signal?: AbortSignal,
   ): Promise<ModelTurn> {
     return recoverProvider(
       (markContent) =>
-        this.streamOnce(messages, onText, markContent, systemInstruction, toolsEnabled),
+        this.streamOnce(messages, onText, markContent, systemInstruction, toolsEnabled, signal),
       onProgress,
       undefined,
       "OpenRouter",
       !this.isFreeModel(),
+      signal,
     );
   }
 
@@ -47,27 +49,31 @@ export class OpenRouterProvider implements ModelProvider {
     markContent: () => void,
     systemInstruction: string,
     toolsEnabled: boolean,
+    signal?: AbortSignal,
   ): Promise<ModelTurn> {
-    const stream = (await this.client.chat.send({
-      chatRequest: {
-        model: this.model,
-        stream: true,
-        messages: [
-          { role: "system", content: systemInstruction },
-          ...messages.map((message) => this.message(message)),
-        ] as ChatMessages[],
-        ...(toolsEnabled
-          ? {
-              tools: this.tools.map(({ name, description, parameters }) => ({
-                type: "function" as const,
-                function: { name, description, parameters },
-              })),
-              toolChoice: "auto" as const,
-              parallelToolCalls: false,
-            }
-          : {}),
+    const stream = (await this.client.chat.send(
+      {
+        chatRequest: {
+          model: this.model,
+          stream: true,
+          messages: [
+            { role: "system", content: systemInstruction },
+            ...messages.map((message) => this.message(message)),
+          ] as ChatMessages[],
+          ...(toolsEnabled
+            ? {
+                tools: this.tools.map(({ name, description, parameters }) => ({
+                  type: "function" as const,
+                  function: { name, description, parameters },
+                })),
+                toolChoice: "auto" as const,
+                parallelToolCalls: false,
+              }
+            : {}),
+        },
       },
-    })) as AsyncIterable<ChatStreamChunk>;
+      { signal },
+    )) as AsyncIterable<ChatStreamChunk>;
     let text = "";
     const pending = new Map<number, PendingToolCall>();
     for await (const chunk of stream) {

@@ -105,6 +105,7 @@ export async function recoverProvider<T>(
   timer: RecoveryClock = clock,
   provider = "Model provider",
   retryQuota = true,
+  signal?: AbortSignal,
 ): Promise<T> {
   let retries = 0;
   let waited = 0;
@@ -115,6 +116,7 @@ export async function recoverProvider<T>(
         hasContent = true;
       });
     } catch (raw) {
+      if (signal?.aborted) throw raw;
       let error = normalizeProviderError(raw, provider);
       if (!retryQuota && error.category === "quota")
         error = new ProviderError(
@@ -132,7 +134,23 @@ export async function recoverProvider<T>(
       retries += 1;
       progress({ kind: "retry", category: error.category, retry: retries, delayMs: delay });
       const started = timer.now();
-      await timer.sleep(delay);
+      if (signal) {
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+          signal.addEventListener("abort", abort, { once: true });
+          timer.sleep(delay).then(
+            () => {
+              signal.removeEventListener("abort", abort);
+              resolve();
+            },
+            (sleepError) => {
+              signal.removeEventListener("abort", abort);
+              reject(sleepError);
+            },
+          );
+          if (signal.aborted) abort();
+        });
+      } else await timer.sleep(delay);
       const elapsed = Math.max(delay, timer.now() - started);
       waited += elapsed;
       progress({ kind: "retry_wait", category: error.category, retry: retries, delayMs: elapsed });

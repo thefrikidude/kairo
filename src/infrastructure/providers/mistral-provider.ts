@@ -21,13 +21,16 @@ export class MistralProvider implements ModelProvider {
     onProgress?: (event: ProviderProgress) => void,
     systemInstruction = modelSystemInstruction,
     toolsEnabled = true,
+    signal?: AbortSignal,
   ): Promise<ModelTurn> {
     return recoverProvider(
       (markContent) =>
-        this.streamOnce(messages, onText, markContent, systemInstruction, toolsEnabled),
+        this.streamOnce(messages, onText, markContent, systemInstruction, toolsEnabled, signal),
       onProgress,
       undefined,
       "Mistral",
+      true,
+      signal,
     );
   }
 
@@ -37,6 +40,7 @@ export class MistralProvider implements ModelProvider {
     markContent: () => void,
     systemInstruction: string,
     toolsEnabled: boolean,
+    signal?: AbortSignal,
   ): Promise<ModelTurn> {
     const response = await this.fetcher("https://api.mistral.ai/v1/chat/completions", {
       method: "POST",
@@ -59,6 +63,7 @@ export class MistralProvider implements ModelProvider {
             }
           : {}),
       }),
+      signal,
     });
     if (!response.ok) throw this.error(response.status);
     if (!response.body) throw new ProviderError("service", true, undefined, "Mistral");

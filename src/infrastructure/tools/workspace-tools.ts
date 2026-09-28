@@ -172,7 +172,7 @@ export class WorkspaceTools implements ToolExecutor {
       : `${call.name}: ${String(call.args.path ?? "workspace")}`;
   }
   /** Dispatches a validated tool request and converts executor errors into tool results. */
-  async execute(call: ToolCall): Promise<ToolResult> {
+  async execute(call: ToolCall, signal?: AbortSignal): Promise<ToolResult> {
     try {
       switch (call.name) {
         case "list_files":
@@ -207,7 +207,7 @@ export class WorkspaceTools implements ToolExecutor {
         case "edit_file":
           return await this.edit(call.args);
         case "run_command":
-          return await this.command(String(call.args.command ?? ""));
+          return await this.command(String(call.args.command ?? ""), signal);
         default:
           throw new Error(`Unknown tool: ${call.name}`);
       }
@@ -282,33 +282,53 @@ export class WorkspaceTools implements ToolExecutor {
     return { ok: true, output: `Edited ${relative(this.root, path)}` };
   }
   /** Runs a shell command in the workspace and captures bounded output and timing. */
-  private command(command: string): Promise<ToolResult> {
+  private command(command: string, signal?: AbortSignal): Promise<ToolResult> {
     if (!command.trim()) return Promise.resolve({ ok: false, output: "command cannot be empty" });
+    if (signal?.aborted)
+      return Promise.resolve({ ok: false, output: "Command cancelled.", exitCode: null });
     return new Promise((done) => {
       const startedAt = Date.now();
       const child = spawn(command, {
         cwd: this.root,
         shell: true,
+        detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
       });
+      const terminate = () => {
+        if (child.pid && process.platform !== "win32") {
+          try {
+            process.kill(-child.pid, "SIGTERM");
+            return;
+          } catch {
+            /* The process may already have exited. */
+          }
+        }
+        child.kill("SIGTERM");
+      };
       let output = "";
       const collect = (chunk: Buffer) => {
         output = truncate(output + chunk.toString());
       };
       child.stdout.on("data", collect);
       child.stderr.on("data", collect);
-      const timer = setTimeout(() => child.kill("SIGTERM"), 60_000);
+      const timer = setTimeout(terminate, 60_000);
+      const abort = terminate;
+      signal?.addEventListener("abort", abort, { once: true });
       child.on("close", (code) => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
         done({
           ok: code === 0,
-          output: truncate(output || `Command exited with ${code}`),
+          output: signal?.aborted
+            ? "Command cancelled."
+            : truncate(output || `Command exited with ${code}`),
           exitCode: code,
           durationMs: Date.now() - startedAt,
         });
       });
       child.on("error", (error) => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
         done({
           ok: false,
           output: error.message,
