@@ -209,10 +209,105 @@ export function changedFileReview(workspace: string, path: string): ChangedFileR
   return { path, diff: "", unavailable: "No current Git diff is available for this file." };
 }
 
+type SlashCommandToken = {
+  start: number;
+  end: number;
+  openingQuote?: number;
+  closingQuote?: number;
+  query: string;
+};
+
+/** Finds the slash-command token at the cursor, including an actively typed quoted token. */
+function slashCommandTokenAtCursor(input: string, cursor: number): SlashCommandToken | undefined {
+  let quote: "'" | '"' | "`" | undefined;
+  let quoteStart = -1;
+  let escaped = false;
+  let slashStart = -1;
+  const end = Math.max(0, Math.min(cursor, input.length));
+
+  for (let index = 0; index < end; index += 1) {
+    const character = input[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) {
+        quote = undefined;
+        if (slashStart >= 0) slashStart = -1;
+      } else if (
+        character === "/" &&
+        (index === quoteStart + 1 || /\s/.test(input[index - 1] ?? ""))
+      ) {
+        slashStart = index;
+      } else if (/\s/.test(character ?? "")) {
+        slashStart = -1;
+      }
+      continue;
+    }
+    const opensQuote =
+      character === '"' ||
+      character === "`" ||
+      (character === "'" &&
+        (index === 0 || /[\s([{]/.test(input[index - 1] ?? "")));
+    if (opensQuote) {
+      quote = character as "'" | '"' | "`";
+      quoteStart = index;
+      slashStart = -1;
+      continue;
+    }
+    if (
+      character === "/" &&
+      (index === 0 || /[\s'"`]/.test(input[index - 1] ?? ""))
+    ) {
+      slashStart = index;
+      continue;
+    }
+    if (/\s/.test(character ?? "")) slashStart = -1;
+  }
+
+  if (slashStart < 0) return undefined;
+  const query = input.slice(slashStart, end).toLowerCase();
+  if (!query.startsWith("/") || /\s/.test(query)) return undefined;
+  let tokenEnd = end;
+  while (tokenEnd < input.length && !/[\s'"`]/.test(input[tokenEnd] ?? "")) tokenEnd += 1;
+  const openingQuote = quoteStart === slashStart - 1 ? quoteStart : undefined;
+  const closingQuote =
+    openingQuote !== undefined && quote && input[tokenEnd] === quote ? tokenEnd : undefined;
+  return { start: slashStart, end: tokenEnd, openingQuote, closingQuote, query };
+}
+
+function removeSlashCommandToken(input: string, token: SlashCommandToken): string {
+  const start = token.openingQuote ?? token.start;
+  const end = token.closingQuote === undefined ? token.end : token.closingQuote + 1;
+  const before = input.slice(0, start);
+  let after = input.slice(end);
+  if (/\s$/.test(before) && /^\s/.test(after)) after = after.slice(1);
+  return before + after;
+}
+
+function replaceSlashCommandToken(
+  input: string,
+  token: SlashCommandToken,
+  replacement: string,
+): string {
+  const start = token.openingQuote ?? token.start;
+  const end = token.closingQuote === undefined ? token.end : token.closingQuote + 1;
+  return input.slice(0, start) + replacement + input.slice(end);
+}
+
 /** Finds palette entries while the user is typing a slash-command name. */
-export function matchingSlashCommands(input: string): readonly (typeof slashCommands)[number][] {
-  if (!input.startsWith("/") || input.includes(" ")) return [];
-  return slashCommands.filter((command) => command.name.startsWith(input.toLowerCase()));
+export function matchingSlashCommands(
+  input: string,
+  cursor = input.length,
+): readonly (typeof slashCommands)[number][] {
+  const token = slashCommandTokenAtCursor(input, cursor);
+  if (!token) return [];
+  return slashCommands.filter((command) => command.name.startsWith(token.query));
 }
 
 function commandInput(command: (typeof slashCommands)[number]): string {
@@ -321,12 +416,19 @@ function MultilineInput({
   onSubmit,
   placeholder,
   focus,
+  onOpenCommands,
+  onCommandQueryChange,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   placeholder: string;
   focus: boolean;
+  onOpenCommands: () => void;
+  onCommandQueryChange: (
+    matches: readonly (typeof slashCommands)[number][],
+    token?: SlashCommandToken,
+  ) => void;
 }) {
   const [cursor, setCursor] = useState(value.length);
   const internalValue = useRef(value);
@@ -336,25 +438,82 @@ function MultilineInput({
       setCursor(value.length);
     }
   }, [value]);
+  useEffect(() => {
+    const token = slashCommandTokenAtCursor(value, cursor);
+    onCommandQueryChange(
+      token ? slashCommands.filter((command) => command.name.startsWith(token.query)) : [],
+      token,
+    );
+  }, [cursor, onCommandQueryChange, value]);
   const change = (next: string, nextCursor: number) => {
     internalValue.current = next;
     setCursor(nextCursor);
     onChange(next);
   };
+  const lineStart = (position: number) => value.lastIndexOf("\n", position - 1) + 1;
+  const lineEnd = (position: number) => {
+    const end = value.indexOf("\n", position);
+    return end < 0 ? value.length : end;
+  };
+  const previousWordStart = (position: number) => {
+    let start = position;
+    while (start > 0 && /\s/.test(value[start - 1] ?? "")) start -= 1;
+    while (start > 0 && !/\s/.test(value[start - 1] ?? "")) start -= 1;
+    return start;
+  };
+  const nextWordEnd = (position: number) => {
+    let end = position;
+    while (end < value.length && /\s/.test(value[end] ?? "")) end += 1;
+    while (end < value.length && !/\s/.test(value[end] ?? "")) end += 1;
+    return end;
+  };
   useInput(
     (input, key) => {
+      const control =
+        key.ctrl && input.length === 1 && input.charCodeAt(0) <= 26
+          ? String.fromCharCode(input.charCodeAt(0) + 96)
+          : "";
+      if (control === "p") {
+        onOpenCommands();
+        return;
+      }
       if (key.return) {
         if (key.shift) {
           change(value.slice(0, cursor) + "\n" + value.slice(cursor), cursor + 1);
         } else onSubmit(value);
         return;
       }
-      if (key.leftArrow) return setCursor((position) => Math.max(0, position - 1));
-      if (key.rightArrow) return setCursor((position) => Math.min(value.length, position + 1));
+      if (key.leftArrow)
+        return setCursor((position) =>
+          key.meta || key.ctrl ? previousWordStart(position) : Math.max(0, position - 1),
+        );
+      if (key.rightArrow)
+        return setCursor((position) =>
+          key.meta || key.ctrl ? nextWordEnd(position) : Math.min(value.length, position + 1),
+        );
+      if ((key.backspace && (key.meta || key.ctrl)) || control === "w") {
+        const start = previousWordStart(cursor);
+        if (start !== cursor) change(value.slice(0, start) + value.slice(cursor), start);
+        return;
+      }
+      if (key.delete && (key.meta || key.ctrl)) {
+        const end = nextWordEnd(cursor);
+        if (end !== cursor) change(value.slice(0, cursor) + value.slice(end), cursor);
+        return;
+      }
+      if (control === "u") {
+        const start = lineStart(cursor);
+        change(value.slice(0, start) + value.slice(cursor), start);
+        return;
+      }
+      if (control === "k") {
+        change(value.slice(0, cursor) + value.slice(lineEnd(cursor)), cursor);
+        return;
+      }
+      if (control === "a") return setCursor(lineStart(cursor));
+      if (control === "e") return setCursor(lineEnd(cursor));
       if (key.home || key.end) {
-        const lineStart = value.lastIndexOf("\n", cursor - 1) + 1;
-        const lineEndIndex = value.indexOf("\n", cursor);
-        return setCursor(key.home ? lineStart : lineEndIndex < 0 ? value.length : lineEndIndex);
+        return setCursor(key.home ? lineStart(cursor) : lineEnd(cursor));
       }
       if (key.backspace && cursor > 0) {
         change(value.slice(0, cursor - 1) + value.slice(cursor), cursor - 1);
@@ -641,49 +800,12 @@ export function BrandMark(): React.JSX.Element {
   );
 }
 
-function EmptyState({
-  mode,
-  workspace,
-  repo,
-}: {
-  mode: InteractionMode;
-  workspace: string;
-  repo: RepositoryStatus;
-}): React.JSX.Element {
+function EmptyState(): React.JSX.Element {
   return (
-    <Box flexDirection="column" alignItems="center" marginTop={2} marginBottom={1}>
+    <Box flexGrow={1} flexDirection="column" alignItems="center" justifyContent="center">
       <BrandMark />
       <Box marginTop={1}>
-        <Text bold color={colors.textSoft}>
-          dependable coding, right in your terminal
-        </Text>
-      </Box>
-      <Box marginTop={1}>
-        <Text color={colors.muted}>Workspace: {workspace}</Text>
-        {repo.branch ? <Text color={colors.muted}> · {repo.branch}</Text> : null}
-        {repo.changedFiles ? (
-          <Text color={colors.warning}> · {repo.changedFiles} changed</Text>
-        ) : null}
-      </Box>
-      <Box flexDirection="column" marginTop={2}>
-        {[
-          ["/plan", "inspect first, change nothing"],
-          ["/model", "choose the coding model"],
-          ["/resume", "continue previous work"],
-          ["/help", "see every command"],
-        ].map(([command, description]) => (
-          <Box key={command}>
-            <Text bold color={colors.accent}>
-              {command.padEnd(11)}
-            </Text>
-            <Text color={colors.textSoft}>{description}</Text>
-          </Box>
-        ))}
-      </Box>
-      <Box marginTop={1}>
-        <Text color={colors.muted}>
-          {mode === "plan" ? "Read-only planning is active" : "Describe an outcome to begin"}
-        </Text>
+        <Text color={colors.muted}>What should we work on?</Text>
       </Box>
     </Box>
   );
@@ -826,8 +948,19 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const [jevCredentialMode, setJevCredentialMode] = useState(false);
   const [savingJevCredential, setSavingJevCredential] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
+  const [commandPickerOpen, setCommandPickerOpen] = useState(false);
   const models = useMemo(modelOptions, []);
-  const commandMatches = useMemo(() => matchingSlashCommands(input), [input]);
+  const [commandMatches, setCommandMatches] = useState<
+    readonly (typeof slashCommands)[number][]
+  >([]);
+  const [commandToken, setCommandToken] = useState<SlashCommandToken>();
+  const onCommandQueryChange = useCallback(
+    (matches: readonly (typeof slashCommands)[number][], token?: SlashCommandToken) => {
+      setCommandMatches(matches);
+      setCommandToken(token);
+    },
+    [],
+  );
   const approval = useMemo(
     () =>
       new TuiApproval((pending) => {
@@ -1302,10 +1435,10 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   );
 
   const submit = useCallback(
-    async (value: string) => {
+    async (value: string, keepDraft = false) => {
       let line = value.trim();
       if (!line || busy !== "idle" || pendingApproval) return;
-      const selectedCommand = commandMatches[commandIndex];
+      const selectedCommand = keepDraft ? undefined : commandMatches[commandIndex];
       if (selectedCommand && line !== selectedCommand.name) {
         if ("acceptsArgument" in selectedCommand && selectedCommand.acceptsArgument) {
           setInput(commandInput(selectedCommand));
@@ -1313,14 +1446,9 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         }
         line = selectedCommand.name;
       }
-      setInput("");
+      if (!keepDraft || line === "/new" || line === "/quit" || line === "/exit") setInput("");
       if (line === "/help") {
-        return append(
-          "system",
-          slashCommands
-            .map((command) => `${command.name.padEnd(10)} ${command.description}`)
-            .join("\n"),
-        );
+        return append("system", slashCommands.map((command) => command.name).join("  "));
       }
       if (line === "/plan") {
         const next = interactionModeAfterCommand(mode, line);
@@ -1480,7 +1608,67 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     ],
   );
 
+  const selectSuggestedCommand = useCallback(
+    (command: (typeof slashCommands)[number]) => {
+      if (commandToken) {
+        if (
+          "acceptsArgument" in command &&
+          command.acceptsArgument &&
+          commandToken.query !== command.name
+        ) {
+          setInput(replaceSlashCommandToken(input, commandToken, commandInput(command)));
+          setCommandMatches([]);
+          setCommandToken(undefined);
+          return;
+        }
+        setInput(removeSlashCommandToken(input, commandToken));
+        setCommandMatches([]);
+        setCommandToken(undefined);
+      }
+      void submit(command.name, true);
+    },
+    [commandToken, input, submit],
+  );
+
+  const submitInput = useCallback(
+    (value: string) => {
+      const selected = commandMatches[commandIndex];
+      if (selected && commandToken) return selectSuggestedCommand(selected);
+      return submit(value);
+    },
+    [commandIndex, commandMatches, commandToken, selectSuggestedCommand, submit],
+  );
+
   useInput((inputKey, key) => {
+    const control =
+      key.ctrl && inputKey.length === 1 && inputKey.charCodeAt(0) <= 26
+        ? String.fromCharCode(inputKey.charCodeAt(0) + 96)
+        : "";
+    if (commandPickerOpen) {
+      if (key.escape || control === "p") return setCommandPickerOpen(false);
+      if (key.upArrow) return setCommandIndex((current) => Math.max(0, current - 1));
+      if (key.downArrow)
+        return setCommandIndex((current) => Math.min(slashCommands.length - 1, current + 1));
+      if (key.return) {
+        const selected = slashCommands[commandIndex];
+        setCommandPickerOpen(false);
+        if (selected) void submit(selected.name, true);
+      }
+      return;
+    }
+    if (
+      control === "p" &&
+      busy === "idle" &&
+      !changesTask &&
+      !pendingApproval &&
+      !modelPicker &&
+      !jevPanel &&
+      !credentialModel
+    ) {
+      setCommandIndex(0);
+      setCommandPickerOpen(true);
+      return;
+    }
     if (changesTask || pendingApproval || modelPicker || jevPanel || !commandMatches.length) return;
     if (key.upArrow) return setCommandIndex((current) => Math.max(0, current - 1));
     if (key.downArrow)
@@ -1488,11 +1676,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
     if (key.tab) {
       const selected = commandMatches[commandIndex];
       if (!selected) return;
-      if ("acceptsArgument" in selected && selected.acceptsArgument) {
-        setInput(commandInput(selected));
-      } else {
-        void submit(selected.name);
-      }
+      selectSuggestedCommand(selected);
     }
   });
 
@@ -1500,12 +1684,13 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const hiddenEntries = entries.length - visibleEntries.length;
   const terminalHeight = process.stdout.rows ? Math.max(20, process.stdout.rows - 1) : undefined;
   const activeModel = routedSelection ?? selection;
+  const commandSource = commandPickerOpen ? slashCommands : commandMatches;
+  const commandWindowStart = Math.max(0, Math.min(commandIndex - 2, commandSource.length - 5));
+  const visibleCommands = commandSource.slice(commandWindowStart, commandWindowStart + 5);
 
   return (
     <Box flexDirection="column" minHeight={terminalHeight}>
-      {entries.length ? (
-        <WorkspaceBar workspace={active.workspace} repo={repo} model={activeModel} />
-      ) : null}
+      <WorkspaceBar workspace={active.workspace} repo={repo} model={activeModel} />
       <Box flexDirection="column" flexGrow={1}>
         {entries.length ? (
           <Box flexDirection="column" marginTop={1}>
@@ -1517,7 +1702,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
             ))}
           </Box>
         ) : (
-          <EmptyState mode={mode} workspace={active.workspace} repo={repo} />
+          <EmptyState />
         )}
       </Box>
       {changesTask ? (
@@ -1602,28 +1787,21 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         </Box>
       ) : (
         <Box flexDirection="column">
-          {commandMatches.length ? (
-            <Box
-              borderStyle="round"
-              borderColor={colors.accent}
-              flexDirection="column"
-              marginTop={1}
-              paddingX={1}
-            >
-              <Text bold color={colors.accent}>
-                COMMANDS
-              </Text>
-              {commandMatches.map((command, index) => (
+          {commandPickerOpen || commandMatches.length ? (
+            <Box flexDirection="column" paddingX={1}>
+              {visibleCommands.map((command, index) => (
                 <Text
                   key={command.name}
-                  color={index === commandIndex ? colors.accent : colors.textSoft}
+                  color={
+                    index + commandWindowStart === commandIndex ? colors.accent : colors.textSoft
+                  }
                   bold={index === commandIndex}
                 >
-                  {index === commandIndex ? "›" : " "} {command.name.padEnd(10)}{" "}
+                  {index + commandWindowStart === commandIndex ? "›" : " "}{" "}
+                  {command.name.padEnd(12)}
                   {command.description}
                 </Text>
               ))}
-              <Text color={colors.muted}>↑/↓ navigate · Tab complete · Enter run</Text>
             </Box>
           ) : null}
           {busy !== "idle" && !pendingApproval ? (
@@ -1644,7 +1822,7 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
                 setInput(value);
                 setCommandIndex(0);
               }}
-              onSubmit={submit}
+              onSubmit={submitInput}
               placeholder={
                 busy === "idle"
                   ? mode === "plan"
@@ -1652,18 +1830,24 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
                     : "Ask Kairo to implement…"
                   : "Task in progress…"
               }
-              focus={busy === "idle" && !changesTask}
+              focus={busy === "idle" && !changesTask && !commandPickerOpen}
+              onOpenCommands={() => {
+                setCommandIndex(0);
+                setCommandPickerOpen(true);
+              }}
+              onCommandQueryChange={onCommandQueryChange}
             />
           </Box>
           <Box paddingX={1} justifyContent="space-between">
             <Box>
               <Text color={colors.muted}>
-                enter send · shift+enter new line · esc stop · / commands
+                {commandPickerOpen
+                  ? "↑↓ choose · ↵ run · esc close"
+                  : busy === "idle"
+                    ? "↵ send · ⇧↵ newline · ⌥⌫ word · ctrl+p commands"
+                    : "esc stop"}
               </Text>
             </Box>
-            <Text color={colors.textSoft}>
-              {activeModel.provider}/{activeModel.model}
-            </Text>
           </Box>
           <Box paddingX={1} justifyContent="space-between">
             <Box>
@@ -1673,7 +1857,6 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
                   ? " · Workspace writes"
                   : " · Ask before edits"}
               </Text>
-              {autoModelRouting ? <Text color={colors.muted}> · Auto routing</Text> : null}
             </Box>
             {autoModelRouting ? (
               <Box>
