@@ -1,4 +1,5 @@
 export type Role = "user" | "model" | "tool";
+export type WorkspaceEditPermission = "workspace" | "ask";
 export type ProviderId = "gemini" | "groq" | "mistral" | "openrouter";
 /** Credential-only services are deliberately separate from selectable coding providers. */
 export type CredentialId = ProviderId | "jev";

@@ -71,6 +71,7 @@ test("Jev enriches but never bypasses mutation approval or retains source conten
   const store = await SqliteSessionStore.open(":memory:");
   try {
     const session = store.create("/workspace");
+    store.setSessionPermissionMode(session.id, "ask");
     let approvalDescription = "";
     let state = "";
     const advisor: JevSafetyAdvisor = {
@@ -200,6 +201,7 @@ test("safe Jev autonomy runs only a discovered low-risk verification without pro
   const store = await SqliteSessionStore.open(":memory:");
   try {
     const session = store.create(root);
+    store.setSessionPermissionMode(session.id, "ask");
     saveVerificationProfile(store, session.id, root);
     let approvals = 0;
     const advisor: JevSafetyAdvisor = {
@@ -376,6 +378,7 @@ test("a task-file approval skips only later writes to that same file", async () 
   const store = await SqliteSessionStore.open(":memory:");
   try {
     const session = store.create("/workspace");
+    store.setSessionPermissionMode(session.id, "ask");
     const approvals: string[] = [];
     const executions: string[] = [];
     let turns = 0;
@@ -423,6 +426,108 @@ test("a task-file approval skips only later writes to that same file", async () 
     assert.deepEqual(approvals, ["write-a", "write-b", "command"]);
     assert.deepEqual(executions, ["write-a", "edit-a", "write-b", "command"]);
     assert.deepEqual(store.latestTask(session.id)?.approvedWritePaths, ["a.txt"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("workspace mode skips file approval but still asks before shell commands", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    const approvals: string[] = [];
+    let turn = 0;
+    const agent = new CodingAgent(
+      {
+        async stream(): Promise<ModelTurn> {
+          turn += 1;
+          return turn === 1
+            ? {
+                text: "",
+                toolCalls: [
+                  { id: "write", name: "write_file", args: { path: "src/a.ts", content: "x" } },
+                  {
+                    id: "edit",
+                    name: "edit_file",
+                    args: { path: "src/a.ts", oldText: "x", newText: "y" },
+                  },
+                  { id: "command", name: "run_command", args: { command: "npm test" } },
+                ],
+              }
+            : { text: "done", toolCalls: [] };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "test action",
+        async execute() {
+          return { ok: true, output: "ok" };
+        },
+      },
+      {
+        async approve(call) {
+          approvals.push(call.name);
+          return true;
+        },
+      },
+      definitions,
+    );
+
+    await agent.run(session.id, "Create and check a file", () => {});
+    assert.deepEqual(approvals, ["run_command"]);
+    const events = store.taskEvents(store.latestTask(session.id)!.id);
+    assert.ok(
+      events.some(
+        (event) => event.kind === "approval" && event.outcome === "session-workspace-write-mode",
+      ),
+    );
+    assert.equal(taskMetrics(events).autonomousActions, 0);
+  } finally {
+    store.close();
+  }
+});
+
+test("ask mode prompts for workspace edits", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    const session = store.create("/workspace");
+    store.setSessionPermissionMode(session.id, "ask");
+    let approved: string[] = [];
+    let turn = 0;
+    const agent = new CodingAgent(
+      {
+        async stream(): Promise<ModelTurn> {
+          turn += 1;
+          return turn === 1
+            ? {
+                text: "",
+                toolCalls: [
+                  { id: "write", name: "write_file", args: { path: "src/a.ts", content: "x" } },
+                ],
+              }
+            : { text: "done", toolCalls: [] };
+        },
+      },
+      store,
+      {
+        root: "/workspace",
+        description: () => "test action",
+        async execute() {
+          return { ok: true, output: "ok" };
+        },
+      },
+      {
+        async approve(call) {
+          approved.push(call.name);
+          return true;
+        },
+      },
+      definitions,
+    );
+
+    await agent.run(session.id, "Create a file", () => {});
+    assert.deepEqual(approved, ["write_file"]);
   } finally {
     store.close();
   }
@@ -717,6 +822,7 @@ test("agent records denied mutating calls and continues", async () => {
   const root = await mkdtemp(join(tmpdir(), "kairo-agent-"));
   const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
   const session = store.create(root);
+  store.setSessionPermissionMode(session.id, "ask");
   const agent = new CodingAgent(
     new FakeProvider(),
     store,
@@ -948,6 +1054,7 @@ test("agent continues with a persisted, focused repair after failed verification
   const root = await mkdtemp(join(tmpdir(), "kairo-repair-"));
   const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
   const session = store.create(root);
+  store.setSessionPermissionMode(session.id, "ask");
   const agent = new CodingAgent(
     new RepairingProvider(),
     store,
@@ -979,6 +1086,7 @@ test("Jev can escalate a failed verification without bypassing its original appr
   const store = await SqliteSessionStore.open(join(root, "db.sqlite"));
   try {
     const session = store.create(root);
+    store.setSessionPermissionMode(session.id, "ask");
     let approvals = 0;
     const advisor: JevSafetyAdvisor = {
       async assess() {

@@ -13,6 +13,7 @@ import type {
   VerificationSelection,
   EvaluationAttempt,
   EvaluationRun,
+  WorkspaceEditPermission,
 } from "../../domain/models.js";
 
 export interface Session {
@@ -20,6 +21,7 @@ export interface Session {
   workspace: string;
   createdAt: number;
   updatedAt: number;
+  permissionMode: WorkspaceEditPermission;
 }
 export class SqliteSessionStore {
   /** Wraps an already-initialized database; callers use open() to guarantee setup. */
@@ -31,7 +33,7 @@ export class SqliteSessionStore {
     db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
       INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
-      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, permission_mode TEXT NOT NULL DEFAULT 'workspace');
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_call_id TEXT, tool_name TEXT, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE TABLE IF NOT EXISTS tool_events (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, call_id TEXT NOT NULL, name TEXT NOT NULL, args_json TEXT NOT NULL, approved INTEGER, output TEXT, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'implementation', status TEXT NOT NULL, plan_json TEXT, changed_files_json TEXT NOT NULL DEFAULT '[]', approved_write_paths_json TEXT NOT NULL DEFAULT '[]', verification_command TEXT, verification_output TEXT, verification_ok INTEGER, verification_exit_code INTEGER, verification_discovered INTEGER, verification_selection_json TEXT, summary TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
@@ -39,6 +41,11 @@ export class SqliteSessionStore {
       CREATE TABLE IF NOT EXISTS context_checkpoints (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT, summary TEXT NOT NULL, through_message_id INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE INDEX IF NOT EXISTS checkpoints_session_created ON context_checkpoints(session_id, created_at DESC);
       CREATE TABLE IF NOT EXISTS repository_profiles (session_id TEXT PRIMARY KEY, profile_json TEXT NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));`);
+    const sessionColumns = db.prepare("SELECT name FROM pragma_table_info('sessions')").all() as {
+      name: string;
+    }[];
+    if (!sessionColumns.some((column) => column.name === "permission_mode"))
+      db.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'workspace'");
     db.exec(`CREATE TABLE IF NOT EXISTS repair_attempts (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, command TEXT NOT NULL, evidence_json TEXT NOT NULL, selected_files_json TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(task_id) REFERENCES tasks(id));
       CREATE INDEX IF NOT EXISTS repair_attempts_task_created ON repair_attempts(task_id, created_at DESC);`);
     const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as {
@@ -244,13 +251,30 @@ export class SqliteSessionStore {
   create(workspace: string): Session {
     const now = Date.now();
     const id = `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-    this.db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?)").run(id, workspace, now, now);
-    return { id, workspace, createdAt: now, updatedAt: now };
+    this.db
+      .prepare("INSERT INTO sessions (id, workspace, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run(id, workspace, now, now);
+    return { id, workspace, createdAt: now, updatedAt: now, permissionMode: "workspace" };
+  }
+  /** Reads the permission mode saved for one session. */
+  sessionPermissionMode(sessionId: string): WorkspaceEditPermission {
+    const row = this.db
+      .prepare("SELECT permission_mode FROM sessions WHERE id=?")
+      .get(sessionId) as { permission_mode?: string } | undefined;
+    return row?.permission_mode === "ask" ? "ask" : "workspace";
+  }
+  /** Persists a session-local edit approval mode and updates its recency. */
+  setSessionPermissionMode(sessionId: string, mode: WorkspaceEditPermission): void {
+    this.db
+      .prepare("UPDATE sessions SET permission_mode=?, updated_at=? WHERE id=?")
+      .run(mode, Date.now(), sessionId);
   }
   /** Loads one session by id, if it still exists. */
   get(id: string): Session | undefined {
     const row = this.db
-      .prepare("SELECT id, workspace, created_at, updated_at FROM sessions WHERE id = ?")
+      .prepare(
+        "SELECT id, workspace, created_at, updated_at, permission_mode FROM sessions WHERE id = ?",
+      )
       .get(id) as Record<string, unknown> | undefined;
     return (
       row && {
@@ -258,6 +282,7 @@ export class SqliteSessionStore {
         workspace: String(row.workspace),
         createdAt: Number(row.created_at),
         updatedAt: Number(row.updated_at),
+        permissionMode: row.permission_mode === "ask" ? "ask" : "workspace",
       }
     );
   }
@@ -266,7 +291,7 @@ export class SqliteSessionStore {
     return (
       this.db
         .prepare(
-          "SELECT id, workspace, created_at, updated_at FROM sessions ORDER BY updated_at DESC",
+          "SELECT id, workspace, created_at, updated_at, permission_mode FROM sessions ORDER BY updated_at DESC",
         )
         .all() as Record<string, unknown>[]
     ).map((r) => ({
@@ -274,6 +299,7 @@ export class SqliteSessionStore {
       workspace: String(r.workspace),
       createdAt: Number(r.created_at),
       updatedAt: Number(r.updated_at),
+      permissionMode: r.permission_mode === "ask" ? "ask" : "workspace",
     }));
   }
   /** Loads all messages required to reconstruct a full conversation. */

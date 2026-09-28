@@ -21,6 +21,36 @@ test("sessions persist messages and sort by latest activity", async () => {
   store.close();
 });
 
+test("session permission modes persist independently across reopen", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-session-permissions-"));
+  const path = join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(path);
+  const workspace = first.create("/workspace");
+  const ask = first.create("/another-workspace");
+  first.setSessionPermissionMode(ask.id, "ask");
+  first.close();
+
+  const reopened = await SqliteSessionStore.open(path);
+  assert.equal(reopened.get(workspace.id)?.permissionMode, "workspace");
+  assert.equal(reopened.get(ask.id)?.permissionMode, "ask");
+  assert.equal(reopened.sessionPermissionMode(ask.id), "ask");
+  reopened.close();
+});
+
+test("existing session tables migrate to workspace-write mode", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-session-permissions-migration-"));
+  const path = join(dir, "sessions.sqlite");
+  const legacy = new Database(path);
+  legacy.exec(
+    "CREATE TABLE sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); INSERT INTO sessions VALUES ('legacy', '/workspace', 1, 1)",
+  );
+  legacy.close();
+
+  const store = await SqliteSessionStore.open(path);
+  assert.equal(store.get("legacy")?.permissionMode, "workspace");
+  store.close();
+});
+
 test("active tasks recover as interrupted after restart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kairo-recover-"));
   const path = join(dir, "sessions.sqlite");

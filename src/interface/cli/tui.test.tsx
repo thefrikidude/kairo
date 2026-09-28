@@ -16,6 +16,7 @@ import {
   interactionModeAfterTask,
   matchingSlashCommands,
   modelOptions,
+  toggleWorkspaceEditPermission,
 } from "./tui.js";
 
 function git(workspace: string, args: string[]): void {
@@ -63,10 +64,15 @@ test("transcript rows clearly separate the speaker from the message", () => {
   assert.match(view.lastFrame() ?? "", /Fix it/);
 });
 
-test("an empty assistant row renders an animated response indicator", () => {
+test("an empty assistant row leaves task activity to the status indicator", () => {
   const view = render(<TranscriptRow entry={{ id: 1, kind: "assistant", text: "" }} />);
-  assert.match(view.lastFrame() ?? "", /Generating response/);
+  assert.doesNotMatch(view.lastFrame() ?? "", /Generating response/);
   view.unmount();
+});
+
+test("workspace edit permission toggles between default writes and approval prompts", () => {
+  assert.equal(toggleWorkspaceEditPermission("workspace"), "ask");
+  assert.equal(toggleWorkspaceEditPermission("ask"), "workspace");
 });
 
 test("changed-file review shows the working-tree patch for a file Kairo touched", async () => {
@@ -189,6 +195,10 @@ test("slash-command palette filters supported names and hides after an argument 
   assert.deepEqual(
     matchingSlashCommands("/aut").map((command) => command.name),
     ["/auto"],
+  );
+  assert.deepEqual(
+    matchingSlashCommands("/per").map((command) => command.name),
+    ["/permissions"],
   );
 });
 

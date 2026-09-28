@@ -5,7 +5,13 @@ import { Box, render, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import parseDiff from "parse-diff";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ModelSelection, Task, TaskEvent, ToolCall } from "../../domain/models.js";
+import type {
+  ModelSelection,
+  Task,
+  TaskEvent,
+  ToolCall,
+  WorkspaceEditPermission,
+} from "../../domain/models.js";
 import type {
   ApprovalDecision,
   ApprovalPolicy,
@@ -97,6 +103,7 @@ export const slashCommands = [
   { name: "/help", description: "Show commands and shortcuts" },
   { name: "/plan", description: "Toggle read-only planning mode" },
   { name: "/model", description: "Choose a model" },
+  { name: "/permissions", description: "Toggle workspace write approvals" },
   { name: "/auto", description: "Toggle Jev automatic model routing" },
   { name: "/jev", description: "Manage the Jev safety advisor" },
   { name: "/new", description: "Start a new session" },
@@ -237,6 +244,13 @@ export function interactionModeAfterCommand(
   command: string,
 ): InteractionMode {
   return command === "/plan" ? (mode === "build" ? "plan" : "build") : mode;
+}
+
+/** Switches only the current saved session between default writes and edit prompts. */
+export function toggleWorkspaceEditPermission(
+  mode: WorkspaceEditPermission,
+): WorkspaceEditPermission {
+  return mode === "workspace" ? "ask" : "workspace";
 }
 
 /** Reflects a completed Jev planning route in the persistent TUI interaction mode. */
@@ -1368,6 +1382,13 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
         agent?.compact(active.id);
         return;
       }
+      if (line === "/permissions") {
+        const permissionMode = toggleWorkspaceEditPermission(active.permissionMode);
+        props.store.setSessionPermissionMode(active.id, permissionMode);
+        const updated = props.store.get(active.id);
+        if (updated) setActive(updated);
+        return;
+      }
       if (line === "/cancel") {
         cancelActiveTask();
         return;
@@ -1654,6 +1675,11 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
           <Box paddingX={1} justifyContent="space-between">
             <Box>
               <ModeBadge mode={mode} />
+              <Text color={active.permissionMode === "workspace" ? colors.success : colors.warning}>
+                {active.permissionMode === "workspace"
+                  ? " · Workspace writes"
+                  : " · Ask before edits"}
+              </Text>
               {autoModelRouting ? <Text color={colors.muted}> · Auto routing</Text> : null}
             </Box>
             {autoModelRouting ? (

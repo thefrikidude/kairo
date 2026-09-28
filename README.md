@@ -4,7 +4,7 @@
 
 <img width="1159" height="677" alt="Screenshot 2026-09-21 at 12 02 14 PM" src="https://github.com/user-attachments/assets/85024d79-f167-4f9d-a80a-3c2fccb74bba" />
 
-Kairo is a terminal coding agent for a local repository. It understands the codebase, plans or implements a change, asks before doing anything mutating, and verifies the result.
+Kairo is a terminal coding agent for a local repository. It understands the codebase, plans or implements a change, works within the opened workspace, and verifies the result.
 
 The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe workspace tools, resumable sessions, useful traces, and honest verification state.
 
@@ -12,7 +12,7 @@ The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe 
 
 - Runs in a full-screen Ink TUI with streaming responses, a task timeline, slash-command palette, and approval cards.
 - Builds a language-neutral repository snapshot, enriches JavaScript/TypeScript structure, ranks relevant files, and keeps model context bounded.
-- Reads and searches freely inside the workspace. Edits, writes, and arbitrary shell commands require approval.
+- Reads and searches freely inside the workspace. Workspace file edits are allowed by default; arbitrary shell commands still require approval. `/permissions` toggles to approval-required file edits for the current saved session.
 - Recommends focused checks after changes and can make bounded repair attempts when verification fails.
 - Saves resumable sessions, plans, checkpoints, and metadata-only task traces.
 - Supports Gemini, Groq, and Mistral coding models, with manual or optional Jev-powered routing.
@@ -84,6 +84,7 @@ OpenRouter is available as a provider. Kairo lists `openrouter/free` as its defa
 Type a request normally, or type `/` to open the command palette. Arrow keys move through matches; Tab completes commands that need arguments and runs commands that do not.
 
 - `/plan` toggles read-only planning.
+- `/permissions` toggles between `Workspace writes` and `Ask before edits`; the setting is saved with the current session. Workspace confinement and shell-command approvals remain in force.
 - `/model` chooses a coding model and disables Auto. `/auto` toggles Jev-powered automatic routing.
 - `/jev` manages the Jev credential, routing, safety, recovery, and autonomy features.
 - `/new`, `/resume [session-id]`, and `/sessions` manage saved sessions.
@@ -91,7 +92,7 @@ Type a request normally, or type `/` to open the command palette. Arrow keys mov
 - `/compact` saves a context checkpoint.
 - `/cancel`, `/logout`, `/help`, and `/quit` handle the remaining session controls.
 
-Press `y` or Enter to approve an action; press `n` or Escape to deny it. Use `Ctrl+O` to expand or collapse the task activity timeline.
+When Kairo requests approval, press `y` or Enter to approve; press `n` or Escape to deny. In `Ask before edits` mode, a file approval can be scoped to that file for the current task. Use `Ctrl+O` to expand or collapse the task activity timeline.
 
 Every successful edit invalidates older verification. A task that changed files is not complete until its latest eligible check passes.
 

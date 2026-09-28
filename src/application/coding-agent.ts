@@ -585,7 +585,19 @@ export class CodingAgent {
     let approved: boolean | null = null;
     if (!definition) return this.record(task, call, false, "Unknown tool requested.", false);
     if (definition.mutating) {
-      if (await this.autonomouslyApprovedVerification(task, call, isVerification)) {
+      const workspaceWrite =
+        (call.name === "write_file" || call.name === "edit_file") &&
+        this.normalizedWritePath(call) !== undefined &&
+        this.store.sessionPermissionMode(task.sessionId) === "workspace";
+      if (workspaceWrite) {
+        approved = true;
+        this.event(task, {
+          kind: "approval",
+          operationId: call.id,
+          name: call.name,
+          outcome: "session-workspace-write-mode",
+        });
+      } else if (await this.autonomouslyApprovedVerification(task, call, isVerification)) {
         this.event(task, {
           kind: "autonomous",
           operationId: call.id,

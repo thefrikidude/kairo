@@ -12,6 +12,7 @@ import type {
   ProviderId,
   CredentialId,
   TaskMode,
+  WorkspaceEditPermission,
 } from "./models.js";
 
 export interface ModelProvider {
@@ -39,6 +40,8 @@ export interface ToolExecutor {
 }
 
 export interface TaskStore {
+  sessionPermissionMode(sessionId: string): WorkspaceEditPermission;
+  setSessionPermissionMode(sessionId: string, mode: WorkspaceEditPermission): void;
   /** Appends metadata for one observable task operation. */
   recordTaskEvent(event: TaskEvent): void;
   /** Returns events in durable insertion order, including earlier resumed runs. */
