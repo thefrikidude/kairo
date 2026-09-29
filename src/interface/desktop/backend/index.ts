@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises";
 import type { ApprovalDecision, ApprovalPolicy, JevFeatures } from "../../../domain/ports.js";
 import type { ModelSelection, ToolCall } from "../../../domain/models.js";
 import { CodingAgent } from "../../../application/coding-agent.js";
+import { executeInteraction, routeInteraction } from "../../../application/interaction-routing.js";
 import {
   loadConfig,
   setAutoModelRoutingEnabled,
@@ -68,6 +69,7 @@ export async function createDesktopRuntime(emit: DesktopEventEmitter) {
     const session = sessionId ? requireSession(store, sessionId) : undefined;
     return {
       sessions: store.list(),
+      archivedSessions: store.listArchived(),
       activeSessionId: session?.id,
       config: { provider: config.provider, model: config.model },
       hasCredential: Boolean(await credentials.get(config.provider)),
@@ -118,7 +120,11 @@ export async function createDesktopRuntime(emit: DesktopEventEmitter) {
     }
   }
 
-  async function createAgent(store: SqliteSessionStore, sessionId: string): Promise<CodingAgent> {
+  async function createAgent(
+    store: SqliteSessionStore,
+    sessionId: string,
+    includeRepositoryContext = true,
+  ): Promise<CodingAgent> {
     const session = requireSession(store, sessionId);
     const config = await loadConfig();
     const apiKey = await credentials.get(config.provider);
@@ -126,7 +132,7 @@ export async function createDesktopRuntime(emit: DesktopEventEmitter) {
       throw new Error(`No ${config.provider} API key is configured. Add one in Model settings.`);
     const tools = await toolsFor(store, sessionId);
     const repository = new RepositoryAwareness(store);
-    await repository.ensureFresh(sessionId, tools.root);
+    if (includeRepositoryContext) await repository.ensureFresh(sessionId, tools.root);
     const jevKey = config.jevEnabled ? await credentials.get("jev") : undefined;
     const features: JevFeatures = {
       routing: config.jevRoutingEnabled,
@@ -167,6 +173,21 @@ export async function createDesktopRuntime(emit: DesktopEventEmitter) {
         activeSessionId = session.id;
         return bootstrap(store, session.id);
       }
+      case "session:archive":
+      case "session:delete": {
+        const sessionId = String(first);
+        requireSession(store, sessionId);
+        if (runningSessions.has(sessionId))
+          throw new Error("Stop the running task before changing this chat.");
+        if (request.method === "session:archive") store.archive(sessionId);
+        else store.delete(sessionId);
+        if (activeSessionId === sessionId) activeSessionId = store.list()[0]?.id;
+        return bootstrap(store, activeSessionId);
+      }
+      case "session:restore": {
+        store.restore(String(first));
+        return bootstrap(store, activeSessionId);
+      }
       case "task:send": {
         const session = requireSession(store, String(first));
         const prompt = second;
@@ -178,21 +199,35 @@ export async function createDesktopRuntime(emit: DesktopEventEmitter) {
         runningSessions.add(session.id);
         emit("task:state", { sessionId: session.id, state: "running" });
         void (async () => {
-          let state: "complete" | "error" = "complete";
+          let state: "complete" | "error" | "cancelled" = "complete";
           let errorMessage: string | undefined;
           try {
-            const agent = await createAgent(store, session.id);
+            const config = await loadConfig();
+            const jevKey =
+              config.jevEnabled && config.jevRoutingEnabled
+                ? await credentials.get("jev")
+                : undefined;
+            const interaction = await routeInteraction(
+              prompt,
+              mode,
+              config.autoModelRoutingEnabled,
+              jevKey ? new JevDecisionProvider(jevKey) : undefined,
+            );
+            if (cancellationRequested.delete(session.id)) {
+              state = "cancelled";
+              return;
+            }
+            const agent = interaction.localResponse
+              ? undefined
+              : await createAgent(store, session.id, interaction.mode !== "answer");
             const onText = (chunk: string) => emit("task:chunk", { sessionId: session.id, chunk });
-            const run =
-              mode === "plan"
-                ? agent.plan(session.id, prompt, onText)
-                : agent.run(session.id, prompt, onText);
-            if (cancellationRequested.delete(session.id)) agent.cancel(session.id);
+            const run = executeInteraction(interaction, session.id, prompt, store, agent, onText);
+            if (cancellationRequested.delete(session.id)) agent?.cancel(session.id);
             await run;
             emit("task:state", {
               sessionId: session.id,
               state: "complete",
-              task: agent.status(session.id),
+              task: agent?.status(session.id),
             });
           } catch (error) {
             state = "error";

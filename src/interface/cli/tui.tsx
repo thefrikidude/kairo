@@ -19,11 +19,7 @@ import type {
 } from "../../domain/ports.js";
 import { ProviderError } from "../../domain/provider-error.js";
 import { CodingAgent } from "../../application/coding-agent.js";
-import {
-  autoInteractionMode,
-  greetingResponse,
-  interactionIntentState,
-} from "../../application/interaction-routing.js";
+import { executeInteraction, routeInteraction } from "../../application/interaction-routing.js";
 import {
   setAutoModelRoutingEnabled,
   setJevEnabled,
@@ -47,7 +43,10 @@ import {
   SqliteSessionStore,
   type Session,
 } from "../../infrastructure/persistence/sqlite-session-store.js";
-import { changedFileReview, type ChangedFileReview } from "../../infrastructure/tools/workspace-review.js";
+import {
+  changedFileReview,
+  type ChangedFileReview,
+} from "../../infrastructure/tools/workspace-review.js";
 
 export type InteractionMode = "build" | "plan";
 
@@ -175,18 +174,14 @@ function slashCommandTokenAtCursor(input: string, cursor: number): SlashCommandT
     const opensQuote =
       character === '"' ||
       character === "`" ||
-      (character === "'" &&
-        (index === 0 || /[\s([{]/.test(input[index - 1] ?? "")));
+      (character === "'" && (index === 0 || /[\s([{]/.test(input[index - 1] ?? "")));
     if (opensQuote) {
       quote = character as "'" | '"' | "`";
       quoteStart = index;
       slashStart = -1;
       continue;
     }
-    if (
-      character === "/" &&
-      (index === 0 || /[\s'"`]/.test(input[index - 1] ?? ""))
-    ) {
+    if (character === "/" && (index === 0 || /[\s'"`]/.test(input[index - 1] ?? ""))) {
       slashStart = index;
       continue;
     }
@@ -873,9 +868,9 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
   const [commandIndex, setCommandIndex] = useState(0);
   const [commandPickerOpen, setCommandPickerOpen] = useState(false);
   const models = useMemo(modelOptions, []);
-  const [commandMatches, setCommandMatches] = useState<
-    readonly (typeof slashCommands)[number][]
-  >([]);
+  const [commandMatches, setCommandMatches] = useState<readonly (typeof slashCommands)[number][]>(
+    [],
+  );
   const [commandToken, setCommandToken] = useState<SlashCommandToken>();
   const onCommandQueryChange = useCallback(
     (matches: readonly (typeof slashCommands)[number][], token?: SlashCommandToken) => {
@@ -978,25 +973,6 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       }
     },
     [agent, approval, autoModelRouting, jevEnabled, jevFeatures, jevKey, models, props, selection],
-  );
-  const classifyInteraction = useCallback(
-    async (request: string) => {
-      const localResponse = greetingResponse(request);
-      if (localResponse) return { intent: "conversation" as const, localResponse };
-      if (!jevEnabled || !jevKey || !jevFeatures.routing)
-        return { intent: "repository_task" as const };
-      try {
-        const decision = await new JevDecisionProvider(jevKey).intent(
-          interactionIntentState(request),
-        );
-        return decision.confidence >= 0.85
-          ? { intent: decision.value }
-          : { intent: "repository_task" as const };
-      } catch {
-        return { intent: "repository_task" as const };
-      }
-    },
-    [jevEnabled, jevFeatures.routing, jevKey],
   );
   const append = useCallback((kind: TranscriptEntry["kind"], text: string) => {
     setEntries((current) => [...current, { id: current.length, kind, text }]);
@@ -1243,17 +1219,25 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       // Render optimistically before routing can make a network request through Jev.
       append("user", request);
       setBusy(requestedMode === "plan" ? "planning" : "acting");
-      const interaction =
-        requestedMode === "build" || autoModelRouting
-          ? await classifyInteraction(request)
-          : undefined;
-      const taskMode =
-        autoModelRouting && interaction ? autoInteractionMode(interaction.intent) : requestedMode;
-      if (autoModelRouting && taskMode !== mode) setMode(taskMode);
+      const interaction = await routeInteraction(
+        request,
+        requestedMode,
+        autoModelRouting,
+        jevEnabled && jevKey && jevFeatures.routing ? new JevDecisionProvider(jevKey) : undefined,
+      );
+      const taskMode = interaction.mode;
+      if (autoModelRouting && taskMode !== "answer" && taskMode !== mode) setMode(taskMode);
       setBusy(taskMode === "plan" ? "planning" : "acting");
-      if (interaction?.intent === "conversation") {
+      if (interaction.localResponse) {
         setBusy("idle");
-        return append("assistant", interaction.localResponse ?? "How can I help?");
+        return executeInteraction(
+          interaction,
+          active.id,
+          request,
+          props.store,
+          undefined,
+          (response) => append("assistant", response),
+        );
       }
       if (!agent) {
         setBusy("idle");
@@ -1277,18 +1261,31 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       };
       try {
         const route =
-          taskMode === "build" && interaction?.intent === "repository_task"
+          taskMode === "build" && interaction.intent === "repository_task"
             ? await resolveTaskAgent(request)
             : agent && { agent, selection, fallbacks: [] };
         if (!route) throw new Error("No credential is available for the selected model.");
         let taskAgent = route.agent;
         activeTaskAgent.current = taskAgent;
-        if (taskMode === "plan") await taskAgent.plan(active.id, request, onAgentText);
-        else if (interaction?.intent === "answer")
-          await taskAgent.answer(active.id, request, onAgentText);
-        else {
+        if (taskMode !== "build") {
+          await executeInteraction(
+            interaction,
+            active.id,
+            request,
+            props.store,
+            taskAgent,
+            onAgentText,
+          );
+        } else {
           try {
-            await taskAgent.run(active.id, request, onAgentText);
+            await executeInteraction(
+              interaction,
+              active.id,
+              request,
+              props.store,
+              taskAgent,
+              onAgentText,
+            );
           } catch (error) {
             if (!(error instanceof ProviderError) || error.category !== "quota") throw error;
             let latestError: unknown = error;
@@ -1318,8 +1315,8 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
             if (latestError) throw latestError;
           }
         }
-        const task = taskAgent.status(active.id);
-        setMode((current) => interactionModeAfterTask(current, task?.mode));
+        const task = taskMode === "answer" ? undefined : taskAgent.status(active.id);
+        if (task) setMode((current) => interactionModeAfterTask(current, task.mode));
         if (task?.changedFiles.length) {
           setChangesIndex(0);
           setChangesTask(task);
@@ -1346,7 +1343,6 @@ export function KairoTui(props: KairoTuiProps): React.JSX.Element {
       appendStream,
       approval,
       autoModelRouting,
-      classifyInteraction,
       entries.length,
       jevFeatures,
       jevKey,

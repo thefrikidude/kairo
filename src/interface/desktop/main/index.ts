@@ -124,6 +124,9 @@ function registerIpc(): void {
   });
   handle("session:open", "session:open");
   handle("session:new", "session:new");
+  handle("session:archive", "session:archive");
+  handle("session:restore", "session:restore");
+  handle("session:delete", "session:delete");
   handle("task:send", "task:send");
   handle("task:cancel", "task:cancel");
   handle("workspace:list", "workspace:list");

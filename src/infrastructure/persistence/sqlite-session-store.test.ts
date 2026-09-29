@@ -21,6 +21,45 @@ test("sessions persist messages and sort by latest activity", async () => {
   store.close();
 });
 
+test("sessions can be archived and restored without losing conversation history", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-session-archive-"));
+  const path = join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(path);
+  const session = store.create("/workspace");
+  store.addMessage(session.id, { role: "user", content: "keep this", createdAt: 1 });
+  store.archive(session.id);
+  assert.equal(
+    store.list().some((item) => item.id === session.id),
+    false,
+  );
+  assert.equal(store.listArchived()[0]?.id, session.id);
+  store.close();
+
+  const reopened = await SqliteSessionStore.open(path);
+  assert.equal(reopened.get(session.id)?.archivedAt !== undefined, true);
+  assert.deepEqual(
+    reopened.messages(session.id).map((item) => item.content),
+    ["keep this"],
+  );
+  reopened.restore(session.id);
+  assert.equal(reopened.list()[0]?.id, session.id);
+  assert.deepEqual(reopened.listArchived(), []);
+  reopened.close();
+});
+
+test("deleting a session removes its conversation and task history", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-session-delete-"));
+  const store = await SqliteSessionStore.open(join(dir, "sessions.sqlite"));
+  const session = store.create("/workspace");
+  store.addMessage(session.id, { role: "user", content: "remove this", createdAt: 1 });
+  const task = store.startTask(session.id, "remove task");
+  store.delete(session.id);
+  assert.equal(store.get(session.id), undefined);
+  assert.deepEqual(store.messages(session.id), []);
+  assert.equal(store.task(task.id), undefined);
+  store.close();
+});
+
 test("session permission modes persist independently across reopen", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kairo-session-permissions-"));
   const path = join(dir, "sessions.sqlite");
@@ -48,6 +87,11 @@ test("existing session tables migrate to workspace-write mode", async () => {
 
   const store = await SqliteSessionStore.open(path);
   assert.equal(store.get("legacy")?.permissionMode, "workspace");
+  assert.equal(store.get("legacy")?.archivedAt, undefined);
+  assert.equal(
+    store.list().some((session) => session.id === "legacy"),
+    true,
+  );
   store.close();
 });
 

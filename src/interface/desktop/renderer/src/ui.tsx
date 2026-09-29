@@ -5,6 +5,7 @@ import type { ModelSelection, Message } from "../../../../domain/models.js";
 type Mode = "build" | "plan";
 type Pane = "files" | "changes";
 type Theme = "light" | "dark";
+type SettingsSection = "general" | "models" | "archived";
 
 export function DesktopApp(): React.JSX.Element {
   const [state, setState] = useState<DesktopBootstrap>();
@@ -14,6 +15,15 @@ export function DesktopApp(): React.JSX.Element {
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState<Mode>("build");
   const [pane, setPane] = useState<Pane>("changes");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [recentChatsOpen, setRecentChatsOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem("kairo.recentChatsOpen") !== "false";
+    } catch {
+      return true;
+    }
+  });
   const [files, setFiles] = useState<string[]>([]);
   const [changes, setChanges] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState("");
@@ -24,7 +34,10 @@ export function DesktopApp(): React.JSX.Element {
   const [showDiff, setShowDiff] = useState(false);
   const [approval, setApproval] = useState<DesktopApproval>();
   const [error, setError] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [sessionMenuId, setSessionMenuId] = useState<string>();
+  const [deleteSessionId, setDeleteSessionId] = useState<string>();
   const [theme, setTheme] = useState<Theme>(() => {
     try {
       return window.localStorage.getItem("kairo.theme") === "light" ? "light" : "dark";
@@ -39,6 +52,7 @@ export function DesktopApp(): React.JSX.Element {
   const [apiKey, setApiKey] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const followTranscript = useRef(true);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -48,6 +62,14 @@ export function DesktopApp(): React.JSX.Element {
       // The selected theme still applies for this window if storage is unavailable.
     }
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("kairo.recentChatsOpen", String(recentChatsOpen));
+    } catch {
+      // Keep the state for this window if storage is unavailable.
+    }
+  }, [recentChatsOpen]);
 
   const applyState = useCallback((next: DesktopBootstrap) => {
     setState(next);
@@ -83,6 +105,7 @@ export function DesktopApp(): React.JSX.Element {
       setActivity("");
       setStream("");
       setApproval(undefined);
+      followTranscript.current = true;
       setSelectedFile("");
       setFileContent("");
       setSavedContent("");
@@ -162,11 +185,25 @@ export function DesktopApp(): React.JSX.Element {
   }, [reload, state?.activeSessionId]);
 
   useEffect(() => {
+    if (!followTranscript.current) return;
     transcriptRef.current?.scrollTo({
       top: transcriptRef.current.scrollHeight,
-      behavior: "smooth",
+      behavior: "instant",
     });
   }, [state?.messages, stream]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (deleteSessionId) setDeleteSessionId(undefined);
+      else if (settingsOpen) setSettingsOpen(false);
+      else if (busy && state?.activeSessionId) {
+        void window.kairo.cancel(state.activeSessionId).catch((cause) => setError(String(cause)));
+      } else setReviewOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [settingsOpen, deleteSessionId, busy, state?.activeSessionId]);
 
   const activeSession = state?.sessions.find((item) => item.id === state.activeSessionId);
   const messages = useMemo(
@@ -177,14 +214,20 @@ export function DesktopApp(): React.JSX.Element {
     [state?.messages],
   );
 
-  const openFile = async (path: string) => {
+  const openFile = async (path: string, review = false) => {
     if (!state?.activeSessionId) return;
     try {
-      const content = await window.kairo.readFile(state.activeSessionId, path);
+      if (review) {
+        const result = await window.kairo.diff(state.activeSessionId, path);
+        setDiff(result.diff);
+        setDiffNotice(result.unavailable ?? "");
+      } else {
+        const content = await window.kairo.readFile(state.activeSessionId, path);
+        setFileContent(content);
+        setSavedContent(content);
+      }
       setSelectedFile(path);
-      setShowDiff(false);
-      setFileContent(content);
-      setSavedContent(content);
+      setShowDiff(review);
     } catch (cause) {
       setError((cause as Error).message);
     }
@@ -192,13 +235,23 @@ export function DesktopApp(): React.JSX.Element {
 
   const refreshChanges = async () => {
     if (!state?.activeSessionId) return;
-    setChanges(await window.kairo.changedFiles(state.activeSessionId));
+    try {
+      const [changed, listed] = await Promise.all([
+        window.kairo.changedFiles(state.activeSessionId),
+        window.kairo.listFiles(state.activeSessionId),
+      ]);
+      setChanges(changed);
+      setFiles(listed);
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
   };
 
   const sendTask = async () => {
     if (!state?.activeSessionId || !prompt.trim() || busy) return;
     const text = prompt.trim();
     setPrompt("");
+    followTranscript.current = true;
     setStream("");
     setState((current) =>
       current
@@ -229,7 +282,29 @@ export function DesktopApp(): React.JSX.Element {
     try {
       const next = await window.kairo.saveModel(selection, apiKey);
       setApiKey("");
-      setShowSettings(false);
+      applyState(next);
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  };
+
+  const changeSession = async (action: "archive" | "delete", sessionId: string) => {
+    try {
+      const next =
+        action === "archive"
+          ? await window.kairo.archiveSession(sessionId)
+          : await window.kairo.deleteSession(sessionId);
+      setSessionMenuId(undefined);
+      setDeleteSessionId(undefined);
+      await focusSession(next);
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  };
+
+  const restoreSession = async (sessionId: string) => {
+    try {
+      const next = await window.kairo.restoreSession(sessionId);
       applyState(next);
     } catch (cause) {
       setError((cause as Error).message);
@@ -262,9 +337,151 @@ export function DesktopApp(): React.JSX.Element {
       </main>
     );
 
+  if (settingsOpen)
+    return (
+      <div className="settings-shell" data-theme={theme}>
+        <aside className="settings-sidebar">
+          <button className="settings-back" onClick={() => setSettingsOpen(false)}>
+            <span aria-hidden="true">←</span> Back to Kairo
+          </button>
+          <div className="settings-title">Settings</div>
+          {(["general", "models", "archived"] as const).map((section) => (
+            <button
+              key={section}
+              className={`settings-nav ${settingsSection === section ? "selected" : ""}`}
+              onClick={() => setSettingsSection(section)}
+            >
+              {section === "general"
+                ? "General"
+                : section === "models"
+                  ? "Models"
+                  : "Archived chats"}
+              {section === "archived" && <small>{state.archivedSessions.length}</small>}
+            </button>
+          ))}
+        </aside>
+        <main className="settings-content">
+          <header>
+            <h1>
+              {settingsSection === "general"
+                ? "General"
+                : settingsSection === "models"
+                  ? "Models"
+                  : "Archived chats"}
+            </h1>
+          </header>
+          {settingsSection === "general" && (
+            <section className="settings-card">
+              <div className="theme-setting">
+                <span>Appearance</span>
+                <div className="theme-options" role="group" aria-label="Appearance">
+                  {(["light", "dark"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={theme === option ? "selected" : ""}
+                      aria-pressed={theme === option}
+                      onClick={() => setTheme(option)}
+                    >
+                      {option === "light" ? "Light" : "Dark"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+          {settingsSection === "models" && (
+            <section className="settings-card model-settings">
+              <label>
+                Provider
+                <select
+                  value={selection.provider}
+                  onChange={(event) => {
+                    const provider = state.providers.find((item) => item.id === event.target.value);
+                    if (provider)
+                      setSelection({
+                        provider: provider.id,
+                        model:
+                          provider.models.find((item) => item.recommended)?.id ??
+                          provider.models[0]?.id ??
+                          "",
+                      });
+                  }}
+                >
+                  {state.providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Model
+                <select
+                  value={selection.model}
+                  onChange={(event) =>
+                    setSelection((current) => ({ ...current, model: event.target.value }))
+                  }
+                >
+                  {state.providers
+                    .find((item) => item.id === selection.provider)
+                    ?.models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                API key
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder={
+                    state.hasCredential
+                      ? "Saved in macOS Keychain"
+                      : state.providers.find((item) => item.id === selection.provider)
+                          ?.environmentVariable
+                  }
+                />
+              </label>
+              <p>Your key is validated and saved in macOS Keychain.</p>
+              <button className="primary" onClick={() => void chooseModel()}>
+                Save model
+              </button>
+            </section>
+          )}
+          {settingsSection === "archived" && (
+            <section className="settings-card archived-list">
+              {state.archivedSessions.length ? (
+                state.archivedSessions.map((session) => (
+                  <div className="archived-row" key={session.id}>
+                    <div>
+                      <strong>
+                        {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
+                      </strong>
+                      <small>{session.workspace}</small>
+                    </div>
+                    <button onClick={() => void restoreSession(session.id)}>Restore</button>
+                  </div>
+                ))
+              ) : (
+                <p className="empty-settings">Archived chats will appear here.</p>
+              )}
+            </section>
+          )}
+          {error && <p className="settings-error">{error}</p>}
+        </main>
+      </div>
+    );
+
   return (
-    <div className="app-shell" data-theme={theme}>
-      <aside className="sidebar">
+    <div
+      className={`app-shell ${reviewOpen ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
+      data-theme={theme}
+    >
+      <aside className="sidebar" aria-label="Chats" hidden={!sidebarOpen}>
         <div className="brand">
           <span className="brand-mark">K</span>
           <span>Kairo</span>
@@ -274,38 +491,92 @@ export function DesktopApp(): React.JSX.Element {
           onClick={() => void newSession()}
           disabled={!activeSession || busy}
         >
-          <span aria-hidden="true">＋</span> New chat
+          <Icon name="plus" /> New chat
         </button>
         <button
           className="open-project-button"
           onClick={() => void openWorkspace()}
           disabled={busy}
         >
-          <span aria-hidden="true">⌕</span> Open project
+          <Icon name="folder" /> Open project
         </button>
-        <div className="section-label">RECENT CHATS</div>
-        <div className="session-list">
+        <button
+          className="section-label"
+          aria-expanded={recentChatsOpen}
+          aria-controls="recent-chats-list"
+          onClick={() => setRecentChatsOpen((open) => !open)}
+        >
+          <span>Recent chats</span>
+          <Icon name="chevron" className={recentChatsOpen ? "expanded" : "collapsed"} />
+        </button>
+        <div className="session-list" id="recent-chats-list" hidden={!recentChatsOpen}>
           {state.sessions.map((session) => (
-            <button
+            <div
               key={session.id}
-              className={`session ${session.id === state.activeSessionId ? "selected" : ""}`}
-              onClick={() => void openSession(session.id)}
-              disabled={busy}
+              className={`session-row ${session.id === state.activeSessionId ? "selected" : ""}`}
             >
-              <span>
-                {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
-              </span>
-              <small>{new Date(session.updatedAt).toLocaleDateString()}</small>
-            </button>
+              <button
+                className="session"
+                onClick={() => void openSession(session.id)}
+                disabled={busy}
+              >
+                <span>
+                  {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
+                </span>
+                <small>{new Date(session.updatedAt).toLocaleDateString()}</small>
+              </button>
+              <button
+                className="session-menu-button"
+                aria-label="Chat actions"
+                title="Chat actions"
+                onClick={() =>
+                  setSessionMenuId(sessionMenuId === session.id ? undefined : session.id)
+                }
+              >
+                ···
+              </button>
+              {sessionMenuId === session.id && (
+                <div className="session-menu">
+                  <button disabled={busy} onClick={() => void changeSession("archive", session.id)}>
+                    Archive
+                  </button>
+                  <button
+                    className="destructive"
+                    disabled={busy}
+                    onClick={() => {
+                      setSessionMenuId(undefined);
+                      setDeleteSessionId(session.id);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
           ))}
         </div>
-        <button className="settings-link" onClick={() => setShowSettings(true)}>
-          Settings
+        <button
+          className="settings-link"
+          onClick={() => {
+            setSettingsSection("general");
+            setSettingsOpen(true);
+          }}
+        >
+          <Icon name="settings" /> Settings
         </button>
       </aside>
 
       <main className="conversation">
         <header className="topbar">
+          <button
+            className="icon-button"
+            aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            aria-expanded={sidebarOpen}
+            title="Toggle sidebar"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            <Icon name="sidebar" />
+          </button>
           <div className="workspace-title">
             <strong>
               {activeSession?.workspace.split("/").filter(Boolean).at(-1) ?? "Choose a project"}
@@ -313,10 +584,16 @@ export function DesktopApp(): React.JSX.Element {
             <span>{activeSession?.workspace ?? "Open a local folder to get started"}</span>
           </div>
           <div className="top-actions">
-            <span className="model-pill" title="Current model">
-              <span className="status-dot" />
-              {state.config.provider} · {state.config.model}
-            </span>
+            <button
+              className={`review-toggle ${reviewOpen ? "selected" : ""}`}
+              disabled={!activeSession}
+              aria-expanded={reviewOpen}
+              aria-controls="workspace-panel"
+              onClick={() => setReviewOpen(!reviewOpen)}
+            >
+              <Icon name="panel" /> <span>Review</span>
+              {changes.length > 0 && <span className="count">{changes.length}</span>}
+            </button>
           </div>
         </header>
 
@@ -331,15 +608,21 @@ export function DesktopApp(): React.JSX.Element {
           </div>
         ) : (
           <>
-            <section className="transcript" ref={transcriptRef}>
+            <section
+              className="transcript"
+              ref={transcriptRef}
+              aria-label="Conversation"
+              onScroll={(event) => {
+                const node = event.currentTarget;
+                followTranscript.current =
+                  node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+              }}
+            >
               {messages.length === 0 && !stream && !state.task && (
                 <div className="chat-start">
                   <div className="chat-start-mark">K</div>
-                  <p className="eyebrow">YOUR CODING PARTNER</p>
-                  <h1>What are we building?</h1>
-                  <p className="chat-start-copy">
-                    Ask a question, describe a change, or let Kairo explore this codebase.
-                  </p>
+                  <h1>Let’s build.</h1>
+                  <p className="chat-start-copy">What would you like to work on?</p>
                   <div className="prompt-suggestions">
                     {[
                       ["Explore this project", "Give me a concise overview of this codebase."],
@@ -403,7 +686,7 @@ export function DesktopApp(): React.JSX.Element {
                   </div>
                 </div>
               )}
-              {busy && !stream && (
+              {busy && (
                 <div className="working">
                   <span className="pulse" />
                   {activity || "Working"}
@@ -434,54 +717,66 @@ export function DesktopApp(): React.JSX.Element {
               )}
             </section>
             <div className="composer-wrap">
-              <div className="mode-row">
-                <button
-                  className={mode === "build" ? "mode-active" : ""}
-                  onClick={() => setMode("build")}
-                >
-                  Build
-                </button>
-                <button
-                  className={mode === "plan" ? "mode-active" : ""}
-                  onClick={() => setMode("plan")}
-                >
-                  Plan
-                </button>
-                <span className="mode-hint">
-                  {mode === "build" ? "Make changes" : "Plan first"}
-                </span>
-              </div>
               <div className="composer">
                 <textarea
                   ref={composerRef}
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
+                    if (
+                      event.key === "Enter" &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
                       event.preventDefault();
                       void sendTask();
                     }
                   }}
                   placeholder="Ask Kairo to work on your project…"
-                  disabled={busy}
+                  aria-label="Message Kairo"
                   rows={3}
                 />
                 <div className="composer-footer">
-                  <span>Enter to send · Shift+Enter for newline</span>
+                  <div className="composer-controls">
+                    <select
+                      aria-label="Task mode"
+                      value={mode}
+                      onChange={(event) => setMode(event.target.value as Mode)}
+                      disabled={busy}
+                    >
+                      <option value="build">Build</option>
+                      <option value="plan">Plan</option>
+                    </select>
+                    <button
+                      className="model-button"
+                      title={`${state.config.provider} / ${state.config.model}`}
+                      onClick={() => {
+                        setSettingsSection("models");
+                        setSettingsOpen(true);
+                      }}
+                    >
+                      {state.config.model}
+                      <span aria-hidden="true">⌄</span>
+                    </button>
+                  </div>
                   {busy ? (
                     <button
                       className="stop-button"
+                      aria-label="Stop task"
+                      title="Stop task (Esc)"
                       onClick={() => void window.kairo.cancel(state.activeSessionId!)}
                     >
-                      Stop
+                      <Icon name="stop" />
                     </button>
                   ) : (
                     <button
                       className="send-button"
+                      aria-label="Send message"
+                      title="Send message"
                       onClick={() => void sendTask()}
                       disabled={!prompt.trim()}
                     >
-                      Send ↑
+                      <Icon name="arrow" />
                     </button>
                   )}
                 </div>
@@ -491,7 +786,12 @@ export function DesktopApp(): React.JSX.Element {
         )}
       </main>
 
-      <aside className="workbench">
+      <aside
+        className="workbench"
+        id="workspace-panel"
+        aria-label="Workspace review"
+        hidden={!reviewOpen}
+      >
         <div className="workbench-tabs">
           <button className={pane === "changes" ? "active" : ""} onClick={() => setPane("changes")}>
             Changes <span>{changes.length}</span>
@@ -500,7 +800,14 @@ export function DesktopApp(): React.JSX.Element {
             Files
           </button>
           <button className="refresh-button" onClick={() => void refreshChanges()} title="Refresh">
-            ↻
+            <Icon name="refresh" />
+          </button>
+          <button
+            className="icon-button"
+            aria-label="Close review"
+            onClick={() => setReviewOpen(false)}
+          >
+            <Icon name="close" />
           </button>
         </div>
         {pane === "changes" ? (
@@ -510,7 +817,7 @@ export function DesktopApp(): React.JSX.Element {
                 <button
                   key={path}
                   className={`file-row ${selectedFile === path ? "selected" : ""}`}
-                  onClick={() => void openFile(path)}
+                  onClick={() => void openFile(path, true)}
                 >
                   <span className="change-dot" />
                   {path}
@@ -540,24 +847,14 @@ export function DesktopApp(): React.JSX.Element {
                 <span title={selectedFile}>{selectedFile}</span>
                 <div>
                   {pane === "changes" && (
-                    <button
-                      onClick={async () => {
-                        const result = await window.kairo.diff(
-                          state.activeSessionId!,
-                          selectedFile,
-                        );
-                        setDiff(result.diff);
-                        setDiffNotice(result.unavailable ?? "");
-                        setShowDiff(true);
-                      }}
-                    >
-                      Diff
+                    <button onClick={() => void openFile(selectedFile, !showDiff)}>
+                      {showDiff ? "Edit" : "Diff"}
                     </button>
                   )}
                   {!showDiff && (
                     <button
                       className="save-button"
-                      disabled={fileContent === savedContent}
+                      disabled={busy || fileContent === savedContent}
                       onClick={async () => {
                         try {
                           await window.kairo.saveFile(
@@ -600,6 +897,9 @@ export function DesktopApp(): React.JSX.Element {
               ) : (
                 <textarea
                   className="editor"
+                  aria-label={selectedFile}
+                  readOnly={busy}
+                  wrap="off"
                   value={fileContent}
                   onChange={(event) => setFileContent(event.target.value)}
                   spellCheck={false}
@@ -612,89 +912,25 @@ export function DesktopApp(): React.JSX.Element {
         </div>
       </aside>
 
-      {showSettings && (
-        <div className="modal-backdrop" onClick={() => setShowSettings(false)}>
-          <div className="settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-heading">
-              <h2>Settings</h2>
-              <button className="icon-button" onClick={() => setShowSettings(false)}>
-                ×
+      {deleteSessionId && (
+        <div className="modal-backdrop">
+          <div
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-chat-title"
+          >
+            <h2 id="delete-chat-title">Delete this chat?</h2>
+            <p>This permanently deletes the conversation and its task history.</p>
+            <div>
+              <button onClick={() => setDeleteSessionId(undefined)}>Cancel</button>
+              <button
+                className="destructive-button"
+                onClick={() => void changeSession("delete", deleteSessionId)}
+              >
+                Delete chat
               </button>
             </div>
-            <div className="theme-setting">
-              <span>Appearance</span>
-              <div className="theme-options" role="group" aria-label="Appearance">
-                {(["light", "dark"] as const).map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={theme === option ? "selected" : ""}
-                    aria-pressed={theme === option}
-                    onClick={() => setTheme(option)}
-                  >
-                    {option === "light" ? "Light" : "Dark"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <label>
-              Provider
-              <select
-                value={selection.provider}
-                onChange={(event) => {
-                  const provider = state.providers.find((item) => item.id === event.target.value);
-                  if (provider)
-                    setSelection({
-                      provider: provider.id,
-                      model:
-                        provider.models.find((item) => item.recommended)?.id ??
-                        provider.models[0]?.id ??
-                        "",
-                    });
-                }}
-              >
-                {state.providers.map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Model
-              <select
-                value={selection.model}
-                onChange={(event) =>
-                  setSelection((current) => ({ ...current, model: event.target.value }))
-                }
-              >
-                {state.providers
-                  .find((item) => item.id === selection.provider)
-                  ?.models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              API key
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder={
-                  state.hasCredential
-                    ? "Saved in macOS Keychain"
-                    : state.providers.find((item) => item.id === selection.provider)
-                        ?.environmentVariable
-                }
-              />
-            </label>
-            <p>Your key is validated and saved in macOS Keychain.</p>
-            <button className="primary full-width" onClick={() => void chooseModel()}>
-              Save model
-            </button>
           </div>
         </div>
       )}
@@ -712,5 +948,68 @@ function ChatMessage({ message }: { message: Message }): React.JSX.Element {
         <pre className="message-text">{message.content}</pre>
       </div>
     </div>
+  );
+}
+
+type IconName =
+  | "plus"
+  | "folder"
+  | "settings"
+  | "sidebar"
+  | "panel"
+  | "close"
+  | "refresh"
+  | "arrow"
+  | "stop"
+  | "chevron";
+function Icon({ name, className }: { name: IconName; className?: string }): React.JSX.Element {
+  const paths: Record<IconName, React.ReactNode> = {
+    plus: <path d="M12 5v14M5 12h14" />,
+    folder: <path d="M3 7V5h6l2 2h10v12H3Z" />,
+    settings: (
+      <>
+        <path d="M4 7h16M4 17h16" />
+        <circle cx="9" cy="7" r="2" />
+        <circle cx="15" cy="17" r="2" />
+      </>
+    ),
+    sidebar: (
+      <>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M9 4v16" />
+      </>
+    ),
+    panel: (
+      <>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M15 4v16" />
+      </>
+    ),
+    close: <path d="m6 6 12 12M6 18 18 6" />,
+    refresh: (
+      <>
+        <path d="M20 7v5h-5M4 17v-5h5" />
+        <path d="M6 6a8 8 0 0 1 13 3M18 18A8 8 0 0 1 5 15" />
+      </>
+    ),
+    arrow: <path d="M12 19V5m-6 6 6-6 6 6" />,
+    stop: <rect x="7" y="7" width="10" height="10" rx="1" fill="currentColor" />,
+    chevron: <path d="m6 9 6 6 6-6" />,
+  };
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {paths[name]}
+    </svg>
   );
 }

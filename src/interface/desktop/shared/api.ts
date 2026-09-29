@@ -16,6 +16,7 @@ export type DesktopProvider = {
 
 export type DesktopBootstrap = {
   sessions: Session[];
+  archivedSessions: Session[];
   activeSessionId?: string;
   config: ModelSelection;
   hasCredential: boolean;
@@ -37,6 +38,9 @@ export interface DesktopApi {
   openWorkspace(): Promise<DesktopBootstrap | undefined>;
   openSession(sessionId: string): Promise<DesktopBootstrap>;
   newSession(): Promise<DesktopBootstrap>;
+  archiveSession(sessionId: string): Promise<DesktopBootstrap>;
+  restoreSession(sessionId: string): Promise<DesktopBootstrap>;
+  deleteSession(sessionId: string): Promise<DesktopBootstrap>;
   send(sessionId: string, prompt: string, mode: "build" | "plan"): Promise<void>;
   cancel(sessionId: string): Promise<void>;
   listFiles(sessionId: string): Promise<string[]>;

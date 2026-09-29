@@ -22,6 +22,7 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   permissionMode: WorkspaceEditPermission;
+  archivedAt?: number;
 }
 export class SqliteSessionStore {
   /** Wraps an already-initialized database; callers use open() to guarantee setup. */
@@ -33,7 +34,7 @@ export class SqliteSessionStore {
     db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
       INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
-      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, permission_mode TEXT NOT NULL DEFAULT 'workspace');
+      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, permission_mode TEXT NOT NULL DEFAULT 'workspace', archived_at INTEGER);
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_call_id TEXT, tool_name TEXT, created_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
       CREATE TABLE IF NOT EXISTS tool_events (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, call_id TEXT NOT NULL, name TEXT NOT NULL, args_json TEXT NOT NULL, approved INTEGER, output TEXT, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'implementation', status TEXT NOT NULL, plan_json TEXT, changed_files_json TEXT NOT NULL DEFAULT '[]', approved_write_paths_json TEXT NOT NULL DEFAULT '[]', verification_command TEXT, verification_output TEXT, verification_ok INTEGER, verification_exit_code INTEGER, verification_discovered INTEGER, verification_selection_json TEXT, summary TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(session_id) REFERENCES sessions(id));
@@ -46,6 +47,8 @@ export class SqliteSessionStore {
     }[];
     if (!sessionColumns.some((column) => column.name === "permission_mode"))
       db.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'workspace'");
+    if (!sessionColumns.some((column) => column.name === "archived_at"))
+      db.exec("ALTER TABLE sessions ADD COLUMN archived_at INTEGER");
     db.exec(`CREATE TABLE IF NOT EXISTS repair_attempts (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, command TEXT NOT NULL, evidence_json TEXT NOT NULL, selected_files_json TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(task_id) REFERENCES tasks(id));
       CREATE INDEX IF NOT EXISTS repair_attempts_task_created ON repair_attempts(task_id, created_at DESC);`);
     const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as {
@@ -273,7 +276,7 @@ export class SqliteSessionStore {
   get(id: string): Session | undefined {
     const row = this.db
       .prepare(
-        "SELECT id, workspace, created_at, updated_at, permission_mode FROM sessions WHERE id = ?",
+        "SELECT id, workspace, created_at, updated_at, permission_mode, archived_at FROM sessions WHERE id = ?",
       )
       .get(id) as Record<string, unknown> | undefined;
     return (
@@ -283,15 +286,23 @@ export class SqliteSessionStore {
         createdAt: Number(row.created_at),
         updatedAt: Number(row.updated_at),
         permissionMode: row.permission_mode === "ask" ? "ask" : "workspace",
+        archivedAt: row.archived_at == null ? undefined : Number(row.archived_at),
       }
     );
   }
   /** Lists sessions from most recently active to oldest. */
   list(): Session[] {
+    return this.listByArchiveState(false);
+  }
+  /** Lists archived sessions from most recently active to oldest. */
+  listArchived(): Session[] {
+    return this.listByArchiveState(true);
+  }
+  private listByArchiveState(archived: boolean): Session[] {
     return (
       this.db
         .prepare(
-          "SELECT id, workspace, created_at, updated_at, permission_mode FROM sessions ORDER BY updated_at DESC",
+          `SELECT id, workspace, created_at, updated_at, permission_mode, archived_at FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
         )
         .all() as Record<string, unknown>[]
     ).map((r) => ({
@@ -300,7 +311,45 @@ export class SqliteSessionStore {
       createdAt: Number(r.created_at),
       updatedAt: Number(r.updated_at),
       permissionMode: r.permission_mode === "ask" ? "ask" : "workspace",
+      archivedAt: r.archived_at == null ? undefined : Number(r.archived_at),
     }));
+  }
+  /** Archives a session while keeping its conversation available for restoration. */
+  archive(id: string): void {
+    const result = this.db
+      .prepare("UPDATE sessions SET archived_at=?, updated_at=? WHERE id=? AND archived_at IS NULL")
+      .run(Date.now(), Date.now(), id);
+    if (result.changes !== 1) throw new Error("Active session not found.");
+  }
+  /** Restores an archived session to the recent chats list. */
+  restore(id: string): void {
+    const result = this.db
+      .prepare(
+        "UPDATE sessions SET archived_at=NULL, updated_at=? WHERE id=? AND archived_at IS NOT NULL",
+      )
+      .run(Date.now(), id);
+    if (result.changes !== 1) throw new Error("Archived session not found.");
+  }
+  /** Permanently removes a session and its task/message history. */
+  delete(id: string): void {
+    const remove = this.db.transaction(() => {
+      if (!this.get(id)) throw new Error("Session not found.");
+      this.db
+        .prepare(
+          "DELETE FROM repair_attempts WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)",
+        )
+        .run(id);
+      this.db
+        .prepare(
+          "DELETE FROM task_events WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)",
+        )
+        .run(id);
+      for (const table of ["messages", "tool_events", "context_checkpoints", "repository_profiles"])
+        this.db.prepare(`DELETE FROM ${table} WHERE session_id=?`).run(id);
+      this.db.prepare("DELETE FROM tasks WHERE session_id=?").run(id);
+      this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
+    });
+    remove();
   }
   /** Loads all messages required to reconstruct a full conversation. */
   messages(sessionId: string): Message[] {
