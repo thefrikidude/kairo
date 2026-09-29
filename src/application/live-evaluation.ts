@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LiveEvaluationResult, Message, ToolCall } from "../domain/models.js";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
-import { GeminiProvider } from "../infrastructure/providers/gemini-provider.js";
+import { SdkProvider } from "../infrastructure/providers/sdk-provider.js";
 import { RepositoryProfiler } from "../infrastructure/repository/repository-profiler.js";
 import { WorkspaceTools, definitions } from "../infrastructure/tools/workspace-tools.js";
 import { CodingAgent } from "./coding-agent.js";
@@ -90,7 +90,7 @@ async function runObservedScenario(
       const tools = await WorkspaceTools.create(root);
       store.saveRepositorySnapshot(session.id, await new RepositoryProfiler().profile(root));
       const agent = new CodingAgent(
-        new GeminiProvider(options.apiKey, options.model, definitions),
+        new SdkProvider("gemini", options.apiKey, options.model, definitions),
         store,
         tools,
         new FixtureApproval(),

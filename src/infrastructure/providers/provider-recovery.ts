@@ -26,10 +26,12 @@ export function normalizeProviderError(error: unknown, provider = "Model provide
       const match = /^(\d+(?:\.\d+)?)s$/.exec(record.retryDelay);
       if (match) retryAfterMs = Math.max(retryAfterMs ?? 0, Number(match[1]) * 1000);
     }
-    const headers = record.headers as { get?: (key: string) => string | null } | undefined;
+    const headers = (record.responseHeaders ?? record.headers) as
+      | { get?: (key: string) => string | null }
+      | undefined;
     const header =
       headers?.get?.("retry-after") ??
-      (record.headers as Record<string, string> | undefined)?.["retry-after"];
+      (headers as Record<string, string> | undefined)?.["retry-after"];
     if (header) {
       const delay = /^\d+(?:\.\d+)?$/.test(header)
         ? Number(header) * 1000

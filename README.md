@@ -15,12 +15,12 @@ The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe 
 - Reads and searches freely inside the workspace. Workspace file edits are allowed by default; arbitrary shell commands still require approval. `/permissions` toggles to approval-required file edits for the current saved session.
 - Recommends focused checks after changes and can make bounded repair attempts when verification fails.
 - Saves resumable sessions, plans, checkpoints, and metadata-only task traces.
-- Supports Gemini, Groq, and Mistral coding models, with manual or optional Jev-powered routing.
+- Supports Gemini, Groq, Mistral, and OpenRouter coding models, with manual or optional Jev-powered routing.
 - Includes deterministic and live evaluations for measuring the agent loop over time.
 
 ## Jev and automatic routing
 
-[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) is Kairo’s optional decision and safety layer. It is **not** a coding model and does not generate source code. Gemini, Groq, or Mistral still perform the actual repository work.
+[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) is Kairo’s optional decision and safety layer. It is **not** a coding model and does not generate source code. Gemini, Groq, Mistral, or OpenRouter still perform the actual repository work.
 
 Open `/jev` in the TUI to add a TypeSafe API key and control four independent features:
 
@@ -145,7 +145,19 @@ pnpm check
 pnpm test
 ```
 
-The code is split into `domain`, `application`, `infrastructure`, and `interface/cli`. The core loop is bounded, workspace-confined, approval-gated, and designed so a successful command is evidence—not automatic proof that the task is correct.
+### Desktop preview (macOS)
+
+Kairo also has an Electron desktop preview with chat, task progress, approvals, file editing, and a working-tree diff panel. It uses the same saved sessions, provider settings, and macOS Keychain credentials as the CLI. The desktop preview is currently macOS-only and expects the Kairo checkout's Node and pnpm dependencies.
+
+```bash
+pnpm desktop:dev
+```
+
+Open a project with **Open project**. Model settings let you select a configured provider and enter an API key; the key is validated and saved to the macOS Keychain. The editor saves directly to the selected workspace, while agent file access continues to use Kairo's workspace protections. The Electron renderer is isolated from Node.js; this does not add an OS-level sandbox for agent shell commands.
+
+`pnpm desktop:build` builds the local Electron app bundle, then `pnpm desktop:preview` launches it. Installers and signing are not included yet.
+
+The code is split into `domain`, `application`, `infrastructure`, and the `interface/cli` and `interface/desktop` clients. The core loop is bounded, workspace-confined, approval-gated, and designed so a successful command is evidence—not automatic proof that the task is correct.
 
 ## Direction
 

@@ -1,0 +1,30 @@
+import { contextBridge, ipcRenderer } from "electron";
+import type { DesktopApi } from "../shared/api.js";
+
+const api: DesktopApi = {
+  bootstrap: () => ipcRenderer.invoke("desktop:bootstrap"),
+  openWorkspace: () => ipcRenderer.invoke("workspace:open"),
+  openSession: (sessionId) => ipcRenderer.invoke("session:open", sessionId),
+  newSession: () => ipcRenderer.invoke("session:new"),
+  send: (sessionId, prompt, mode) => ipcRenderer.invoke("task:send", sessionId, prompt, mode),
+  cancel: (sessionId) => ipcRenderer.invoke("task:cancel", sessionId),
+  listFiles: (sessionId) => ipcRenderer.invoke("workspace:list", sessionId),
+  readFile: (sessionId, path) => ipcRenderer.invoke("workspace:read", sessionId, path),
+  saveFile: (sessionId, path, content) =>
+    ipcRenderer.invoke("workspace:write", sessionId, path, content),
+  changedFiles: (sessionId) => ipcRenderer.invoke("workspace:changes", sessionId),
+  diff: (sessionId, path) => ipcRenderer.invoke("workspace:diff", sessionId, path),
+  saveModel: (selection, apiKey) => ipcRenderer.invoke("model:save", selection, apiKey),
+  resolveApproval: (id, decision) => ipcRenderer.invoke("approval:resolve", id, decision),
+  onChunk: (listener) => subscribe("task:chunk", listener),
+  onTaskState: (listener) => subscribe("task:state", listener),
+  onApproval: (listener) => subscribe("approval:request", listener),
+};
+
+function subscribe<T>(channel: string, listener: (value: T) => void): () => void {
+  const wrapped = (_event: Electron.IpcRendererEvent, value: T) => listener(value);
+  ipcRenderer.on(channel, wrapped);
+  return () => ipcRenderer.removeListener(channel, wrapped);
+}
+
+contextBridge.exposeInMainWorld("kairo", api);

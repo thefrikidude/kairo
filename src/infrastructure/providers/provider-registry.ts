@@ -1,9 +1,6 @@
 import type { ModelSelection, ProviderId } from "../../domain/models.js";
 import type { ModelProvider, ToolDefinition } from "../../domain/ports.js";
-import { GeminiProvider } from "./gemini-provider.js";
-import { GroqProvider } from "./groq-provider.js";
-import { MistralProvider } from "./mistral-provider.js";
-import { OpenRouterProvider } from "./openrouter-provider.js";
+import { SdkProvider } from "./sdk-provider.js";
 
 export interface ProviderDescriptor {
   id: ProviderId;
@@ -33,7 +30,7 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
     models: [
       { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", tier: "balanced", recommended: true },
     ],
-    create: (apiKey, model, tools) => new GeminiProvider(apiKey, model, tools),
+    create: (apiKey, model, tools) => new SdkProvider("gemini", apiKey, model, tools),
     validate: async (apiKey) =>
       validateResponse(
         "Gemini",
@@ -50,7 +47,7 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
       { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", tier: "strong", recommended: true },
       { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B (faster)", tier: "fast" },
     ],
-    create: (apiKey, model, tools) => new GroqProvider(apiKey, model, tools),
+    create: (apiKey, model, tools) => new SdkProvider("groq", apiKey, model, tools),
     validate: async (apiKey) =>
       validateResponse(
         "Groq",
@@ -76,7 +73,7 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
         tier: "strong",
       },
     ],
-    create: (apiKey, model, tools) => new MistralProvider(apiKey, model, tools),
+    create: (apiKey, model, tools) => new SdkProvider("mistral", apiKey, model, tools),
     validate: async (apiKey) =>
       validateResponse(
         "Mistral",
@@ -97,7 +94,7 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
         recommended: true,
       },
     ],
-    create: (apiKey, model, tools) => new OpenRouterProvider(apiKey, model, tools),
+    create: (apiKey, model, tools) => new SdkProvider("openrouter", apiKey, model, tools),
     validate: async (apiKey) =>
       validateResponse(
         "OpenRouter",

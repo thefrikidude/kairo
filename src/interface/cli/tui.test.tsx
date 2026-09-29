@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { render } from "ink-testing-library";
 import {
   BrandMark,
-  changedFileReview,
   inlineDiff,
   ModeBadge,
   TranscriptRow,
@@ -18,6 +17,10 @@ import {
   modelOptions,
   toggleWorkspaceEditPermission,
 } from "./tui.js";
+import {
+  changedFileReview,
+  changedWorkspaceFiles,
+} from "../../infrastructure/tools/workspace-review.js";
 
 function git(workspace: string, args: string[]): void {
   execFileSync(process.platform === "darwin" ? "/usr/bin/git" : "git", args, {
@@ -109,6 +112,24 @@ test("changed-file review renders untracked files as additions", async () => {
     const review = changedFileReview(workspace, "new.txt");
     assert.match(review.diff, /\+created by Kairo/);
     assert.equal(review.unavailable, undefined);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("changed-file list includes edited and untracked paths with spaces", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "kairo-changes-"));
+  try {
+    git(workspace, ["init"]);
+    git(workspace, ["config", "user.email", "kairo@example.test"]);
+    git(workspace, ["config", "user.name", "Kairo Test"]);
+    await writeFile(join(workspace, "tracked file.txt"), "before\n");
+    git(workspace, ["add", "tracked file.txt"]);
+    git(workspace, ["commit", "-m", "initial"]);
+    await writeFile(join(workspace, "tracked file.txt"), "after\n");
+    await writeFile(join(workspace, "new file.txt"), "new\n");
+    const paths = changedWorkspaceFiles(workspace);
+    assert.deepEqual(paths.sort(), ["new file.txt", "tracked file.txt"]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
