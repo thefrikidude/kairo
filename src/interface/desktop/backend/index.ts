@@ -150,6 +150,7 @@ export async function createDesktopRuntime(emit: DesktopEventEmitter) {
       jevKey ? new JevDecisionProvider(jevKey) : undefined,
       features,
       repository,
+      (event) => emit("task:event", { ...event, sessionId }),
     );
     agentsBySession.set(session.id, agent);
     return agent;

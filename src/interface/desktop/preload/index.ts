@@ -21,6 +21,7 @@ const api: DesktopApi = {
   resolveApproval: (id, decision) => ipcRenderer.invoke("approval:resolve", id, decision),
   onChunk: (listener) => subscribe("task:chunk", listener),
   onTaskState: (listener) => subscribe("task:state", listener),
+  onTaskEvent: (listener) => subscribe("task:event", listener),
   onApproval: (listener) => subscribe("approval:request", listener),
 };
 

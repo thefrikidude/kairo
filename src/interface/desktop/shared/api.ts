@@ -2,6 +2,7 @@ import type {
   Message,
   ModelSelection,
   Task,
+  TaskEvent,
   ToolCall,
   WorkspaceEditPermission,
 } from "../../../domain/models.js";
@@ -54,6 +55,7 @@ export interface DesktopApi {
   onTaskState(
     listener: (event: { sessionId: string; state: string; task?: Task; error?: string }) => void,
   ): () => void;
+  onTaskEvent(listener: (event: TaskEvent & { sessionId: string }) => void): () => void;
   onApproval(listener: (approval: DesktopApproval) => void): () => void;
 }
 
@@ -63,4 +65,4 @@ declare global {
   }
 }
 
-export type { Message, Task, ToolCall, WorkspaceEditPermission };
+export type { Message, Task, TaskEvent, ToolCall, WorkspaceEditPermission };

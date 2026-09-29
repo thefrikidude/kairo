@@ -59,6 +59,7 @@ export class CodingAgent {
       autonomy: false,
     },
     private readonly repositoryAwareness?: RepositoryAwareness,
+    private readonly onEvent?: (event: TaskEvent) => void,
   ) {
     this.context = new ContextManager(store);
   }
@@ -560,7 +561,9 @@ export class CodingAgent {
 
   /** Attaches identity and wall-clock time without retaining prompts or tool arguments. */
   private event(task: Task, event: Omit<TaskEvent, "taskId" | "createdAt">): void {
-    this.store.recordTaskEvent({ ...event, taskId: task.id, createdAt: Date.now() });
+    const recorded = { ...event, taskId: task.id, createdAt: Date.now() };
+    this.store.recordTaskEvent(recorded);
+    this.onEvent?.(recorded);
   }
 
   /** Executes a tool after user approval, except for the deliberately narrow Jev trust envelope. */

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DesktopApproval, DesktopBootstrap } from "../../shared/api.js";
-import type { ModelSelection, Message } from "../../../../domain/models.js";
+import type { ModelSelection, Message, TaskEvent } from "../../../../domain/models.js";
 
 type Mode = "build" | "plan";
 type Pane = "files" | "changes";
@@ -11,6 +11,9 @@ export function DesktopApp(): React.JSX.Element {
   const [state, setState] = useState<DesktopBootstrap>();
   const [busy, setBusy] = useState(false);
   const [activity, setActivity] = useState("");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [showWorkedDuration, setShowWorkedDuration] = useState(false);
+  const [toolActivity, setToolActivity] = useState<TaskEvent[]>([]);
   const [stream, setStream] = useState("");
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState<Mode>("build");
@@ -52,7 +55,17 @@ export function DesktopApp(): React.JSX.Element {
   const [apiKey, setApiKey] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const taskStartedAt = useRef<number | undefined>(undefined);
   const followTranscript = useRef(true);
+
+  useEffect(() => {
+    if (!busy || taskStartedAt.current === undefined) return;
+    const updateElapsed = () =>
+      setElapsedSeconds(Math.floor((Date.now() - taskStartedAt.current!) / 1000));
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -103,6 +116,10 @@ export function DesktopApp(): React.JSX.Element {
       applyState(next);
       setBusy(false);
       setActivity("");
+      taskStartedAt.current = undefined;
+      setElapsedSeconds(0);
+      setShowWorkedDuration(false);
+      setToolActivity([]);
       setStream("");
       setApproval(undefined);
       followTranscript.current = true;
@@ -153,18 +170,45 @@ export function DesktopApp(): React.JSX.Element {
   useEffect(() => {
     void reload().catch((cause) => setError((cause as Error).message));
     const stopChunk = window.kairo.onChunk(({ sessionId, chunk }) => {
-      if (sessionId === state?.activeSessionId && chunk !== "\n[Plan saved]\n")
+      if (
+        sessionId === state?.activeSessionId &&
+        chunk !== "\n[Plan saved]\n" &&
+        !/^\n\[Tool\] [^\n]+\n$/.test(chunk)
+      )
         setStream((current) => current + chunk);
+    });
+    const stopTaskEvent = window.kairo.onTaskEvent((event) => {
+      if (event.sessionId !== state?.activeSessionId) return;
+      if (event.kind === "tool_started") {
+        setToolActivity((current) => [...current, event]);
+      } else if (event.kind === "tool_finished") {
+        setToolActivity((current) => {
+          const index = current.findIndex((item) => item.operationId === event.operationId);
+          if (index < 0) return [...current, event];
+          const next = [...current];
+          next[index] = event;
+          return next;
+        });
+      }
     });
     const stopState = window.kairo.onTaskState((event) => {
       if (event.sessionId !== state?.activeSessionId) return;
       if (event.state === "running") {
+        taskStartedAt.current = Date.now();
+        setElapsedSeconds(0);
+        setShowWorkedDuration(false);
         setBusy(true);
         setActivity("Working");
         setStream("");
+        setToolActivity([]);
       } else if (event.state === "cancelling") {
         setActivity("Stopping…");
       } else {
+        if (taskStartedAt.current !== undefined) {
+          setElapsedSeconds(Math.floor((Date.now() - taskStartedAt.current) / 1000));
+          setShowWorkedDuration(true);
+          taskStartedAt.current = undefined;
+        }
         setBusy(false);
         setActivity("");
         setStream("");
@@ -179,6 +223,7 @@ export function DesktopApp(): React.JSX.Element {
     });
     return () => {
       stopChunk();
+      stopTaskEvent();
       stopState();
       stopApproval();
     };
@@ -262,12 +307,18 @@ export function DesktopApp(): React.JSX.Element {
         : current,
     );
     setBusy(true);
+    taskStartedAt.current = Date.now();
+    setElapsedSeconds(0);
+    setShowWorkedDuration(false);
     setActivity(mode === "plan" ? "Planning" : "Starting");
     setError("");
     try {
       await window.kairo.send(state.activeSessionId, text, mode);
     } catch (cause) {
       setBusy(false);
+      taskStartedAt.current = undefined;
+      setElapsedSeconds(0);
+      setShowWorkedDuration(false);
       setActivity("");
       setError((cause as Error).message);
     }
@@ -677,19 +728,30 @@ export function DesktopApp(): React.JSX.Element {
                   )}
                 </div>
               )}
+              {toolActivity.length > 0 && (
+                <div className="tool-activity" aria-label="Tool activity" aria-live="polite">
+                  {toolActivity.map((event) => (
+                    <ToolActivityRow key={event.operationId} event={event} />
+                  ))}
+                </div>
+              )}
               {stream && (
                 <div className="message assistant">
                   <div className="avatar">K</div>
                   <div className="message-body">
                     <div className="message-author">Kairo</div>
-                    <pre className="stream-text">{stream}</pre>
+                    <Markdown content={stream} />
                   </div>
                 </div>
               )}
-              {busy && (
+              {(busy || showWorkedDuration) && (
                 <div className="working">
-                  <span className="pulse" />
-                  {activity || "Working"}
+                  {busy && <span className="pulse" />}
+                  {busy
+                    ? activity === "Waiting for approval" || activity === "Stopping…"
+                      ? `${activity} · Working for ${elapsedSeconds}s`
+                      : `Working for ${elapsedSeconds}s`
+                    : `Worked for ${elapsedSeconds}s`}
                 </div>
               )}
               {error && (
@@ -938,14 +1000,199 @@ export function DesktopApp(): React.JSX.Element {
   );
 }
 
+function ToolActivityRow({ event }: { event: TaskEvent }): React.JSX.Element {
+  const labels: Record<string, string> = {
+    list_files: "Listing files",
+    read_file: "Reading file",
+    read_file_range: "Reading file",
+    search_files: "Searching files",
+    write_file: "Writing file",
+    edit_file: "Editing file",
+    run_command: "Running command",
+    submit_plan: "Saving plan",
+  };
+  const label = labels[event.name ?? ""] ?? (event.name ? `Using ${event.name}` : "Tool activity");
+  const state =
+    event.kind === "tool_started" ? "Running" : event.outcome === "succeeded" ? "Done" : "Failed";
+  return (
+    <div className={`tool-activity-row ${state.toLowerCase()}`}>
+      <span className="tool-activity-dot" />
+      <span>{label}</span>
+      <span className="tool-activity-status">{state}</span>
+    </div>
+  );
+}
+
+function Markdown({ content }: { content: string }): React.JSX.Element {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: React.ReactNode[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index]!;
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+    const fence = line.match(/^\s*```([^\s`]*)\s*$/);
+    if (fence) {
+      const code: string[] = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```\s*$/.test(lines[index]!)) code.push(lines[index++]!);
+      if (index < lines.length) index += 1;
+      blocks.push(
+        <CodeBlock key={blocks.length} code={code.join("\n")} language={fence[1] ?? ""} />,
+      );
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*$/);
+    if (heading) {
+      const level = heading[1]!.length;
+      blocks.push(
+        React.createElement(`h${level}`, { key: blocks.length }, inlineMarkdown(heading[2]!)),
+      );
+      index += 1;
+      continue;
+    }
+    if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      blocks.push(<hr key={blocks.length} />);
+      index += 1;
+      continue;
+    }
+    if (/^\s*>/.test(line)) {
+      const quote: string[] = [];
+      while (index < lines.length && /^\s*>/.test(lines[index]!))
+        quote.push(lines[index++]!.replace(/^\s*>\s?/, ""));
+      blocks.push(
+        <blockquote key={blocks.length}>
+          <Markdown content={quote.join("\n")} />
+        </blockquote>,
+      );
+      continue;
+    }
+    const list = line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/);
+    if (list) {
+      const ordered = Boolean(list[2]);
+      const items: string[] = [];
+      while (index < lines.length) {
+        const item = lines[index]!.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/);
+        if (!item || Boolean(item[2]) !== ordered) break;
+        items.push(item[3]!);
+        index += 1;
+      }
+      const List = ordered ? "ol" : "ul";
+      blocks.push(
+        <List key={blocks.length}>
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex}>{inlineMarkdown(item)}</li>
+          ))}
+        </List>,
+      );
+      continue;
+    }
+    const paragraph = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index]!.trim() &&
+      !/^\s*```/.test(lines[index]!) &&
+      !/^(#{1,6})\s/.test(lines[index]!) &&
+      !/^\s*>/.test(lines[index]!) &&
+      !/^\s*(?:[-+*]|\d+\.)\s+/.test(lines[index]!)
+    )
+      paragraph.push(lines[index++]!);
+    blocks.push(
+      <p key={blocks.length}>
+        {paragraph.map((part, partIndex) => (
+          <React.Fragment key={partIndex}>
+            {partIndex > 0 && <br />}
+            {inlineMarkdown(part)}
+          </React.Fragment>
+        ))}
+      </p>,
+    );
+  }
+  return <div className="markdown-body">{blocks}</div>;
+}
+
+function inlineMarkdown(text: string): React.ReactNode[] {
+  const token =
+    /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|(?<!\*)\*[^*]+\*(?!\*)|(?<!_)_[^_]+_(?!_)|\[[^\]]+\]\([^)]+\))/g;
+  const result: React.ReactNode[] = [];
+  let offset = 0;
+  for (const match of text.matchAll(token)) {
+    const value = match[0];
+    const start = match.index ?? 0;
+    if (start > offset) result.push(text.slice(offset, start));
+    const key = `inline-${start}`;
+    if (value.startsWith("`")) result.push(<code key={key}>{value.slice(1, -1)}</code>);
+    else if (value.startsWith("**") || value.startsWith("__"))
+      result.push(<strong key={key}>{value.slice(2, -2)}</strong>);
+    else if (value.startsWith("*") || value.startsWith("_"))
+      result.push(<em key={key}>{value.slice(1, -1)}</em>);
+    else {
+      const link = value.match(/^\[([^\]]+)\]\(([^)]+)\)$/)!;
+      const safe = /^(https?:|mailto:|#|\/)/i.test(link[2]!);
+      result.push(
+        safe ? (
+          <a key={key} href={link[2]} target="_blank" rel="noreferrer">
+            {link[1]}
+          </a>
+        ) : (
+          link[1]
+        ),
+      );
+    }
+    offset = start + value.length;
+  }
+  if (offset < text.length) result.push(text.slice(offset));
+  return result;
+}
+
+function CodeBlock({ code, language }: { code: string; language: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="code-block">
+      <div className="code-block-header">
+        <span>{language || "Code"}</span>
+        <button onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
+      </div>
+      <pre>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 function ChatMessage({ message }: { message: Message }): React.JSX.Element {
-  const user = message.role === "user";
+  const internalUserLabel =
+    message.role !== "user"
+      ? undefined
+      : /^Automatic recovery attempt \d+\/\d+:/.test(message.content)
+        ? "Recovery"
+        : message.content.startsWith("Resume the interrupted task:")
+          ? "Continuing task"
+          : undefined;
+  const user = message.role === "user" && !internalUserLabel;
+  const author = internalUserLabel ?? (user ? "You" : "Kairo");
   return (
     <div className={`message ${user ? "user" : "assistant"}`}>
       <div className="avatar">{user ? "Y" : "K"}</div>
       <div className="message-body">
-        <div className="message-author">{user ? "You" : "Kairo"}</div>
-        <pre className="message-text">{message.content}</pre>
+        <div className="message-author">{author}</div>
+        {user ? (
+          <div className="message-text">{message.content}</div>
+        ) : (
+          <Markdown content={message.content} />
+        )}
       </div>
     </div>
   );
