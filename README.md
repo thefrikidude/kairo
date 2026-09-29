@@ -1,168 +1,58 @@
 # Kairo
 
-[![npm version](https://img.shields.io/npm/v/%40mrace07%2Fkairo)](https://www.npmjs.com/package/@mrace07/kairo)
+Kairo is a desktop coding agent for local repositories. It helps you inspect a project, plan or implement changes, review edits, and verify the result.
 
-<img width="1159" height="677" alt="Screenshot 2026-09-21 at 12 02 14 PM" src="https://github.com/user-attachments/assets/85024d79-f167-4f9d-a80a-3c2fccb74bba" />
-
-Kairo is a terminal coding agent for a local repository. It understands the codebase, plans or implements a change, works within the opened workspace, and verifies the result.
-
-The focus is reliability, not agent theatre. Kairo keeps one bounded loop, safe workspace tools, resumable sessions, useful traces, and honest verification state.
+The desktop app combines a local workspace, a bounded agent loop, approval controls, resumable conversations, and an integrated file and diff review surface.
 
 ## What it does
 
-- Runs in a full-screen Ink TUI with streaming responses, a task timeline, slash-command palette, and approval cards.
-- Builds a language-neutral repository snapshot, enriches JavaScript/TypeScript structure, ranks relevant files, and keeps model context bounded.
-- Reads and searches freely inside the workspace. Workspace file edits are allowed by default; arbitrary shell commands still require approval. `/permissions` toggles to approval-required file edits for the current saved session.
-- Recommends focused checks after changes and can make bounded repair attempts when verification fails.
-- Saves resumable sessions, plans, checkpoints, and metadata-only task traces.
-- Supports Gemini, Groq, Mistral, and OpenRouter coding models, with manual or optional Jev-powered routing.
-- Includes deterministic and live evaluations for measuring the agent loop over time.
+- Opens local project folders and keeps separate resumable chats for each workspace.
+- Builds a language-neutral repository snapshot and selects relevant files for each model request.
+- Reads and searches inside the workspace; agent edits and shell commands follow Kairo's configured approval rules.
+- Recommends project checks after changes and records whether the latest eligible verification passed.
+- Shows task progress, tool activity, approval requests, changed files, and working-tree diffs.
+- Supports Gemini, Groq, Mistral, and OpenRouter, with optional Jev safety and model routing.
 
-## Jev and automatic routing
+## Agent safeguards
 
-[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) is Kairo’s optional decision and safety layer. It is **not** a coding model and does not generate source code. Gemini, Groq, Mistral, or OpenRouter still perform the actual repository work.
+Kairo confines file tools to the opened workspace and rejects symlink escapes. Shell commands run from the workspace and require approval. Agent loops, tool calls, retries, and verification repairs are bounded. Kairo does not treat a model's completion message as proof that a task passed; changed work must have successful verification evidence.
 
-Open `/jev` in the TUI to add a TypeSafe API key and control four independent features:
+Repository snapshots store derived metadata rather than source contents. Session conversations and tool results are persisted in the local SQLite state store so chats can be resumed. Task traces retain operation metadata for review.
 
-- **Task routing** distinguishes conversation, direct answers, repository work, and requests that should become a read-only plan.
-- **Safety context** assesses proposed operations while Kairo’s local approval and workspace rules remain authoritative.
-- **Recovery advice** helps choose whether a failed check needs a focused repair, broader context, or escalation.
-- **Safe autonomy** may skip a prompt only for a high-confidence, low-risk verification command that Kairo already discovered from the repository. It never grants autonomous file writes or arbitrary shell access.
+## Run the desktop app from source
 
-`/auto` separately toggles automatic model selection. When enabled, Jev classifies each BUILD request as `fast`, `balanced`, or `strong`, then Kairo chooses from models whose credentials are available locally. Decisions below the `0.85` confidence threshold, unavailable tiers, or Jev errors fall back to your manually selected model. Quota failures can fall through to another available model.
-
-Auto routing is opt-in. `/model` always puts you back in manual mode, and an explicit PLAN request is never silently upgraded into implementation. The footer only shows `AUTO` or `JEV` when those features are enabled.
-
-## Repository awareness
-
-Kairo starts with a deterministic, language-neutral snapshot instead of assuming every project is JavaScript or TypeScript. In a Git repository it inventories tracked and untracked, non-ignored files with `git ls-files`. Outside Git it uses a bounded recursive walk. Symlinked directories, dependencies, generated output, binary content, and workspace escapes are excluded from content inspection.
-
-The snapshot records derived metadata for up to 20,000 files:
-
-- file paths, size, modification time, and role such as source, test, manifest, CI, build, documentation, configuration, or agent instruction;
-- detected ecosystems from manifests for Node, Python, Go, Rust, JVM, Ruby, PHP, Elixir, and .NET repositories;
-- Git root, branch, HEAD, and changed paths when available;
-- common source/test roots and existing JavaScript/TypeScript symbols, imports, and test relationships;
-- Node verification commands discovered from `package.json`, with the manifest and package-manager lockfile recorded as evidence.
-
-Kairo recognizes root and nested `AGENTS.md` and `CLAUDE.md` files, `.github/copilot-instructions.md`, and `.cursor/rules/**`. Applicable instruction text is read only for the current model request: root rules are always considered, while nested rules are included only for selected files under their directory. Each file is capped at 16 KiB and the complete instruction budget is 32 KiB.
-
-Snapshots are versioned and fingerprinted. Kairo checks freshness when a session starts or resumes and before each model turn after tool activity. Branch, HEAD, working-tree, inventory, or high-signal control-file changes rebuild stale metadata automatically. Old repository profiles are treated as stale and rebuilt once.
-
-Only derived metadata is persisted in SQLite. Source text, instruction contents, README contents, diffs, and command output are not stored in the snapshot. Manifests, CI files, build files, and documentation are surfaced as paths so the agent can inspect the relevant evidence on demand.
-
-## Install and quick start
-
-You’ll need Node.js 24.21+ and an API key for Gemini, Groq, or Mistral.
-
-Install Kairo globally from npm:
-
-```bash
-npm install --global @mrace07/kairo
-```
-
-Then start it in a repository:
-
-```bash
-cd your-project
-kairo .
-```
-
-On first run, Kairo helps you choose a provider and can store its credential in the macOS Keychain. You can also configure one with an environment variable for a single run:
-
-```bash
-GEMINI_API_KEY=your_key_here kairo .
-GROQ_API_KEY=your_key_here kairo .
-MISTRAL_API_KEY=your_key_here kairo .
-OPENROUTER_API_KEY=your_key_here kairo .
-```
-
-OpenRouter is available as a provider. Kairo lists `openrouter/free` as its default model route; use `/model openrouter <model-id>` to select another OpenRouter model. OpenRouter’s free router chooses among free models that support the request’s required features, including tool calling. See the [OpenRouter model catalog](https://openrouter.ai/models) for model IDs.
-
-## TUI workflow
-
-Type a request normally, or type `/` to open the command palette. Arrow keys move through matches; Tab completes commands that need arguments and runs commands that do not.
-
-- `/plan` toggles read-only planning.
-- `/permissions` toggles between `Workspace writes` and `Ask before edits`; the setting is saved with the current session. Workspace confinement and shell-command approvals remain in force.
-- `/model` chooses a coding model and disables Auto. `/auto` toggles Jev-powered automatic routing.
-- `/jev` manages the Jev credential, routing, safety, recovery, and autonomy features.
-- `/new`, `/resume [session-id]`, and `/sessions` manage saved sessions.
-- `/status`, `/trace [task-id]`, and `/changes` explain what happened.
-- `/compact` saves a context checkpoint.
-- `/cancel`, `/logout`, `/help`, and `/quit` handle the remaining session controls.
-
-When Kairo requests approval, press `y` or Enter to approve; press `n` or Escape to deny. In `Ask before edits` mode, a file approval can be scoped to that file for the current task. Use `Ctrl+O` to expand or collapse the task activity timeline.
-
-Every successful edit invalidates older verification. A task that changed files is not complete until its latest eligible check passes.
-
-## CLI essentials
-
-```bash
-# Credentials
-kairo auth login [gemini|groq|mistral|openrouter]
-kairo auth logout [gemini|groq|mistral|openrouter]
-kairo auth status
-
-# Saved sessions
-kairo sessions list
-kairo resume <session-id>
-
-# Agent-loop evaluations
-kairo eval
-kairo eval jev
-kairo eval live
-kairo eval self --trials 3
-kairo eval history
-kairo eval show <run-id>
-kairo eval baseline set <run-id>
-kairo eval baseline show
-kairo eval compare <run-id>
-```
-
-`kairo eval` checks deterministic plumbing. `eval jev` uses a local stub to exercise Jev integration; it is not a live latency or quality benchmark. `eval self` is the real-provider capability suite: it creates isolated Kairo snapshots, seeds defects, requires a verified result, and runs independent hidden graders.
-
-`kairo eval live` uses DeepEval and is available from a Kairo source checkout after `pnpm install`; it is kept out of the global npm install to reduce runtime dependencies.
-
-Evaluation history and task traces are sanitized. They store IDs, operation names, timing, outcomes, counters, and verification metadata—not prompts, model responses, source contents, credentials, or raw command output.
-
-## Development
-
-To run Kairo from a local checkout:
+Requirements: macOS, Node.js 24.21+, pnpm, and a provider API key. The current desktop app uses the macOS Keychain for credentials and is run from the project checkout.
 
 ```bash
 git clone https://github.com/thefrikidude/kairo.git
 cd kairo
 pnpm install
-pnpm build
-node dist/interface/cli/index.js .
+pnpm desktop:dev
 ```
 
-Run checks with:
+Use **Open project** to select a workspace, then add a provider key in Model settings. Kairo validates the key and stores it in the macOS Keychain.
+
+Build and preview the local desktop bundle with:
+
+```bash
+pnpm desktop:build
+pnpm desktop:preview
+```
+
+Installers, signing, and release distribution are not configured yet.
+
+## Development
 
 ```bash
 pnpm check
 pnpm test
 ```
 
-### Desktop preview (macOS)
-
-Kairo also has an Electron desktop preview with chat, task progress, approvals, file editing, and a working-tree diff panel. It uses the same saved sessions, provider settings, and macOS Keychain credentials as the CLI. The desktop preview is currently macOS-only and expects the Kairo checkout's Node and pnpm dependencies.
-
-```bash
-pnpm desktop:dev
-```
-
-Open a project with **Open project**. Model settings let you select a configured provider and enter an API key; the key is validated and saved to the macOS Keychain. The editor saves directly to the selected workspace, while agent file access continues to use Kairo's workspace protections. The Electron renderer is isolated from Node.js; this does not add an OS-level sandbox for agent shell commands.
-
-`pnpm desktop:build` builds the local Electron app bundle, then `pnpm desktop:preview` launches it. Installers and signing are not included yet.
-
-The code is split into `domain`, `application`, `infrastructure`, and the `interface/cli` and `interface/desktop` clients. The core loop is bounded, workspace-confined, approval-gated, and designed so a successful command is evidence—not automatic proof that the task is correct.
+The application is organized into domain, application, infrastructure, and desktop interface layers. The Electron renderer is isolated from Node.js; this does not add an OS-level sandbox for approved shell commands.
 
 ## Direction
 
-1. Keep the single-agent loop dependable: safer tools, better repair, stronger verification, and useful traces.
-2. Add evidence-backed Python, Go, Rust, JVM, and other verification adapters without guessing commands from prose.
-3. Add a lightweight repository graph, then Tree-sitter enrichment and on-demand LSP queries where deterministic retrieval needs stronger semantics.
-4. Expand realistic broken-repository evaluations and measure reliability, cost, and latency before considering embeddings or a graph database.
-5. Add local providers and better evidence-based routing without weakening manual control.
+1. Keep the single-agent loop dependable with stronger recovery, verification, and useful traces.
+2. Add evidence-backed verification adapters for more languages and ecosystems.
+3. Improve the desktop workspace for efficient file review and human steering.
+4. Expand realistic repository evaluations and measure reliability, cost, and latency.

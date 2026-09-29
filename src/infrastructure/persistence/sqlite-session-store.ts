@@ -112,7 +112,7 @@ export class SqliteSessionStore {
     store.recoverInterruptedTasks();
     return store;
   }
-  /** Closes the SQLite handle after the CLI session exits. */
+  /** Closes the SQLite handle during desktop runtime shutdown. */
   close(): void {
     this.db.close();
   }

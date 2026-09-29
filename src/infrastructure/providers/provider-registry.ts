@@ -105,7 +105,7 @@ export const providerRegistry: readonly ProviderDescriptor[] = [
   },
 ] as const;
 
-/** Narrows untrusted CLI/config text to a registered provider identifier. */
+/** Narrows untrusted configuration text to a registered provider identifier. */
 export function isProviderId(value: unknown): value is ProviderId {
   return providerRegistry.some((provider) => provider.id === value);
 }

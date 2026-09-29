@@ -359,7 +359,7 @@ export class CodingAgent {
           : "completed",
     });
   }
-  /** Records a terminal task failure and makes the reason visible in the REPL. */
+  /** Records a task failure and makes the reason visible to the active interface. */
   private fail(task: Task, error: string, onText: (text: string) => void): void {
     this.store.updateTask(task.id, { status: "failed", error });
     onText(`\nKairo couldn't complete this task: ${error}\n`);

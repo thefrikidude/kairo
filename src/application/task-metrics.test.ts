@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
 import { CodingAgent } from "./coding-agent.js";
 import { taskMetrics } from "./task-metrics.js";
-import { formatMetrics, formatTrace } from "../interface/cli/task-trace.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -44,9 +43,7 @@ test("failed model turns have a paired outcome and measured latency", async () =
     assert.equal(metrics.modelFailures, 1);
     assert.equal(metrics.unfinishedOperations, 0);
     assert.equal(events.at(-1)?.outcome, "failed");
-    assert.ok(formatTrace(task, events).includes("model_finished"));
     assert.ok(!JSON.stringify(events).includes("network unavailable"));
-    assert.match(formatMetrics([]), /No trace recorded/);
   } finally {
     store.close();
   }

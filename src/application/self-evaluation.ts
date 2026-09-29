@@ -495,7 +495,7 @@ async function assertKairoSource(root: string): Promise<void> {
     await readFile(join(root, "src/application/coding-agent.ts"), "utf8");
     if (packageJson.name !== "kairo") throw new Error();
   } catch {
-    throw new Error("Run `kairo eval self` from the Kairo repository root.");
+    throw new Error("Self-evaluations must run from the Kairo source repository root.");
   }
 }
 function emptyMetrics(): SelfEvaluationResult["metrics"] {

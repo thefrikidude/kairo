@@ -1,12 +1,12 @@
 {
   "name": "@mrace07/kairo",
   "version": "0.1.2",
-  "description": "A terminal coding agent for local repositories, with approval-gated tools and verification.",
+  "private": true,
+  "description": "A desktop coding agent for local repositories, with approval-gated tools and verification.",
   "keywords": [
     "ai",
     "coding-agent",
-    "terminal",
-    "cli",
+    "desktop",
     "developer-tools"
   ],
   "repository": {
@@ -17,16 +17,7 @@
   "bugs": {
     "url": "https://github.com/thefrikidude/kairo/issues"
   },
-  "files": [
-    "dist/",
-    "!dist/interface/desktop/**",
-    "!dist/**/*.test.*",
-    "README.md"
-  ],
   "type": "module",
-  "bin": {
-    "kairo": "dist/interface/cli/index.js"
-  },
   "engines": {
     "node": ">=24.21.0"
   },
@@ -36,7 +27,6 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm run build && node --test \"dist/**/*.test.js\"",
-    "start": "tsx src/interface/cli/index.ts",
     "desktop:dev": "node node_modules/electron/install.js && ELECTRON_ENTRY=out/main/index.js electron-vite dev",
     "desktop:build": "electron-vite build",
     "desktop:preview": "node node_modules/electron/install.js && ELECTRON_ENTRY=out/main/index.js electron-vite preview"
@@ -48,8 +38,6 @@
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "ai": "^7.0.118",
     "better-sqlite3": "^12.0.0",
-    "ink": "^7.1.1",
-    "ink-text-input": "^6.0.0",
     "parse-diff": "0.12.0",
     "react": "^19.3.0"
   },
@@ -62,7 +50,6 @@
     "deepeval": "0.9.14",
     "electron": "^44.4.5",
     "electron-vite": "^5.0.0",
-    "ink-testing-library": "^4.0.0",
     "prettier": "^3.9.6",
     "react-dom": "^19.3.0",
     "tsx": "^4.0.0",

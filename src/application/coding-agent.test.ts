@@ -557,7 +557,7 @@ test("planning saves a structured read-only artifact without requiring approval"
                 name: "submit_plan",
                 args: {
                   goal: "Add task planning",
-                  assumptions: ["The CLI remains terminal-first."],
+                  assumptions: ["Kairo remains focused on local coding tasks."],
                   files: [{ path: "src/application/coding-agent.ts", reason: "Coordinate plans." }],
                   steps: ["Add a planning mode.", "Persist the completed plan."],
                   verification: { command: "pnpm test", reason: "Run the agent tests." },

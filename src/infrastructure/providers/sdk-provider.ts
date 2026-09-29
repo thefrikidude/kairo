@@ -88,7 +88,7 @@ export class SdkProvider implements ModelProvider {
         ? { providerOptions: { [this.provider]: { parallelToolCalls: false } } }
         : {}),
       abortSignal: signal,
-      // Kairo's recovery layer owns retries and emits retry progress to the TUI.
+      // Kairo's recovery layer owns retries and emits retry progress to the desktop UI.
       maxRetries: 0,
       // Provider errors are normalized and shown by Kairo; never dump raw SDK errors to stderr.
       onError: () => {},

@@ -3,8 +3,6 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import Database from "better-sqlite3";
 import { SqliteSessionStore } from "../infrastructure/persistence/sqlite-session-store.js";
 import {
@@ -12,7 +10,6 @@ import {
   compareWithBaseline,
   summarizeAttempts,
 } from "./evaluation-comparison.js";
-import { formatComparison } from "../interface/cli/evaluation-comparison-report.js";
 import type { EvaluationAttempt, EvaluationRun } from "../domain/models.js";
 
 const run: EvaluationRun = {
@@ -76,24 +73,26 @@ test("comparison weights observed attempts and retains absent scenarios", () => 
   assert.equal(summarizeAttempts([]).averages.repairs, null);
 });
 
-test("reports improvements, regressions, no change, and model mismatch without deltas", () => {
-  for (const [before, after, expected] of [
-    [false, true, "IMPROVEMENT"],
-    [true, false, "REGRESSION"],
-    [true, true, "NO CHANGE"],
+test("comparisons preserve model comparability and mark provider mismatch", () => {
+  for (const [before, after] of [
+    [false, true],
+    [true, false],
+    [true, true],
   ] as const) {
-    assert.match(
-      formatComparison(compareEvaluations(run, [attempt("a", before)], run, [attempt("a", after)])),
-      new RegExp(expected),
+    const comparison = compareEvaluations(
+      run,
+      [attempt("a", before)],
+      run,
+      [attempt("a", after)],
     );
+    assert.equal(comparison.overall.current.passRate, after ? 1 : 0);
   }
   const mismatch = compareEvaluations(run, [attempt("a", false)], { ...run, model: "other" }, [
     attempt("a", true),
   ]);
   assert.equal(mismatch.overall.delta, null);
   assert.equal(mismatch.scenarios[0]?.delta, null);
-  assert.match(formatComparison(mismatch), /not directly comparable/);
-  assert.doesNotMatch(formatComparison(mismatch), /IMPROVEMENT|REGRESSION/);
+  assert.equal(mismatch.comparable, false);
   assert.equal(
     compareEvaluations(run, [attempt("a", false)], { ...run, provider: "groq" }, [
       attempt("a", true),
@@ -102,7 +101,7 @@ test("reports improvements, regressions, no change, and model mismatch without d
   );
 });
 
-test("baseline validates, persists, replaces, and CLI commands resolve local state", async () => {
+test("baseline validates, persists, and replaces across a store reopen", async () => {
   const dir = await mkdtemp(join(tmpdir(), "kairo-baseline-test-"));
   const path = join(dir, "sessions.sqlite");
   let store = await SqliteSessionStore.open(path);
@@ -132,23 +131,11 @@ test("baseline validates, persists, replaces, and CLI commands resolve local sta
     store = await SqliteSessionStore.open(path);
     assert.equal(store.evaluationBaseline()?.id, replacement.id);
     assert.equal(compareWithBaseline(store, base.id)?.baselineRun.id, replacement.id);
-    const cli = async (...args: string[]) =>
-      (
-        await promisify(execFile)(
-          process.execPath,
-          ["dist/interface/cli/index.js", "eval", ...args],
-          { cwd: process.cwd(), env: { ...process.env, KAIRO_STATE_DIR: dir } },
-        )
-      ).stdout;
-    assert.match(await cli("baseline", "show"), new RegExp(replacement.id));
-    assert.match(await cli("baseline", "set", base.id), new RegExp(base.id));
-    assert.match(await cli("compare", replacement.id), /N\/A/);
-    assert.match(await cli("compare", short.id), /REGRESSION/);
-    const json = JSON.parse(await cli("compare", base.id, "--json"));
-    assert.equal(json.comparable, true);
-    assert.equal(json.overall.delta.passRate, 0);
-    await assert.rejects(cli("baseline", "set", "missing"));
-    await assert.rejects(cli("compare"));
+    assert.equal(compareWithBaseline(store, replacement.id)?.baselineRun.id, replacement.id);
+    const shortComparison = compareWithBaseline(store, short.id);
+    assert.equal(shortComparison?.baselineRun.id, replacement.id);
+    assert.equal(shortComparison?.overall.baseline.attempts, 0);
+    assert.equal(shortComparison?.overall.delta?.passRate, null);
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });
