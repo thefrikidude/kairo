@@ -36,14 +36,19 @@ input.on("line", (line) => {
   }
   const { id, method, params } = message;
   const reply = (result: unknown) => output({ id, result });
-  if (method === "initialize") reply({ userAgent: "fixture" });
-  else if (method === "initialized") return;
+  if (method === "initialize") {
+    if (params.capabilities?.experimentalApi !== true)
+      throw new Error("Experimental API is required");
+    reply({ userAgent: "fixture" });
+  } else if (method === "initialized") return;
   else if (method === "account/read")
     reply({ account: { type: "chatgpt" }, requiresOpenaiAuth: true });
   else if (method === "model/list")
     reply({ data: [{ model: "fixture-model", displayName: "Fixture model" }], nextCursor: null });
   else if (method === "account/login/start")
     reply({ authUrl: "https://auth.openai.com/authorize?fixture=true" });
+  else if (method === "thread/settings/update") reply({});
+  else if (method === "thread/compact/start") reply({});
   else if (method === "thread/start" || method === "thread/resume") {
     if (params.sandbox !== "read-only" && params.sandbox !== "workspace-write")
       throw new Error("Missing sandbox");

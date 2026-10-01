@@ -150,6 +150,7 @@ function registerIpc(): void {
   handle("project:archive", "project:archive");
   handle("project:delete", "project:delete");
   handle("task:send", "task:send");
+  handle("codex:command", "codex:command");
   handle("task:cancel", "task:cancel");
   handle("workspace:list", "workspace:list");
   handle("workspace:read", "workspace:read");

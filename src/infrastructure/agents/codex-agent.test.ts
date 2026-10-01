@@ -64,6 +64,40 @@ test("Codex discovers account/models, streams once, and resumes the saved thread
   assert.match((await agent.login()).url, /^https:\/\/auth.openai.com\//);
 });
 
+test("Codex commands use native App Server thread settings and compaction", async (t) => {
+  const agent = adapter();
+  t.after(() => agent.close());
+  let threadId = "";
+  assert.match(
+    await agent.executeCommand!({
+      workspace: "/tmp",
+      command: "plan",
+      onThread: (id) => (threadId = id),
+    }),
+    /Plan mode/,
+  );
+  assert.equal(threadId, "thread-1");
+  assert.equal(
+    await agent.executeCommand!({
+      threadId,
+      workspace: "/tmp",
+      command: "model",
+      argument: "fixture-model",
+      onThread: () => {},
+    }),
+    "Codex model set to fixture-model.",
+  );
+  assert.match(
+    await agent.executeCommand!({
+      threadId,
+      workspace: "/tmp",
+      command: "compact",
+      onThread: () => {},
+    }),
+    /compaction/,
+  );
+});
+
 test("Codex concurrent threads keep responses isolated and route approvals to the requesting session", async (t) => {
   const agent = adapter();
   t.after(() => agent.close());

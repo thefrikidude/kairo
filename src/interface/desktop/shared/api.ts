@@ -63,6 +63,11 @@ export interface DesktopApi {
   archiveProject(workspace: string): Promise<DesktopBootstrap>;
   deleteProject(workspace: string): Promise<DesktopBootstrap>;
   send(sessionId: string, prompt: string, mode: "build" | "plan"): Promise<void>;
+  codexCommand(
+    sessionId: string,
+    command: "plan" | "default" | "model" | "compact",
+    argument?: string,
+  ): Promise<string>;
   cancel(sessionId: string): Promise<void>;
   listFiles(sessionId: string): Promise<string[]>;
   readFile(sessionId: string, path: string): Promise<string>;

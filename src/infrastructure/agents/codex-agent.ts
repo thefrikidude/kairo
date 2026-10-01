@@ -1,6 +1,7 @@
 import type {
   ExternalAgentAdapter,
   ExternalAgentInfo,
+  ExternalCommand,
   ExternalRun,
 } from "../../domain/agent-runtime.js";
 import { findAgentExecutable } from "./executable.js";
@@ -55,6 +56,7 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
       try {
         await rpc.request("initialize", {
           clientInfo: { name: "kairo", title: "Kairo", version: "0.1.2" },
+          capabilities: { experimentalApi: true },
         });
         rpc.send({ method: "initialized" });
         return rpc;
@@ -108,6 +110,62 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
     });
     if (!result.authUrl) throw new Error("Codex did not return a browser sign-in URL.");
     return { url: result.authUrl };
+  }
+
+  async executeCommand(input: ExternalCommand): Promise<string> {
+    const rpc = await this.connect();
+    let threadId = input.threadId;
+    if (!threadId) {
+      const thread = await rpc.request<ThreadResponse>("thread/start", {
+        cwd: input.workspace,
+        model: input.model ?? null,
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandbox: "workspace-write",
+      });
+      threadId = thread.thread.id;
+      input.onThread(threadId);
+    }
+    if (this.running.has(threadId)) throw new Error("Wait for the Codex turn to finish first.");
+    switch (input.command) {
+      case "plan":
+      case "default": {
+        const model = input.model ?? (await this.defaultModel(rpc));
+        await rpc.request("thread/settings/update", {
+          threadId,
+          collaborationMode: {
+            mode: input.command === "plan" ? "plan" : "default",
+            settings: { model, reasoningEffort: null, developerInstructions: null },
+          },
+        });
+        return input.command === "plan"
+          ? "Codex switched to Plan mode."
+          : "Codex switched to its default mode.";
+      }
+      case "model": {
+        const model = input.argument?.trim();
+        if (!model) throw new Error("Choose a model with /model <model>.");
+        await rpc.request("thread/settings/update", { threadId, model });
+        return `Codex model set to ${model}.`;
+      }
+      case "compact":
+        await rpc.request("thread/compact/start", { threadId });
+        return "Codex started conversation compaction.";
+    }
+  }
+
+  private async defaultModel(rpc: JsonRpcProcess): Promise<string> {
+    const page: { data: { model: string; isDefault?: boolean }[] } = await rpc.request(
+      "model/list",
+      {
+        limit: 100,
+        cursor: null,
+        includeHidden: false,
+      },
+    );
+    const model = page.data.find((item) => item.isDefault)?.model ?? page.data[0]?.model;
+    if (!model) throw new Error("Codex did not provide an available model for its mode setting.");
+    return model;
   }
 
   async run(input: ExternalRun): Promise<"complete" | "cancelled"> {

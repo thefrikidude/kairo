@@ -105,6 +105,29 @@ test("desktop keeps API-key sessions and routes concurrent external chats indepe
   await assert.rejects(request("session:runtime", b, { kind: "builtin" }), /new chat/);
 });
 
+test("desktop routes Codex slash commands through its adapter and rejects unsupported commands", async (t) => {
+  const { request, store } = await setup(t);
+  const created = await request<DesktopBootstrap>("session:new", {
+    kind: "external",
+    agentId: "codex",
+    model: "fixture-model",
+  });
+  const sessionId = created.activeSessionId!;
+  assert.match(await request("codex:command", sessionId, "plan"), /Plan mode/);
+  assert.ok(store.get(sessionId)?.externalSessionId);
+  assert.equal(store.messages(sessionId).at(-1)?.content, "Codex switched to Plan mode.");
+  assert.equal(
+    await request("codex:command", sessionId, "model", "fixture-model"),
+    "Codex model set to fixture-model.",
+  );
+  assert.equal((store.get(sessionId)?.runtime as { model?: string }).model, "fixture-model");
+  await assert.rejects(
+    request("codex:command", sessionId, "not-real"),
+    /Unsupported Codex command/,
+  );
+  await assert.rejects(request("codex:command", "missing-session", "plan"), /Session not found/);
+});
+
 test("background approvals survive chat switching and cancellation resolves only that session", async (t) => {
   const { request, events, builtin, wait } = await setup(t);
   const opened = await request<DesktopBootstrap>("session:new", {

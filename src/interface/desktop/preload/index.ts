@@ -17,6 +17,8 @@ const api: DesktopApi = {
   archiveProject: (workspace) => ipcRenderer.invoke("project:archive", workspace),
   deleteProject: (workspace) => ipcRenderer.invoke("project:delete", workspace),
   send: (sessionId, prompt, mode) => ipcRenderer.invoke("task:send", sessionId, prompt, mode),
+  codexCommand: (sessionId, command, argument) =>
+    ipcRenderer.invoke("codex:command", sessionId, command, argument),
   cancel: (sessionId) => ipcRenderer.invoke("task:cancel", sessionId),
   listFiles: (sessionId) => ipcRenderer.invoke("workspace:list", sessionId),
   readFile: (sessionId, path) => ipcRenderer.invoke("workspace:read", sessionId, path),

@@ -28,6 +28,15 @@ export type ExternalRun = {
   approve(name: string, description: string): Promise<boolean>;
 };
 
+export type ExternalCommand = {
+  threadId?: string;
+  workspace: string;
+  onThread(id: string): void;
+  command: "plan" | "default" | "model" | "compact";
+  argument?: string;
+  model?: string;
+};
+
 /** Each adapter owns its agent's protocol and credentials; Kairo never copies CLI tokens. */
 export interface ExternalAgentAdapter {
   readonly id: string;
@@ -35,5 +44,6 @@ export interface ExternalAgentAdapter {
   inspect(): Promise<ExternalAgentInfo>;
   login(): Promise<{ url: string }>;
   run(input: ExternalRun): Promise<"complete" | "cancelled">;
+  executeCommand?(input: ExternalCommand): Promise<string>;
   close(): Promise<void>;
 }

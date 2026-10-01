@@ -16,6 +16,7 @@ const methods = new Set([
   "project:archive",
   "project:delete",
   "task:send",
+  "codex:command",
   "task:cancel",
   "workspace:list",
   "workspace:read",
