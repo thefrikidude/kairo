@@ -1,12 +1,135 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import parseDiff from "parse-diff";
 import type { DesktopBootstrap, LiveSession } from "../../shared/api.js";
 import type { SessionRuntime } from "../../../../domain/agent-runtime.js";
 import type { ModelSelection, Message, TaskEvent } from "../../../../domain/models.js";
 
 type Mode = "build" | "plan";
-type Pane = "files" | "changes";
 type Theme = "light" | "dark";
 type SettingsSection = "general" | "models" | "archived";
+const SIDEBAR_DEFAULT_WIDTH = 224;
+const SIDEBAR_MIN_WIDTH = 176;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_COLLAPSE_THRESHOLD = 156;
+type ChangeSummary = {
+  path: string;
+  additions: number;
+  deletions: number;
+  diff: string;
+  unavailable?: string;
+};
+type DiffRow = {
+  kind: "add" | "remove" | "context" | "hunk" | "meta" | "fold";
+  oldLine?: number;
+  newLine?: number;
+  count?: number;
+  text: string;
+};
+
+async function summarizeChanges(sessionId: string): Promise<ChangeSummary[]> {
+  const paths = await window.kairo.changedFiles(sessionId);
+  return Promise.all(
+    paths.map(async (path) => {
+      const { diff, unavailable } = await window.kairo.diff(sessionId, path);
+      const files = parseDiff(diff);
+      let additions = files.reduce((total, file) => total + file.additions, 0);
+      const deletions = files.reduce((total, file) => total + file.deletions, 0);
+      if (!files.length && unavailable && diff.trim())
+        additions = diff.split(/\r?\n/).filter(Boolean).length;
+      return { path, additions, deletions, diff, unavailable };
+    }),
+  );
+}
+
+function parseDiffRows(diff: string): DiffRow[] {
+  const files = parseDiff(diff);
+  if (!files.length)
+    return diff
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((text, index) => ({ kind: "add", newLine: index + 1, text }));
+  return files.flatMap((file) => {
+    const rows: DiffRow[] = [];
+    let previousChunk: (typeof file.chunks)[number] | undefined;
+    for (const chunk of file.chunks) {
+      if (previousChunk) {
+        const gap = Math.max(
+          chunk.oldStart - previousChunk.oldStart - previousChunk.oldLines,
+          chunk.newStart - previousChunk.newStart - previousChunk.newLines,
+        );
+        if (gap > 0) rows.push({ kind: "fold", count: gap, text: "" });
+      }
+      rows.push({ kind: "hunk", text: chunk.content });
+      rows.push(
+        ...chunk.changes.map((change): DiffRow => {
+          if (change.content.startsWith("\\")) return { kind: "meta", text: change.content };
+          if (change.type === "add")
+            return { kind: "add", newLine: change.ln, text: change.content.slice(1) };
+          if (change.type === "del")
+            return { kind: "remove", oldLine: change.ln, text: change.content.slice(1) };
+          return {
+            kind: "context",
+            oldLine: change.ln1,
+            newLine: change.ln2,
+            text: change.content.slice(1),
+          };
+        }),
+      );
+      previousChunk = chunk;
+    }
+    return rows;
+  });
+}
+
+function DiffLine({ row }: { row: DiffRow }): React.JSX.Element {
+  if (row.kind === "hunk") return <div className="diff-hunk">{row.text}</div>;
+  if (row.kind === "fold")
+    return <div className="diff-context-gap">{row.count} unmodified lines</div>;
+  const marker = row.kind === "add" ? "+" : row.kind === "remove" ? "−" : "";
+  return (
+    <div className={`diff-row diff-${row.kind}`}>
+      <span className="diff-line-number">{row.oldLine ?? ""}</span>
+      <span className="diff-line-number">{row.newLine ?? ""}</span>
+      <span className="diff-marker">{marker}</span>
+      <code>{row.text || " "}</code>
+    </div>
+  );
+}
+
+function DiffContents({ diff }: { diff: string }): React.JSX.Element {
+  const rows = parseDiffRows(diff);
+  const content: React.ReactNode[] = [];
+  for (let index = 0; index < rows.length;) {
+    if (rows[index].kind !== "context") {
+      content.push(<DiffLine key={index} row={rows[index]} />);
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < rows.length && rows[end].kind === "context") end += 1;
+    const context = rows.slice(index, end);
+    if (context.length > 8) {
+      content.push(
+        <details className="diff-context-fold" key={index}>
+          <summary>{context.length} unmodified lines</summary>
+          {context.map((row, offset) => (
+            <DiffLine key={index + offset} row={row} />
+          ))}
+        </details>,
+      );
+    } else {
+      content.push(...context.map((row, offset) => <DiffLine key={index + offset} row={row} />));
+    }
+    index = end;
+  }
+  return <div className="diff-rows">{content}</div>;
+}
+
+function fileExtension(path: string): string {
+  const name = path.split(/[\\/]/).at(-1) ?? path;
+  const extension = name.includes(".") ? (name.split(".").at(-1) ?? "") : "";
+  return (extension || name.slice(0, 2)).slice(0, 3).toUpperCase();
+}
 
 export function DesktopApp(): React.JSX.Element {
   const [state, setState] = useState<DesktopBootstrap>();
@@ -28,7 +151,7 @@ export function DesktopApp(): React.JSX.Element {
   }, [state?.sessions]);
   const activeModelSelection =
     activeSession?.runtime.kind === "builtin"
-      ? activeSession.runtime.selection ?? state?.config
+      ? (activeSession.runtime.selection ?? state?.config)
       : state?.config;
   const live = state?.activeSessionId ? state.liveSessions[state.activeSessionId] : undefined;
   const busy = Boolean(live && ["running", "waiting", "cancelling"].includes(live.state));
@@ -72,22 +195,46 @@ export function DesktopApp(): React.JSX.Element {
       setDrafts((current) => ({ ...current, [state.activeSessionId!]: text }));
   };
   const [mode, setMode] = useState<Mode>("build");
-  const [pane, setPane] = useState<Pane>("changes");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [files, setFiles] = useState<string[]>([]);
-  const [changes, setChanges] = useState<string[]>([]);
-  const [selectedFile, setSelectedFile] = useState("");
-  const [fileContent, setFileContent] = useState("");
-  const [savedContent, setSavedContent] = useState("");
-  const [diff, setDiff] = useState("");
-  const [diffNotice, setDiffNotice] = useState("");
-  const [showDiff, setShowDiff] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const saved = Number(window.localStorage.getItem("kairo.sidebarWidth"));
+      return Number.isFinite(saved) && saved >= SIDEBAR_MIN_WIDTH
+        ? Math.min(saved, SIDEBAR_MAX_WIDTH)
+        : SIDEBAR_DEFAULT_WIDTH;
+    } catch {
+      return SIDEBAR_DEFAULT_WIDTH;
+    }
+  });
+  const [sidebarResizeActive, setSidebarResizeActive] = useState(false);
+  const [changes, setChanges] = useState<ChangeSummary[]>([]);
+  const [viewingChanges, setViewingChanges] = useState(false);
+  const [pinnedSessions, setPinnedSessions] = useState<string[]>(() => {
+    try {
+      const value: unknown = JSON.parse(
+        window.localStorage.getItem("kairo.pinnedSessions") ?? "[]",
+      );
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+    } catch {
+      return [];
+    }
+  });
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
-  const [sessionMenuId, setSessionMenuId] = useState<string>();
   const [deleteSessionId, setDeleteSessionId] = useState<string>();
+  const [deleteAllArchivedOpen, setDeleteAllArchivedOpen] = useState(false);
+  const [projectMenuWorkspace, setProjectMenuWorkspace] = useState<string>();
+  const [deleteProjectWorkspace, setDeleteProjectWorkspace] = useState<string>();
+  const [projectDeleteBusy, setProjectDeleteBusy] = useState(false);
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem("kairo.collapsedProjects") ?? "{}");
+    } catch {
+      return {};
+    }
+  });
   const [theme, setTheme] = useState<Theme>(() => {
     try {
       return window.localStorage.getItem("kairo.theme") === "light" ? "light" : "dark";
@@ -113,6 +260,13 @@ export function DesktopApp(): React.JSX.Element {
   }, [busy]);
 
   useEffect(() => {
+    const textarea = composerRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
+  }, [prompt]);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try {
       window.localStorage.setItem("kairo.theme", theme);
@@ -120,6 +274,40 @@ export function DesktopApp(): React.JSX.Element {
       // The selected theme still applies for this window if storage is unavailable.
     }
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("kairo.collapsedProjects", JSON.stringify(collapsedProjects));
+    } catch {
+      // Project expansion still works for this window if storage is unavailable.
+    }
+  }, [collapsedProjects]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("kairo.pinnedSessions", JSON.stringify(pinnedSessions));
+    } catch {
+      // Pin state remains available for this window if storage is unavailable.
+    }
+  }, [pinnedSessions]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("kairo.sidebarWidth", String(sidebarWidth));
+    } catch {
+      // Resizing still works for this window if storage is unavailable.
+    }
+  }, [sidebarWidth]);
+
+  const resizeSidebar = (requestedWidth: number) => {
+    if (requestedWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
+      setSidebarWidth(SIDEBAR_MIN_WIDTH);
+      setSidebarOpen(false);
+      setSidebarResizeActive(false);
+      return;
+    }
+    setSidebarWidth(Math.max(SIDEBAR_MIN_WIDTH, Math.min(requestedWidth, SIDEBAR_MAX_WIDTH)));
+  };
 
   const applyState = useCallback((next: DesktopBootstrap) => {
     activeSessionRef.current = next.activeSessionId;
@@ -140,15 +328,10 @@ export function DesktopApp(): React.JSX.Element {
         return;
       applyState(next);
       if (next.activeSessionId) {
-        const [listed, changed] = await Promise.all([
-          window.kairo.listFiles(next.activeSessionId),
-          window.kairo.changedFiles(next.activeSessionId),
-        ]);
+        const changed = await summarizeChanges(next.activeSessionId);
         if (activeSessionRef.current !== next.activeSessionId) return;
-        setFiles(listed);
         setChanges(changed);
       } else {
-        setFiles([]);
         setChanges([]);
       }
     },
@@ -160,19 +343,12 @@ export function DesktopApp(): React.JSX.Element {
       if (!next) return;
       applyState(next);
       followTranscript.current = true;
-      setSelectedFile("");
-      setFileContent("");
-      setSavedContent("");
+      setViewingChanges(false);
       if (next.activeSessionId) {
-        const [listed, changed] = await Promise.all([
-          window.kairo.listFiles(next.activeSessionId),
-          window.kairo.changedFiles(next.activeSessionId),
-        ]);
+        const changed = await summarizeChanges(next.activeSessionId);
         if (activeSessionRef.current !== next.activeSessionId) return;
-        setFiles(listed);
         setChanges(changed);
       } else {
-        setFiles([]);
         setChanges([]);
       }
     },
@@ -221,10 +397,13 @@ export function DesktopApp(): React.JSX.Element {
       if (kind === "agent" && first) {
         void newSession({ kind: "external", agentId: first }, newSessionWorkspace);
       } else if (kind === "model" && first && rest.length) {
-        void newSession({
-          kind: "builtin",
-          selection: { provider: first as ModelSelection["provider"], model: rest.join(":") },
-        }, newSessionWorkspace);
+        void newSession(
+          {
+            kind: "builtin",
+            selection: { provider: first as ModelSelection["provider"], model: rest.join(":") },
+          },
+          newSessionWorkspace,
+        );
       }
     } catch (cause) {
       setError((cause as Error).message);
@@ -427,7 +606,10 @@ export function DesktopApp(): React.JSX.Element {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (deleteSessionId) setDeleteSessionId(undefined);
+      else if (deleteAllArchivedOpen) setDeleteAllArchivedOpen(false);
+      else if (deleteProjectWorkspace) setDeleteProjectWorkspace(undefined);
       else if (newSessionOpen) setNewSessionOpen(false);
+      else if (projectMenuWorkspace) setProjectMenuWorkspace(undefined);
       else if (settingsOpen) setSettingsOpen(false);
       else if (busy && state?.activeSessionId) {
         void window.kairo.cancel(state.activeSessionId).catch((cause) => setError(String(cause)));
@@ -435,7 +617,16 @@ export function DesktopApp(): React.JSX.Element {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [settingsOpen, deleteSessionId, newSessionOpen, busy, state?.activeSessionId]);
+  }, [
+    settingsOpen,
+    deleteSessionId,
+    deleteAllArchivedOpen,
+    deleteProjectWorkspace,
+    newSessionOpen,
+    projectMenuWorkspace,
+    busy,
+    state?.activeSessionId,
+  ]);
 
   const messages = useMemo(
     () =>
@@ -445,36 +636,20 @@ export function DesktopApp(): React.JSX.Element {
     [state?.messages],
   );
 
-  const openFile = async (path: string, review = false) => {
+  const refreshChanges = async () => {
     if (!state?.activeSessionId) return;
     try {
-      if (review) {
-        const result = await window.kairo.diff(state.activeSessionId, path);
-        if (activeSessionRef.current !== state.activeSessionId) return;
-        setDiff(result.diff);
-        setDiffNotice(result.unavailable ?? "");
-      } else {
-        const content = await window.kairo.readFile(state.activeSessionId, path);
-        if (activeSessionRef.current !== state.activeSessionId) return;
-        setFileContent(content);
-        setSavedContent(content);
-      }
-      setSelectedFile(path);
-      setShowDiff(review);
+      const changed = await summarizeChanges(state.activeSessionId);
+      setChanges(changed);
     } catch (cause) {
       setError((cause as Error).message);
     }
   };
 
-  const refreshChanges = async () => {
-    if (!state?.activeSessionId) return;
+  const openInCursor = async (path: string) => {
+    if (!state?.activeSessionId || !path) return;
     try {
-      const [changed, listed] = await Promise.all([
-        window.kairo.changedFiles(state.activeSessionId),
-        window.kairo.listFiles(state.activeSessionId),
-      ]);
-      setChanges(changed);
-      setFiles(listed);
+      await window.kairo.openInCursor(state.activeSessionId, path);
     } catch (cause) {
       setError((cause as Error).message);
     }
@@ -548,8 +723,36 @@ export function DesktopApp(): React.JSX.Element {
         action === "archive"
           ? await window.kairo.archiveSession(sessionId)
           : await window.kairo.deleteSession(sessionId);
-      setSessionMenuId(undefined);
       setDeleteSessionId(undefined);
+      await focusSession(next);
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  };
+
+  const deleteProject = async (workspace: string) => {
+    setProjectDeleteBusy(true);
+    try {
+      const next = await window.kairo.deleteProject(workspace);
+      setDeleteProjectWorkspace(undefined);
+      setProjectMenuWorkspace(undefined);
+      setCollapsedProjects((current) => {
+        const updated = { ...current };
+        delete updated[workspace];
+        return updated;
+      });
+      await focusSession(next);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setProjectDeleteBusy(false);
+    }
+  };
+
+  const archiveProject = async (workspace: string) => {
+    try {
+      const next = await window.kairo.archiveProject(workspace);
+      setProjectMenuWorkspace(undefined);
       await focusSession(next);
     } catch (cause) {
       setError((cause as Error).message);
@@ -559,6 +762,24 @@ export function DesktopApp(): React.JSX.Element {
   const restoreSession = async (sessionId: string) => {
     try {
       const next = await window.kairo.restoreSession(sessionId);
+      applyState(next);
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  };
+
+  const togglePinnedSession = (sessionId: string) => {
+    setPinnedSessions((current) =>
+      current.includes(sessionId)
+        ? current.filter((id) => id !== sessionId)
+        : [...current, sessionId],
+    );
+  };
+
+  const deleteAllArchived = async () => {
+    try {
+      const next = await window.kairo.deleteArchivedSessions();
+      setDeleteAllArchivedOpen(false);
       applyState(next);
     } catch (cause) {
       setError((cause as Error).message);
@@ -594,149 +815,165 @@ export function DesktopApp(): React.JSX.Element {
       </main>
     );
 
-  if (settingsOpen)
-    return (
-      <div className="settings-shell" data-theme={theme}>
-        <aside className="settings-sidebar">
-          <button className="settings-back" onClick={() => setSettingsOpen(false)}>
-            <span aria-hidden="true">←</span> Back to Kairo
+  const settingsPage = (
+    <div className="settings-shell" data-theme={theme}>
+      <aside className="settings-sidebar">
+        <button className="settings-back" onClick={() => setSettingsOpen(false)}>
+          <span aria-hidden="true">←</span> Back to Kairo
+        </button>
+        <div className="settings-title">Settings</div>
+        {(["general", "models", "archived"] as const).map((section) => (
+          <button
+            key={section}
+            className={`settings-nav ${settingsSection === section ? "selected" : ""}`}
+            onClick={() => setSettingsSection(section)}
+          >
+            {section === "general" ? "General" : section === "models" ? "Models" : "Archived chats"}
+            {section === "archived" && <small>{state.archivedSessions.length}</small>}
           </button>
-          <div className="settings-title">Settings</div>
-          {(["general", "models", "archived"] as const).map((section) => (
-            <button
-              key={section}
-              className={`settings-nav ${settingsSection === section ? "selected" : ""}`}
-              onClick={() => setSettingsSection(section)}
-            >
-              {section === "general"
-                ? "General"
-                : section === "models"
-                  ? "Models"
-                  : "Archived chats"}
-              {section === "archived" && <small>{state.archivedSessions.length}</small>}
-            </button>
-          ))}
-        </aside>
-        <main className="settings-content">
-          <header>
-            <h1>
-              {settingsSection === "general"
-                ? "General"
-                : settingsSection === "models"
-                  ? "Models"
-                  : "Archived chats"}
-            </h1>
-          </header>
-          {settingsSection === "general" && (
-            <section className="settings-card">
-              <div className="theme-setting">
-                <span>Appearance</span>
-                <div className="theme-options" role="group" aria-label="Appearance">
-                  {(["light", "dark"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className={theme === option ? "selected" : ""}
-                      aria-pressed={theme === option}
-                      onClick={() => setTheme(option)}
-                    >
-                      {option === "light" ? "Light" : "Dark"}
-                    </button>
-                  ))}
-                </div>
+        ))}
+      </aside>
+      <main className="settings-content">
+        <header>
+          <h1>
+            {settingsSection === "general"
+              ? "General"
+              : settingsSection === "models"
+                ? "Models"
+                : "Archived chats"}
+          </h1>
+        </header>
+        {settingsSection === "general" && (
+          <section className="settings-card">
+            <div className="theme-setting">
+              <span>Appearance</span>
+              <div className="theme-options" role="group" aria-label="Appearance">
+                {(["light", "dark"] as const).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={theme === option ? "selected" : ""}
+                    aria-pressed={theme === option}
+                    onClick={() => setTheme(option)}
+                  >
+                    {option === "light" ? "Light" : "Dark"}
+                  </button>
+                ))}
               </div>
-            </section>
-          )}
-          {settingsSection === "models" && (
-            <section className="settings-card model-settings">
-              <label>
-                Provider
-                <select
-                  value={selection.provider}
-                  onChange={(event) => {
-                    const provider = state.providers.find((item) => item.id === event.target.value);
-                    if (provider)
-                      setSelection({
-                        provider: provider.id,
-                        model:
-                          provider.models.find((item) => item.recommended)?.id ??
-                          provider.models[0]?.id ??
-                          "",
-                      });
-                  }}
-                >
-                  {state.providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.name}
+            </div>
+          </section>
+        )}
+        {settingsSection === "models" && (
+          <section className="settings-card model-settings">
+            <label>
+              Provider
+              <select
+                value={selection.provider}
+                onChange={(event) => {
+                  const provider = state.providers.find((item) => item.id === event.target.value);
+                  if (provider)
+                    setSelection({
+                      provider: provider.id,
+                      model:
+                        provider.models.find((item) => item.recommended)?.id ??
+                        provider.models[0]?.id ??
+                        "",
+                    });
+                }}
+              >
+                {state.providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Model
+              <select
+                value={selection.model}
+                onChange={(event) =>
+                  setSelection((current) => ({ ...current, model: event.target.value }))
+                }
+              >
+                {state.providers
+                  .find((item) => item.id === selection.provider)
+                  ?.models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
                     </option>
                   ))}
-                </select>
-              </label>
-              <label>
-                Model
-                <select
-                  value={selection.model}
-                  onChange={(event) =>
-                    setSelection((current) => ({ ...current, model: event.target.value }))
-                  }
-                >
-                  {state.providers
-                    .find((item) => item.id === selection.provider)
-                    ?.models.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label>
-                API key
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder={
-                    state.hasCredential
-                      ? "Saved in macOS Keychain"
-                      : state.providers.find((item) => item.id === selection.provider)
-                          ?.environmentVariable
-                  }
-                />
-              </label>
-              <p>Your key is validated and saved in macOS Keychain.</p>
-              <button className="primary" onClick={() => void chooseModel()}>
-                Save model
+              </select>
+            </label>
+            <label>
+              API key
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder={
+                  state.hasCredential
+                    ? "Saved in macOS Keychain"
+                    : state.providers.find((item) => item.id === selection.provider)
+                        ?.environmentVariable
+                }
+              />
+            </label>
+            <p>Your key is validated and saved in macOS Keychain.</p>
+            <button className="primary" onClick={() => void chooseModel()}>
+              Save model
+            </button>
+          </section>
+        )}
+        {settingsSection === "archived" && (
+          <section className="settings-card archived-list">
+            <div className="archived-list-header">
+              <span>{state.archivedSessions.length} archived chats</span>
+              <button
+                className="destructive-button"
+                disabled={!state.archivedSessions.length}
+                onClick={() => setDeleteAllArchivedOpen(true)}
+              >
+                Delete all
               </button>
-            </section>
-          )}
-          {settingsSection === "archived" && (
-            <section className="settings-card archived-list">
-              {state.archivedSessions.length ? (
-                state.archivedSessions.map((session) => (
-                  <div className="archived-row" key={session.id}>
-                    <div>
-                      <strong>
-                        {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
-                      </strong>
-                      <small>{session.workspace}</small>
-                    </div>
-                    <button onClick={() => void restoreSession(session.id)}>Restore</button>
+            </div>
+            {state.archivedSessions.length ? (
+              state.archivedSessions.map((session) => (
+                <div className="archived-row" key={session.id}>
+                  <div>
+                    <strong>
+                      {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
+                    </strong>
+                    <small>{session.workspace}</small>
                   </div>
-                ))
-              ) : (
-                <p className="empty-settings">Archived chats will appear here.</p>
-              )}
-            </section>
-          )}
-          {error && <p className="settings-error">{error}</p>}
-        </main>
-      </div>
-    );
+                  <div className="archived-actions">
+                    <button onClick={() => void restoreSession(session.id)}>Restore</button>
+                    <button
+                      className="destructive-button"
+                      onClick={() => setDeleteSessionId(session.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="empty-settings">Archived chats will appear here.</p>
+            )}
+          </section>
+        )}
+        {error && <p className="settings-error">{error}</p>}
+      </main>
+    </div>
+  );
+
+  if (settingsOpen) return settingsPage;
 
   return (
     <div
-      className={`app-shell ${reviewOpen ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
+      className={`app-shell ${reviewOpen ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"} ${sidebarResizeActive ? "sidebar-resizing" : ""}`}
       data-theme={theme}
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
     >
       <aside className="sidebar" aria-label="Chats" hidden={!sidebarOpen}>
         <div className="brand">
@@ -758,64 +995,131 @@ export function DesktopApp(): React.JSX.Element {
         </button>
         <div className="section-label sidebar-section-title">Projects</div>
         <div className="project-session-list">
-          {projectGroups.length ? projectGroups.map((group) => (
-            <section className="project-session-group" key={group.workspace}>
-              <div className="project-heading" title={group.workspace}>
-                <Icon name="folder" />
-                <span>{group.name}</span>
-              </div>
-              {group.sessions.map((session) => (
-                <div
-                  key={session.id}
-                  className={`session-row ${session.id === state?.activeSessionId ? "selected" : ""}`}
-                >
-                  <button className="session" onClick={() => void openSession(session.id)}>
-                    <span className="session-title" title={session.title}>{session.title}</span>
-                    <small>
-                      {session.runtime.kind === "external"
-                        ? state?.agents.find((agent) => agent.id === session.runtime.agentId)?.name ??
-                          session.runtime.agentId
-                        : "Kairo"} · {state?.liveSessions[session.id]?.state ?? "idle"}
-                    </small>
-                  </button>
-                  <button
-                    className="session-menu-button"
-                    aria-label="Chat actions"
-                    title="Chat actions"
-                    onClick={() =>
-                      setSessionMenuId(sessionMenuId === session.id ? undefined : session.id)
-                    }
-                  >
-                    ···
-                  </button>
-                  {sessionMenuId === session.id && (
-                    <div className="session-menu">
-                      <button
-                        disabled={["running", "waiting", "cancelling"].includes(
-                          state?.liveSessions[session.id]?.state ?? "",
-                        )}
-                        onClick={() => void changeSession("archive", session.id)}
-                      >
-                        Archive
-                      </button>
-                      <button
-                        className="destructive"
-                        disabled={["running", "waiting", "cancelling"].includes(
-                          state?.liveSessions[session.id]?.state ?? "",
-                        )}
-                        onClick={() => {
-                          setSessionMenuId(undefined);
-                          setDeleteSessionId(session.id);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </section>
-          )) : (
+          {projectGroups.length ? (
+            projectGroups.map((group) => {
+              const collapsed = collapsedProjects[group.workspace] ?? false;
+              const sortedSessions = [...group.sessions].sort(
+                (left, right) =>
+                  Number(pinnedSessions.includes(right.id)) -
+                  Number(pinnedSessions.includes(left.id)),
+              );
+              const projectBusy = group.sessions.some((session) =>
+                ["running", "waiting", "cancelling"].includes(
+                  state?.liveSessions[session.id]?.state ?? "",
+                ),
+              );
+              const listId = `project-sessions-${encodeURIComponent(group.workspace)}`;
+              return (
+                <section className="project-session-group" key={group.workspace}>
+                  <div className="project-heading-row">
+                    <button
+                      className="project-heading"
+                      title={group.workspace}
+                      aria-expanded={!collapsed}
+                      aria-controls={listId}
+                      onClick={() =>
+                        setCollapsedProjects((current) => ({
+                          ...current,
+                          [group.workspace]: !collapsed,
+                        }))
+                      }
+                    >
+                      <Icon
+                        name="chevron"
+                        className={`project-chevron ${collapsed ? "collapsed" : "expanded"}`}
+                      />
+                      <Icon name="folder" />
+                      <span>{group.name}</span>
+                    </button>
+                    <button
+                      className="project-menu-button"
+                      aria-label={`Project actions for ${group.name}`}
+                      title="Project actions"
+                      onClick={() =>
+                        setProjectMenuWorkspace(
+                          projectMenuWorkspace === group.workspace ? undefined : group.workspace,
+                        )
+                      }
+                    >
+                      ···
+                    </button>
+                    {projectMenuWorkspace === group.workspace && (
+                      <div className="session-menu project-menu">
+                        <button
+                          disabled={projectBusy}
+                          title={projectBusy ? "Stop project chats before archiving" : undefined}
+                          onClick={() => void archiveProject(group.workspace)}
+                        >
+                          Archive all chats
+                        </button>
+                        <button
+                          className="destructive"
+                          disabled={projectBusy}
+                          title={projectBusy ? "Stop project chats before deleting" : undefined}
+                          onClick={() => {
+                            setProjectMenuWorkspace(undefined);
+                            setDeleteProjectWorkspace(group.workspace);
+                          }}
+                        >
+                          Delete project
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="project-session-items" id={listId} hidden={collapsed}>
+                    {sortedSessions.map((session) => {
+                      const sessionState = state?.liveSessions[session.id]?.state;
+                      const isSessionBusy = ["running", "waiting", "cancelling"].includes(
+                        sessionState ?? "",
+                      );
+                      const isPinned = pinnedSessions.includes(session.id);
+                      return (
+                        <div
+                          key={session.id}
+                          className={`session-row ${session.id === state?.activeSessionId ? "selected" : ""}`}
+                        >
+                          <button
+                            className="session"
+                            aria-current={
+                              session.id === state?.activeSessionId ? "page" : undefined
+                            }
+                            onClick={() => void openSession(session.id)}
+                          >
+                            <span className="session-title" title={session.title}>
+                              {session.title}
+                            </span>
+                          </button>
+                          <div className="session-row-actions">
+                            <button
+                              className={`session-action-button ${isPinned ? "pinned" : ""}`}
+                              aria-label={isPinned ? "Unpin chat" : "Pin chat"}
+                              aria-pressed={isPinned}
+                              title={isPinned ? "Unpin chat" : "Pin chat"}
+                              onClick={() => togglePinnedSession(session.id)}
+                            >
+                              <Icon name="pin" />
+                            </button>
+                            <button
+                              className="session-action-button"
+                              aria-label="Archive chat"
+                              title="Archive chat"
+                              disabled={isSessionBusy}
+                              onClick={() => void changeSession("archive", session.id)}
+                            >
+                              <Icon name="archive" />
+                            </button>
+                            {isSessionBusy && (
+                              <span className="session-spinner" aria-label="Running" />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })
+          ) : (
             <p className="empty-session-list">Open a project to see sessions</p>
           )}
         </div>
@@ -830,6 +1134,51 @@ export function DesktopApp(): React.JSX.Element {
         </button>
       </aside>
 
+      <div
+        className={`sidebar-resize-handle ${sidebarResizeActive ? "active" : ""}`}
+        role="separator"
+        aria-label="Resize sidebar"
+        aria-orientation="vertical"
+        aria-valuemin={SIDEBAR_MIN_WIDTH}
+        aria-valuemax={SIDEBAR_MAX_WIDTH}
+        aria-valuenow={sidebarWidth}
+        tabIndex={sidebarOpen ? 0 : -1}
+        hidden={!sidebarOpen}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setSidebarResizeActive(true);
+        }}
+        onPointerMove={(event) => {
+          if (sidebarResizeActive) resizeSidebar(event.clientX);
+        }}
+        onPointerUp={(event) => {
+          setSidebarResizeActive(false);
+          if (event.currentTarget.hasPointerCapture(event.pointerId))
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onLostPointerCapture={() => setSidebarResizeActive(false)}
+        onDoubleClick={() => {
+          setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+          setSidebarOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            resizeSidebar(sidebarWidth - 16);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            resizeSidebar(sidebarWidth + 16);
+          } else if (event.key === "Home") {
+            event.preventDefault();
+            resizeSidebar(SIDEBAR_MIN_WIDTH);
+          } else if (event.key === "End") {
+            event.preventDefault();
+            resizeSidebar(SIDEBAR_MAX_WIDTH);
+          }
+        }}
+      />
+
       <main className="conversation">
         <header className="topbar">
           <button
@@ -842,15 +1191,22 @@ export function DesktopApp(): React.JSX.Element {
             <Icon name="sidebar" />
           </button>
           <div className="workspace-title">
-            <strong>
+            <strong
+              title={
+                activeSession?.workspace.split("/").filter(Boolean).at(-1) ?? "Choose a project"
+              }
+            >
               {activeSession?.workspace.split("/").filter(Boolean).at(-1) ?? "Choose a project"}
             </strong>
-            <span>{activeSession?.workspace ?? "Open a local folder to get started"}</span>
+            <span title={activeSession?.workspace}>
+              {activeSession?.workspace ?? "Open a local folder to get started"}
+            </span>
           </div>
           <div className="top-actions">
             <button
               className={`review-toggle ${reviewOpen ? "selected" : ""}`}
               disabled={!activeSession}
+              title={reviewOpen ? "Close review" : "Review workspace changes"}
               aria-expanded={reviewOpen}
               aria-controls="workspace-panel"
               onClick={() => setReviewOpen(!reviewOpen)}
@@ -1044,8 +1400,8 @@ export function DesktopApp(): React.JSX.Element {
                     }
                   }}
                   placeholder={`Ask ${externalAgent?.name ?? "Kairo"} to work on your project…`}
-                  aria-label="Message Kairo"
-                  rows={3}
+                  aria-label={`Message ${externalAgent?.name ?? "Kairo"}`}
+                  rows={1}
                 />
                 <div className="composer-footer">
                   <div className="composer-controls">
@@ -1096,6 +1452,7 @@ export function DesktopApp(): React.JSX.Element {
                       </button>
                     )}
                   </div>
+                  <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
                   {busy ? (
                     <button
                       className="stop-button"
@@ -1135,13 +1492,18 @@ export function DesktopApp(): React.JSX.Element {
         hidden={!reviewOpen}
       >
         <div className="workbench-tabs">
-          <button className={pane === "changes" ? "active" : ""} onClick={() => setPane("changes")}>
-            Changes <span>{changes.length}</span>
-          </button>
-          <button className={pane === "files" ? "active" : ""} onClick={() => setPane("files")}>
-            Files
-          </button>
-          <button className="refresh-button" onClick={() => void refreshChanges()} title="Refresh">
+          <span className="review-heading">
+            Changes{" "}
+            <span>
+              {changes.length} {changes.length === 1 ? "file" : "files"}
+            </span>
+          </span>
+          <button
+            className="refresh-button"
+            aria-label="Refresh changed files"
+            onClick={() => void refreshChanges()}
+            title="Refresh"
+          >
             <Icon name="refresh" />
           </button>
           <button
@@ -1152,106 +1514,81 @@ export function DesktopApp(): React.JSX.Element {
             <Icon name="close" />
           </button>
         </div>
-        {pane === "changes" ? (
-          <div className="file-list">
+        {viewingChanges ? (
+          <section className="change-detail">
+            <div className="change-detail-header">
+              <button className="back-to-changes" onClick={() => setViewingChanges(false)}>
+                ← All changes
+              </button>
+              <strong>
+                {changes.length} {changes.length === 1 ? "file" : "files"} changed
+              </strong>
+              <span className="change-summary-stats">
+                <span className="addition-count">
+                  +{changes.reduce((total, item) => total + item.additions, 0)}
+                </span>
+                <span className="deletion-count">
+                  −{changes.reduce((total, item) => total + item.deletions, 0)}
+                </span>
+              </span>
+            </div>
+            <div className="diff-scroll">
+              {changes.map((change) => (
+                <article className="file-diff-section" key={change.path}>
+                  <header className="file-diff-header">
+                    <span className="filetype-mark">{fileExtension(change.path)}</span>
+                    <strong title={change.path}>{change.path}</strong>
+                    <span className="change-summary-stats">
+                      <span className="addition-count">+{change.additions}</span>
+                      <span className="deletion-count">−{change.deletions}</span>
+                    </span>
+                    <button
+                      className="cursor-button"
+                      onClick={() => void openInCursor(change.path)}
+                    >
+                      Open in Cursor
+                    </button>
+                  </header>
+                  {change.unavailable && <div className="diff-notice">{change.unavailable}</div>}
+                  <div className="diff-rows-wrap">
+                    <DiffContents diff={change.diff} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <section className="changes-overview">
+            <div className="changes-overview-title">
+              <span>Edited files</span>
+              <button
+                className="view-changes-button"
+                disabled={!changes.length}
+                onClick={() => setViewingChanges(true)}
+              >
+                View changes ↗
+              </button>
+            </div>
             {changes.length ? (
-              changes.map((path) => (
-                <button
-                  key={path}
-                  className={`file-row ${selectedFile === path ? "selected" : ""}`}
-                  onClick={() => void openFile(path, true)}
-                >
-                  <span className="change-dot" />
-                  {path}
-                </button>
-              ))
+              <div className="change-summary-list">
+                {changes.map((change) => (
+                  <div className="change-summary-row" key={change.path}>
+                    <div className="change-summary-file" title={change.path}>
+                      <span className="filetype-mark">{fileExtension(change.path)}</span>
+                      <span>{change.path}</span>
+                    </div>
+                    <div className="change-summary-stats">
+                      <span className="addition-count">+{change.additions}</span>
+                      <span className="deletion-count">−{change.deletions}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="empty-small">No working tree changes</div>
             )}
-          </div>
-        ) : (
-          <div className="file-list">
-            {files.map((path) => (
-              <button
-                key={path}
-                className={`file-row ${selectedFile === path ? "selected" : ""}`}
-                onClick={() => void openFile(path)}
-              >
-                {path}
-              </button>
-            ))}
-          </div>
+          </section>
         )}
-        <div className="editor-area">
-          {selectedFile ? (
-            <>
-              <div className="editor-heading">
-                <span title={selectedFile}>{selectedFile}</span>
-                <div>
-                  {pane === "changes" && (
-                    <button onClick={() => void openFile(selectedFile, !showDiff)}>
-                      {showDiff ? "Edit" : "Diff"}
-                    </button>
-                  )}
-                  {!showDiff && (
-                    <button
-                      className="save-button"
-                      disabled={workspaceBusy || fileContent === savedContent}
-                      onClick={async () => {
-                        try {
-                          await window.kairo.saveFile(
-                            state.activeSessionId!,
-                            selectedFile,
-                            fileContent,
-                          );
-                          setSavedContent(fileContent);
-                          await refreshChanges();
-                        } catch (cause) {
-                          setError((cause as Error).message);
-                        }
-                      }}
-                    >
-                      Save
-                    </button>
-                  )}
-                </div>
-              </div>
-              {showDiff ? (
-                <>
-                  <div className="diff-notice">{diffNotice}</div>
-                  <pre className="diff-content">
-                    {diff.split("\n").map((line, index) => (
-                      <div
-                        key={index}
-                        className={
-                          line.startsWith("+")
-                            ? "diff-add"
-                            : line.startsWith("-")
-                              ? "diff-remove"
-                              : ""
-                        }
-                      >
-                        {line || " "}
-                      </div>
-                    ))}
-                  </pre>
-                </>
-              ) : (
-                <textarea
-                  className="editor"
-                  aria-label={selectedFile}
-                  readOnly={workspaceBusy}
-                  wrap="off"
-                  value={fileContent}
-                  onChange={(event) => setFileContent(event.target.value)}
-                  spellCheck={false}
-                />
-              )}
-            </>
-          ) : (
-            <div className="empty-editor">Select a file to view or edit it.</div>
-          )}
-        </div>
       </aside>
 
       {newSessionOpen && (
@@ -1271,7 +1608,13 @@ export function DesktopApp(): React.JSX.Element {
             <p>Choose an agent or model, then select the project folder it can work in.</p>
             <div className="session-folder-picker">
               <span className="session-picker-caption">Project folder</span>
-              <button onClick={() => void pickSessionWorkspace()} disabled={workspacePickerBusy}>
+              <button
+                autoFocus
+                aria-label="Choose project folder"
+                title={newSessionWorkspace || "Choose the project folder for this session"}
+                onClick={() => void pickSessionWorkspace()}
+                disabled={workspacePickerBusy}
+              >
                 <Icon name="folder" />
                 {workspacePickerBusy
                   ? "Choose a folder…"
@@ -1286,7 +1629,6 @@ export function DesktopApp(): React.JSX.Element {
             <label className="session-picker-label">
               Agent or model
               <select
-                autoFocus
                 value={newSessionChoice}
                 onChange={(event) => setNewSessionChoice(event.target.value)}
               >
@@ -1298,7 +1640,8 @@ export function DesktopApp(): React.JSX.Element {
                       value={JSON.stringify(["agent", agent.id])}
                       disabled={!agent.installed}
                     >
-                      {agent.name}{!agent.installed ? " · not installed" : ""}
+                      {agent.name}
+                      {!agent.installed ? " · not installed" : ""}
                     </option>
                   ))}
                 </optgroup>
@@ -1356,6 +1699,57 @@ export function DesktopApp(): React.JSX.Element {
                 onClick={() => void changeSession("delete", deleteSessionId)}
               >
                 Delete chat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteAllArchivedOpen && (
+        <div className="modal-backdrop">
+          <div
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-all-archived-title"
+          >
+            <h2 id="delete-all-archived-title">Delete all archived chats?</h2>
+            <p>
+              This permanently deletes all {state?.archivedSessions.length ?? 0} archived chats and
+              their task history. This cannot be undone.
+            </p>
+            <div>
+              <button onClick={() => setDeleteAllArchivedOpen(false)}>Cancel</button>
+              <button className="destructive-button" onClick={() => void deleteAllArchived()}>
+                Delete all chats
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteProjectWorkspace && (
+        <div className="modal-backdrop">
+          <div
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-project-title"
+          >
+            <h2 id="delete-project-title">Delete project?</h2>
+            <p>
+              This permanently deletes all active and archived chats and task history for this
+              project. Files in the folder will remain.
+            </p>
+            <code className="project-delete-path">{deleteProjectWorkspace}</code>
+            <div>
+              <button onClick={() => setDeleteProjectWorkspace(undefined)}>Cancel</button>
+              <button
+                className="destructive-button"
+                disabled={projectDeleteBusy}
+                onClick={() => void deleteProject(deleteProjectWorkspace)}
+              >
+                {projectDeleteBusy ? "Deleting…" : "Delete project"}
               </button>
             </div>
           </div>
@@ -1576,6 +1970,8 @@ function ChatMessage({
 type IconName =
   | "plus"
   | "folder"
+  | "pin"
+  | "archive"
   | "settings"
   | "sidebar"
   | "panel"
@@ -1588,6 +1984,18 @@ function Icon({ name, className }: { name: IconName; className?: string }): Reac
   const paths: Record<IconName, React.ReactNode> = {
     plus: <path d="M12 5v14M5 12h14" />,
     folder: <path d="M3 7V5h6l2 2h10v12H3Z" />,
+    pin: (
+      <>
+        <path d="m16 3 5 5-4 1-3 5-4-4 5-3 1-4Z" />
+        <path d="m2 22 8-8" />
+      </>
+    ),
+    archive: (
+      <>
+        <path d="M3 4h18v4H3z" />
+        <path d="M5 8v12h14V8M10 12h4" />
+      </>
+    ),
     settings: (
       <>
         <path d="M4 7h16M4 17h16" />
