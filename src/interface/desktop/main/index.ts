@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   dialog,
+  shell,
   ipcMain,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
@@ -44,12 +45,13 @@ function startBackend(): Promise<void> {
   backend.on("error", (error) => {
     for (const request of pending.values()) request.reject(error);
     pending.clear();
-    send("task:state", { sessionId: "", state: "error", error: error.message });
+    send("runtime:error", { error: error.message });
   });
   backend.on("exit", (code) => {
     const error = new Error(`Kairo runtime stopped${code === null ? "" : ` (${code})`}.`);
     for (const request of pending.values()) request.reject(error);
     pending.clear();
+    if (!backendShutdownComplete) send("runtime:error", { error: error.message });
   });
   const ready = new Promise<void>((resolveReady, rejectReady) => {
     const lines = createInterface({ input: backend!.stdout });
@@ -124,6 +126,16 @@ function registerIpc(): void {
   });
   handle("session:open", "session:open");
   handle("session:new", "session:new");
+  handle("session:runtime", "session:runtime");
+  handle("agents:refresh", "agents:refresh");
+  ipcMain.handle("agents:login", async (event, agentId: unknown) => {
+    assertTrusted(event);
+    const result = await request<{ url: string }>("agents:login", [agentId]);
+    const url = new URL(result.url);
+    if (url.protocol !== "https:" || url.hostname !== "auth.openai.com")
+      throw new Error("Agent returned an unrecognized sign-in URL.");
+    await shell.openExternal(url.href);
+  });
   handle("session:archive", "session:archive");
   handle("session:restore", "session:restore");
   handle("session:delete", "session:delete");
@@ -185,6 +197,20 @@ app
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-app.on("before-quit", () => {
-  backend?.stdin.end(`${JSON.stringify({ id: ++nextRequestId, method: "shutdown", args: [] })}\n`);
+let backendShutdownComplete = false;
+let backendShutdownStarted = false;
+app.on("before-quit", (event) => {
+  if (backendShutdownComplete || !backend) return;
+  event.preventDefault();
+  if (backendShutdownStarted) return;
+  backendShutdownStarted = true;
+  void request("shutdown")
+    .catch((error: unknown) => {
+      console.error(`Kairo runtime shutdown failed: ${(error as Error).message}`);
+    })
+    .finally(() => {
+      backendShutdownComplete = true;
+      backend?.stdin.end();
+      app.quit();
+    });
 });

@@ -1,27 +1,17 @@
 # Kairo
 
-Kairo is a desktop coding agent for local repositories. It helps you inspect a project, plan or implement changes, review edits, and verify the result.
+Kairo is a desktop workspace for coding agents working on local repositories. Run multiple user-managed native chat sessions, inspect their activity, and review workspace files and diffs. There is no embedded terminal UI.
 
-The desktop app combines a local workspace, a bounded agent loop, approval controls, resumable conversations, and an integrated file and diff review surface.
+## Two ways to work
 
-## What it does
+- **Kairo agent:** bring an API key for Gemini, Groq, Mistral, or OpenRouter directly into Model settings. The existing Kairo runtime provides repository context, approval controls, verification, and optional Jev routing.
+- **External agents:** use an installed agent's official runtime and authentication. The first native-chat adapter supports **Codex CLI**, through its official [app-server protocol](https://developers.openai.com/codex/app-server). Its CLI runs as a background service and streams responses, tool activity, and supported approvals into Kairo.
 
-- Opens local project folders and keeps separate resumable chats for each workspace.
-- Builds a language-neutral repository snapshot and selects relevant files for each model request.
-- Reads and searches inside the workspace; agent edits and shell commands follow Kairo's configured approval rules.
-- Recommends project checks after changes and records whether the latest eligible verification passed.
-- Shows task progress, tool activity, approval requests, changed files, and working-tree diffs.
-- Supports Gemini, Groq, Mistral, and OpenRouter, with optional Jev safety and model routing.
+External-agent support is adapter-based. Claude Code and other agents are not integrated yet; arbitrary terminal commands are not treated as native-chat agents. Automatic delegation and coordination are planned after user-managed sessions are stable.
 
-## Agent safeguards
+## Run from source
 
-Kairo confines file tools to the opened workspace and rejects symlink escapes. Shell commands run from the workspace and require approval. Agent loops, tool calls, retries, and verification repairs are bounded. Kairo does not treat a model's completion message as proof that a task passed; changed work must have successful verification evidence.
-
-Repository snapshots store derived metadata rather than source contents. Session conversations and tool results are persisted in the local SQLite state store so chats can be resumed. Task traces retain operation metadata for review.
-
-## Run the desktop app from source
-
-Requirements: macOS, Node.js 24.21+, pnpm, and a provider API key. The current desktop app uses the macOS Keychain for credentials and is run from the project checkout.
+Requirements: macOS, Node.js 24.21+, pnpm, and either a provider API key or an installed, supported external agent. Kairo uses the macOS Keychain for its own provider credentials.
 
 ```bash
 git clone https://github.com/thefrikidude/kairo.git
@@ -30,9 +20,17 @@ pnpm install
 pnpm desktop:dev
 ```
 
-Use **Open project** to select a workspace, then add a provider key in Model settings. Kairo validates the key and stores it in the macOS Keychain.
+1. Use **Open project** to select a local workspace.
+2. Choose **Kairo · API key** or **Codex** in the Agent selector before sending the first message. Use **Refresh agents** after installing the CLI.
+3. For Kairo, enter a provider key in Model settings. For Codex, Kairo reuses the official CLI login; if needed, **Sign in to Codex** opens its official browser authentication flow. Kairo does not import or store Codex account tokens.
+4. Select a model and send a message. External models come from the agent's live catalog; **Agent default model** follows the CLI configuration. An unavailable configured default produces an error; select a model from the catalog instead.
+5. Create additional chats and switch between them while tasks run. Session status appears in the sidebar. Open a waiting chat to answer its approval request.
 
-Build and preview the local desktop bundle with:
+A chat keeps its agent identity once its conversation starts. Models can change between turns; create a new chat to use another agent. Each new chat inherits the current chat's runtime choice.
+
+Chats opened in the same project currently share its files. Review shows the workspace's changes, not per-agent ownership. Use separate folders/worktrees for isolated work; automatic worktree management is not implemented. File saves are blocked while a session is working in that workspace.
+
+Build and preview with:
 
 ```bash
 pnpm desktop:build
@@ -41,6 +39,14 @@ pnpm desktop:preview
 
 Installers, signing, and release distribution are not configured yet.
 
+## Runtime safeguards and persistence
+
+The built-in Kairo agent retains workspace-confined file tools, symlink protection, command approvals, bounded model/tool loops, and verification/repair behavior. External agents use their own runtime safeguards. The Codex adapter selects read-only access in Plan mode and workspace-write access in Build mode, with human approval requests routed into Kairo. It never launches Codex with permission or sandbox bypass flags.
+
+The initial Codex bridge handles command and file-change approvals. Other server requests, including structured questions and additional permission grants, fail explicitly rather than being automatically approved. External-agent turn completion is not independent proof of verification: changed work is marked as requiring verification.
+
+SQLite preserves chat history, runtime/model choices, and official external conversation IDs. Codex conversations resume after restarting Kairo. Live processes are managed for the app's lifetime and are stopped on app exit; quitting does not leave a detached Kairo service running. Interrupted turns remain interrupted until the user sends another message.
+
 ## Development
 
 ```bash
@@ -48,11 +54,4 @@ pnpm check
 pnpm test
 ```
 
-The application is organized into domain, application, infrastructure, and desktop interface layers. The Electron renderer is isolated from Node.js; this does not add an OS-level sandbox for approved shell commands.
-
-## Direction
-
-1. Keep the single-agent loop dependable with stronger recovery, verification, and useful traces.
-2. Add evidence-backed verification adapters for more languages and ecosystems.
-3. Improve the desktop workspace for efficient file review and human steering.
-4. Expand realistic repository evaluations and measure reliability, cost, and latency.
+The application is organized into domain, application, infrastructure, and desktop interface layers. The Electron renderer is isolated from Node.js and agent processes communicate over private stdio, without a network listener. Add native-chat agent adapters to the infrastructure registry by implementing discovery, official authentication, streamed turns, approvals, cancellation, and resume identity.

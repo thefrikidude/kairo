@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DesktopApproval, DesktopBootstrap } from "../../shared/api.js";
+import type { DesktopBootstrap, LiveSession } from "../../shared/api.js";
+import type { SessionRuntime } from "../../../../domain/agent-runtime.js";
 import type { ModelSelection, Message, TaskEvent } from "../../../../domain/models.js";
 
 type Mode = "build" | "plan";
@@ -9,13 +10,46 @@ type SettingsSection = "general" | "models" | "archived";
 
 export function DesktopApp(): React.JSX.Element {
   const [state, setState] = useState<DesktopBootstrap>();
-  const [busy, setBusy] = useState(false);
-  const [activity, setActivity] = useState("");
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [showWorkedDuration, setShowWorkedDuration] = useState(false);
-  const [toolActivity, setToolActivity] = useState<TaskEvent[]>([]);
-  const [stream, setStream] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [, setClock] = useState(0);
+  const activeSession = state?.sessions.find((item) => item.id === state.activeSessionId);
+  const live = state?.activeSessionId ? state.liveSessions[state.activeSessionId] : undefined;
+  const busy = Boolean(live && ["running", "waiting", "cancelling"].includes(live.state));
+  const stream = busy ? (live?.stream ?? "") : "";
+  const toolActivity = live?.events ?? [];
+  const activity =
+    live?.state === "waiting"
+      ? "Waiting for approval"
+      : live?.state === "cancelling"
+        ? "Stopping…"
+        : "Working";
+  const elapsedSeconds = live
+    ? Math.floor(((live.finishedAt ?? Date.now()) - live.startedAt) / 1000)
+    : 0;
+  const showWorkedDuration = Boolean(live && !busy);
+  const approval = state?.approvals.find((item) => item.sessionId === state.activeSessionId);
+  const externalAgent =
+    activeSession?.runtime.kind === "external"
+      ? state?.agents.find(
+          (item) =>
+            activeSession.runtime.kind === "external" && item.id === activeSession.runtime.agentId,
+        )
+      : undefined;
+  const runtimeLocked = Boolean(state?.messages.length || activeSession?.externalSessionId);
+  const workspaceBusy = Boolean(
+    state?.sessions.some(
+      (session) =>
+        session.workspace === activeSession?.workspace &&
+        ["running", "waiting", "cancelling"].includes(state.liveSessions[session.id]?.state),
+    ),
+  );
+  const [agentSetupBusy, setAgentSetupBusy] = useState(false);
+  const [loginPending, setLoginPending] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const prompt = state?.activeSessionId ? (drafts[state.activeSessionId] ?? "") : "";
+  const setPrompt = (text: string) => {
+    if (state?.activeSessionId)
+      setDrafts((current) => ({ ...current, [state.activeSessionId!]: text }));
+  };
   const [mode, setMode] = useState<Mode>("build");
   const [pane, setPane] = useState<Pane>("changes");
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -35,7 +69,6 @@ export function DesktopApp(): React.JSX.Element {
   const [diff, setDiff] = useState("");
   const [diffNotice, setDiffNotice] = useState("");
   const [showDiff, setShowDiff] = useState(false);
-  const [approval, setApproval] = useState<DesktopApproval>();
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
@@ -55,15 +88,13 @@ export function DesktopApp(): React.JSX.Element {
   const [apiKey, setApiKey] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  const taskStartedAt = useRef<number | undefined>(undefined);
   const followTranscript = useRef(true);
+  const activeSessionRef = useRef<string | undefined>(undefined);
+  const navigationRevision = useRef(0);
 
   useEffect(() => {
-    if (!busy || taskStartedAt.current === undefined) return;
-    const updateElapsed = () =>
-      setElapsedSeconds(Math.floor((Date.now() - taskStartedAt.current!) / 1000));
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 1000);
+    if (!busy) return;
+    const timer = window.setInterval(() => setClock((clock) => clock + 1), 1000);
     return () => window.clearInterval(timer);
   }, [busy]);
 
@@ -85,6 +116,7 @@ export function DesktopApp(): React.JSX.Element {
   }, [recentChatsOpen]);
 
   const applyState = useCallback((next: DesktopBootstrap) => {
+    activeSessionRef.current = next.activeSessionId;
     setState(next);
     setSelection(next.config);
     setError("");
@@ -92,14 +124,21 @@ export function DesktopApp(): React.JSX.Element {
 
   const reload = useCallback(
     async (sessionId?: string) => {
+      const revision = navigationRevision.current;
       const next = await window.kairo.bootstrap();
-      if (sessionId && next.activeSessionId !== sessionId) return;
+      if (revision !== navigationRevision.current) return;
+      if (
+        sessionId &&
+        (next.activeSessionId !== sessionId || activeSessionRef.current !== sessionId)
+      )
+        return;
       applyState(next);
       if (next.activeSessionId) {
         const [listed, changed] = await Promise.all([
           window.kairo.listFiles(next.activeSessionId),
           window.kairo.changedFiles(next.activeSessionId),
         ]);
+        if (activeSessionRef.current !== next.activeSessionId) return;
         setFiles(listed);
         setChanges(changed);
       } else {
@@ -114,14 +153,6 @@ export function DesktopApp(): React.JSX.Element {
     async (next: DesktopBootstrap | undefined) => {
       if (!next) return;
       applyState(next);
-      setBusy(false);
-      setActivity("");
-      taskStartedAt.current = undefined;
-      setElapsedSeconds(0);
-      setShowWorkedDuration(false);
-      setToolActivity([]);
-      setStream("");
-      setApproval(undefined);
       followTranscript.current = true;
       setSelectedFile("");
       setFileContent("");
@@ -131,6 +162,7 @@ export function DesktopApp(): React.JSX.Element {
           window.kairo.listFiles(next.activeSessionId),
           window.kairo.changedFiles(next.activeSessionId),
         ]);
+        if (activeSessionRef.current !== next.activeSessionId) return;
         setFiles(listed);
         setChanges(changed);
       } else {
@@ -142,26 +174,31 @@ export function DesktopApp(): React.JSX.Element {
   );
 
   const openWorkspace = async () => {
+    const revision = ++navigationRevision.current;
     try {
-      await focusSession(await window.kairo.openWorkspace());
+      const next = await window.kairo.openWorkspace();
+      if (revision === navigationRevision.current) await focusSession(next);
     } catch (cause) {
       setError((cause as Error).message);
     }
   };
 
   const openSession = async (sessionId: string) => {
-    if (busy) return;
+    const revision = ++navigationRevision.current;
     try {
-      await focusSession(await window.kairo.openSession(sessionId));
+      const next = await window.kairo.openSession(sessionId);
+      if (revision === navigationRevision.current) await focusSession(next);
     } catch (cause) {
       setError((cause as Error).message);
     }
   };
 
   const newSession = async () => {
-    if (!activeSession || busy) return;
+    if (!activeSession) return;
+    const revision = ++navigationRevision.current;
     try {
-      await focusSession(await window.kairo.newSession());
+      const next = await window.kairo.newSession(activeSession.runtime);
+      if (revision === navigationRevision.current) await focusSession(next);
     } catch (cause) {
       setError((cause as Error).message);
     }
@@ -170,64 +207,174 @@ export function DesktopApp(): React.JSX.Element {
   useEffect(() => {
     void reload().catch((cause) => setError((cause as Error).message));
     const stopChunk = window.kairo.onChunk(({ sessionId, chunk }) => {
-      if (
-        sessionId === state?.activeSessionId &&
-        chunk !== "\n[Plan saved]\n" &&
-        !/^\n\[Tool\] [^\n]+\n$/.test(chunk)
-      )
-        setStream((current) => current + chunk);
+      if (chunk === "\n[Plan saved]\n" || /^\n\[Tool\] [^\n]+\n$/.test(chunk)) return;
+      setState((current) => {
+        if (!current) return current;
+        const previous = current.liveSessions[sessionId];
+        if (!previous) return current;
+        return {
+          ...current,
+          liveSessions: {
+            ...current.liveSessions,
+            [sessionId]: { ...previous, stream: previous.stream + chunk },
+          },
+        };
+      });
     });
     const stopTaskEvent = window.kairo.onTaskEvent((event) => {
-      if (event.sessionId !== state?.activeSessionId) return;
-      if (event.kind === "tool_started") {
-        setToolActivity((current) => [...current, event]);
-      } else if (event.kind === "tool_finished") {
-        setToolActivity((current) => {
-          const index = current.findIndex((item) => item.operationId === event.operationId);
-          if (index < 0) return [...current, event];
-          const next = [...current];
-          next[index] = event;
-          return next;
-        });
-      }
+      if (event.kind !== "tool_started" && event.kind !== "tool_finished") return;
+      setState((current) => {
+        const previous = current?.liveSessions[event.sessionId];
+        if (!current || !previous) return current;
+        const events = [...previous.events];
+        const index = events.findIndex((item) => item.operationId === event.operationId);
+        if (index < 0) events.push(event);
+        else events[index] = event;
+        return {
+          ...current,
+          liveSessions: { ...current.liveSessions, [event.sessionId]: { ...previous, events } },
+        };
+      });
     });
     const stopState = window.kairo.onTaskState((event) => {
-      if (event.sessionId !== state?.activeSessionId) return;
-      if (event.state === "running") {
-        taskStartedAt.current = Date.now();
-        setElapsedSeconds(0);
-        setShowWorkedDuration(false);
-        setBusy(true);
-        setActivity("Working");
-        setStream("");
-        setToolActivity([]);
-      } else if (event.state === "cancelling") {
-        setActivity("Stopping…");
-      } else {
-        if (taskStartedAt.current !== undefined) {
-          setElapsedSeconds(Math.floor((Date.now() - taskStartedAt.current) / 1000));
-          setShowWorkedDuration(true);
-          taskStartedAt.current = undefined;
+      setState((current) => {
+        if (!current) return current;
+        const previous = current.liveSessions[event.sessionId];
+        const terminal = ["complete", "cancelled", "error"].includes(event.state);
+        const next: LiveSession = {
+          ...(previous ?? { startedAt: Date.now(), stream: "", events: [] }),
+          state: event.state as LiveSession["state"],
+          error: event.error,
+          finishedAt: terminal ? Date.now() : undefined,
+        };
+        if (
+          event.state === "running" &&
+          previous &&
+          ["complete", "cancelled", "error"].includes(previous.state)
+        ) {
+          next.startedAt = Date.now();
+          next.stream = "";
+          next.events = [];
         }
-        setBusy(false);
-        setActivity("");
-        setStream("");
-        void reload(event.sessionId).finally(() => {
-          if (event.error) setError(event.error!);
-        });
+        return {
+          ...current,
+          liveSessions: { ...current.liveSessions, [event.sessionId]: next },
+          approvals: terminal
+            ? current.approvals.filter((item) => item.sessionId !== event.sessionId)
+            : current.approvals,
+        };
+      });
+      if (["complete", "cancelled", "error"].includes(event.state)) {
+        void reload(event.sessionId).catch((cause) => setError((cause as Error).message));
       }
     });
     const stopApproval = window.kairo.onApproval((request) => {
-      setApproval(request);
-      setActivity("Waiting for approval");
+      setState((current) => {
+        if (!current) return current;
+        const previous = current.liveSessions[request.sessionId];
+        return {
+          ...current,
+          approvals: [...current.approvals.filter((item) => item.id !== request.id), request],
+          liveSessions: previous
+            ? { ...current.liveSessions, [request.sessionId]: { ...previous, state: "waiting" } }
+            : current.liveSessions,
+        };
+      });
+    });
+    const stopRuntimeError = window.kairo.onRuntimeError(({ error: message }) => {
+      setError(message);
+      setState((current) =>
+        current
+          ? {
+              ...current,
+              approvals: [],
+              liveSessions: Object.fromEntries(
+                Object.entries(current.liveSessions).map(([id, session]) => [
+                  id,
+                  ["running", "waiting", "cancelling"].includes(session.state)
+                    ? { ...session, state: "error", error: message, finishedAt: Date.now() }
+                    : session,
+                ]),
+              ),
+            }
+          : current,
+      );
     });
     return () => {
+      stopRuntimeError();
       stopChunk();
       stopTaskEvent();
       stopState();
       stopApproval();
     };
-  }, [reload, state?.activeSessionId]);
+  }, [reload]);
+
+  const refreshAgents = useCallback(async () => {
+    const agents = await window.kairo.refreshAgents();
+    setState((current) => (current ? { ...current, agents } : current));
+    return agents;
+  }, []);
+
+  const stateReady = Boolean(state);
+  useEffect(() => {
+    if (!stateReady) return;
+    void refreshAgents().catch((cause) => setError((cause as Error).message));
+  }, [refreshAgents, stateReady]);
+
+  useEffect(() => {
+    if (!loginPending) return;
+    let disposed = false;
+    let polling = false;
+    const timer = window.setInterval(() => {
+      if (polling) return;
+      polling = true;
+      void refreshAgents()
+        .then((agents) => {
+          if (!disposed && agents.some((agent) => agent.id === "codex" && agent.authenticated))
+            setLoginPending(false);
+        })
+        .catch((cause) => {
+          if (!disposed) {
+            setError((cause as Error).message);
+            setLoginPending(false);
+          }
+        })
+        .finally(() => {
+          polling = false;
+        });
+    }, 3000);
+    const timeout = window.setTimeout(() => setLoginPending(false), 5 * 60_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.clearTimeout(timeout);
+    };
+  }, [loginPending, refreshAgents]);
+
+  const chooseRuntime = async (runtime: SessionRuntime) => {
+    if (!activeSession) return;
+    setAgentSetupBusy(true);
+    try {
+      applyState(await window.kairo.setRuntime(activeSession.id, runtime));
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setAgentSetupBusy(false);
+    }
+  };
+
+  const loginAgent = async () => {
+    if (!externalAgent) return;
+    setAgentSetupBusy(true);
+    try {
+      await window.kairo.loginAgent(externalAgent.id);
+      setLoginPending(true);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setAgentSetupBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!followTranscript.current) return;
@@ -250,7 +397,6 @@ export function DesktopApp(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settingsOpen, deleteSessionId, busy, state?.activeSessionId]);
 
-  const activeSession = state?.sessions.find((item) => item.id === state.activeSessionId);
   const messages = useMemo(
     () =>
       state?.messages.filter(
@@ -264,10 +410,12 @@ export function DesktopApp(): React.JSX.Element {
     try {
       if (review) {
         const result = await window.kairo.diff(state.activeSessionId, path);
+        if (activeSessionRef.current !== state.activeSessionId) return;
         setDiff(result.diff);
         setDiffNotice(result.unavailable ?? "");
       } else {
         const content = await window.kairo.readFile(state.activeSessionId, path);
+        if (activeSessionRef.current !== state.activeSessionId) return;
         setFileContent(content);
         setSavedContent(content);
       }
@@ -297,29 +445,44 @@ export function DesktopApp(): React.JSX.Element {
     const text = prompt.trim();
     setPrompt("");
     followTranscript.current = true;
-    setStream("");
     setState((current) =>
       current
         ? {
             ...current,
             messages: [...current.messages, { role: "user", content: text, createdAt: Date.now() }],
+            liveSessions: {
+              ...current.liveSessions,
+              [current.activeSessionId!]: {
+                state: "running",
+                startedAt: Date.now(),
+                stream: "",
+                events: [],
+              },
+            },
           }
         : current,
     );
-    setBusy(true);
-    taskStartedAt.current = Date.now();
-    setElapsedSeconds(0);
-    setShowWorkedDuration(false);
-    setActivity(mode === "plan" ? "Planning" : "Starting");
     setError("");
     try {
       await window.kairo.send(state.activeSessionId, text, mode);
     } catch (cause) {
-      setBusy(false);
-      taskStartedAt.current = undefined;
-      setElapsedSeconds(0);
-      setShowWorkedDuration(false);
-      setActivity("");
+      setState((current) => {
+        if (!current || current.activeSessionId !== state.activeSessionId) return current;
+        const previous = current.liveSessions[state.activeSessionId!];
+        return {
+          ...current,
+          messages: current.messages.filter(
+            (item, index) =>
+              index !== current.messages.length - 1 ||
+              item.role !== "user" ||
+              item.content !== text,
+          ),
+          liveSessions: {
+            ...current.liveSessions,
+            [state.activeSessionId!]: { ...previous, state: "error", finishedAt: Date.now() },
+          },
+        };
+      });
       setError((cause as Error).message);
     }
   };
@@ -365,8 +528,11 @@ export function DesktopApp(): React.JSX.Element {
   const pickApproval = async (decision: "approve" | "task_file" | "deny") => {
     if (!approval) return;
     await window.kairo.resolveApproval(approval.id, decision);
-    setApproval(undefined);
-    setActivity("Working");
+    setState((current) =>
+      current
+        ? { ...current, approvals: current.approvals.filter((item) => item.id !== approval.id) }
+        : current,
+    );
   };
 
   if (!state)
@@ -537,18 +703,10 @@ export function DesktopApp(): React.JSX.Element {
           <span className="brand-mark">K</span>
           <span>Kairo</span>
         </div>
-        <button
-          className="new-chat"
-          onClick={() => void newSession()}
-          disabled={!activeSession || busy}
-        >
+        <button className="new-chat" onClick={() => void newSession()} disabled={!activeSession}>
           <Icon name="plus" /> New chat
         </button>
-        <button
-          className="open-project-button"
-          onClick={() => void openWorkspace()}
-          disabled={busy}
-        >
+        <button className="open-project-button" onClick={() => void openWorkspace()}>
           <Icon name="folder" /> Open project
         </button>
         <button
@@ -566,15 +724,14 @@ export function DesktopApp(): React.JSX.Element {
               key={session.id}
               className={`session-row ${session.id === state.activeSessionId ? "selected" : ""}`}
             >
-              <button
-                className="session"
-                onClick={() => void openSession(session.id)}
-                disabled={busy}
-              >
+              <button className="session" onClick={() => void openSession(session.id)}>
                 <span>
                   {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
                 </span>
-                <small>{new Date(session.updatedAt).toLocaleDateString()}</small>
+                <small>
+                  {session.runtime.kind === "builtin" ? "Kairo" : session.runtime.agentId} ·{" "}
+                  {state.liveSessions[session.id]?.state ?? "idle"}
+                </small>
               </button>
               <button
                 className="session-menu-button"
@@ -588,12 +745,19 @@ export function DesktopApp(): React.JSX.Element {
               </button>
               {sessionMenuId === session.id && (
                 <div className="session-menu">
-                  <button disabled={busy} onClick={() => void changeSession("archive", session.id)}>
+                  <button
+                    disabled={["running", "waiting", "cancelling"].includes(
+                      state.liveSessions[session.id]?.state,
+                    )}
+                    onClick={() => void changeSession("archive", session.id)}
+                  >
                     Archive
                   </button>
                   <button
                     className="destructive"
-                    disabled={busy}
+                    disabled={["running", "waiting", "cancelling"].includes(
+                      state.liveSessions[session.id]?.state,
+                    )}
                     onClick={() => {
                       setSessionMenuId(undefined);
                       setDeleteSessionId(session.id);
@@ -689,7 +853,11 @@ export function DesktopApp(): React.JSX.Element {
                 </div>
               )}
               {messages.map((message, index) => (
-                <ChatMessage key={`${message.createdAt}-${index}`} message={message} />
+                <ChatMessage
+                  key={`${message.createdAt}-${index}`}
+                  message={message}
+                  agentName={externalAgent?.name ?? "Kairo"}
+                />
               ))}
               {state.task?.mode === "planning" && state.task.plan && (
                 <div className="plan-card">
@@ -739,7 +907,7 @@ export function DesktopApp(): React.JSX.Element {
                 <div className="message assistant">
                   <div className="avatar">K</div>
                   <div className="message-body">
-                    <div className="message-author">Kairo</div>
+                    <div className="message-author">{externalAgent?.name ?? "Kairo"}</div>
                     <Markdown content={stream} />
                   </div>
                 </div>
@@ -762,7 +930,7 @@ export function DesktopApp(): React.JSX.Element {
               )}
               {approval && (
                 <div className="approval-card">
-                  <strong>Kairo needs approval</strong>
+                  <strong>{externalAgent?.name ?? "Kairo"} needs approval</strong>
                   <pre>{approval.description}</pre>
                   <div className="approval-actions">
                     <button onClick={() => void pickApproval("deny")}>Deny</button>
@@ -779,6 +947,78 @@ export function DesktopApp(): React.JSX.Element {
               )}
             </section>
             <div className="composer-wrap">
+              {externalAgent && (!externalAgent.authenticated || externalAgent.error) && (
+                <div className="agent-setup" role="status">
+                  <span>
+                    {externalAgent.error || `${externalAgent.name} needs its official sign-in.`}
+                  </span>
+                  <button
+                    disabled={agentSetupBusy || loginPending}
+                    onClick={() => void loginAgent()}
+                  >
+                    {loginPending ? "Waiting for sign-in…" : `Sign in to ${externalAgent.name}`}
+                  </button>
+                  <button
+                    disabled={agentSetupBusy}
+                    onClick={() =>
+                      void refreshAgents().catch((cause) => setError((cause as Error).message))
+                    }
+                  >
+                    Check sign-in
+                  </button>
+                </div>
+              )}
+              {state.liveSessions[state.activeSessionId!]?.error && (
+                <p className="error" role="alert">
+                  {state.liveSessions[state.activeSessionId!]?.error}
+                </p>
+              )}
+              {activeSession.runtime.kind === "external" &&
+                state.task?.status === "verification_required" && (
+                  <p className="agent-note">
+                    Agent turn finished. Workspace changes still need verification.
+                  </p>
+                )}
+              {runtimeLocked && (
+                <p className="agent-note">Create a new chat to use a different agent.</p>
+              )}
+              <div className="runtime-picker">
+                <label>
+                  Agent{" "}
+                  <select
+                    aria-label="Session agent"
+                    disabled={busy || agentSetupBusy || runtimeLocked}
+                    value={
+                      activeSession.runtime.kind === "builtin"
+                        ? "builtin"
+                        : activeSession.runtime.agentId
+                    }
+                    onChange={(event) =>
+                      void chooseRuntime(
+                        event.target.value === "builtin"
+                          ? { kind: "builtin", selection: state.config }
+                          : { kind: "external", agentId: event.target.value },
+                      )
+                    }
+                  >
+                    <option value="builtin">Kairo · API key</option>
+                    {state.agents.map((agent) => (
+                      <option key={agent.id} value={agent.id} disabled={!agent.installed}>
+                        {agent.name}
+                        {!agent.installed ? " · not installed" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  onClick={() =>
+                    void refreshAgents().catch((cause) => setError((cause as Error).message))
+                  }
+                  disabled={agentSetupBusy}
+                >
+                  Refresh agents
+                </button>
+              </div>
               <div className="composer">
                 <textarea
                   ref={composerRef}
@@ -794,7 +1034,7 @@ export function DesktopApp(): React.JSX.Element {
                       void sendTask();
                     }
                   }}
-                  placeholder="Ask Kairo to work on your project…"
+                  placeholder={`Ask ${externalAgent?.name ?? "Kairo"} to work on your project…`}
                   aria-label="Message Kairo"
                   rows={3}
                 />
@@ -809,17 +1049,43 @@ export function DesktopApp(): React.JSX.Element {
                       <option value="build">Build</option>
                       <option value="plan">Plan</option>
                     </select>
-                    <button
-                      className="model-button"
-                      title={`${state.config.provider} / ${state.config.model}`}
-                      onClick={() => {
-                        setSettingsSection("models");
-                        setSettingsOpen(true);
-                      }}
-                    >
-                      {state.config.model}
-                      <span aria-hidden="true">⌄</span>
-                    </button>
+                    {activeSession.runtime.kind === "external" ? (
+                      <select
+                        aria-label="Agent model"
+                        disabled={busy || agentSetupBusy}
+                        value={activeSession.runtime.model ?? ""}
+                        onChange={(event) =>
+                          void chooseRuntime({
+                            kind: "external",
+                            agentId:
+                              activeSession.runtime.kind === "external"
+                                ? activeSession.runtime.agentId
+                                : "",
+                            model: event.target.value || undefined,
+                          })
+                        }
+                      >
+                        <option value="">Agent default model</option>
+                        {externalAgent?.models.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <button
+                        className="model-button"
+                        disabled={busy}
+                        title={`${state.config.provider} / ${state.config.model}`}
+                        onClick={() => {
+                          setSettingsSection("models");
+                          setSettingsOpen(true);
+                        }}
+                      >
+                        {state.config.model}
+                        <span aria-hidden="true">⌄</span>
+                      </button>
+                    )}
                   </div>
                   {busy ? (
                     <button
@@ -836,7 +1102,12 @@ export function DesktopApp(): React.JSX.Element {
                       aria-label="Send message"
                       title="Send message"
                       onClick={() => void sendTask()}
-                      disabled={!prompt.trim()}
+                      disabled={
+                        !prompt.trim() ||
+                        agentSetupBusy ||
+                        (activeSession.runtime.kind === "external" &&
+                          (!externalAgent?.authenticated || Boolean(externalAgent.error)))
+                      }
                     >
                       <Icon name="arrow" />
                     </button>
@@ -916,7 +1187,7 @@ export function DesktopApp(): React.JSX.Element {
                   {!showDiff && (
                     <button
                       className="save-button"
-                      disabled={busy || fileContent === savedContent}
+                      disabled={workspaceBusy || fileContent === savedContent}
                       onClick={async () => {
                         try {
                           await window.kairo.saveFile(
@@ -960,7 +1231,7 @@ export function DesktopApp(): React.JSX.Element {
                 <textarea
                   className="editor"
                   aria-label={selectedFile}
-                  readOnly={busy}
+                  readOnly={workspaceBusy}
                   wrap="off"
                   value={fileContent}
                   onChange={(event) => setFileContent(event.target.value)}
@@ -1009,6 +1280,10 @@ function ToolActivityRow({ event }: { event: TaskEvent }): React.JSX.Element {
     write_file: "Writing file",
     edit_file: "Editing file",
     run_command: "Running command",
+    commandExecution: "Running command",
+    fileChange: "Editing files",
+    mcpToolCall: "Calling tool",
+    webSearch: "Searching web",
     submit_plan: "Saving plan",
   };
   const label = labels[event.name ?? ""] ?? (event.name ? `Using ${event.name}` : "Tool activity");
@@ -1172,7 +1447,13 @@ function CodeBlock({ code, language }: { code: string; language: string }): Reac
   );
 }
 
-function ChatMessage({ message }: { message: Message }): React.JSX.Element {
+function ChatMessage({
+  message,
+  agentName,
+}: {
+  message: Message;
+  agentName: string;
+}): React.JSX.Element {
   const internalUserLabel =
     message.role !== "user"
       ? undefined
@@ -1182,7 +1463,7 @@ function ChatMessage({ message }: { message: Message }): React.JSX.Element {
           ? "Continuing task"
           : undefined;
   const user = message.role === "user" && !internalUserLabel;
-  const author = internalUserLabel ?? (user ? "You" : "Kairo");
+  const author = internalUserLabel ?? (user ? "You" : agentName);
   return (
     <div className={`message ${user ? "user" : "assistant"}`}>
       <div className="avatar">{user ? "Y" : "K"}</div>

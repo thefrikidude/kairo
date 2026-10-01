@@ -1181,3 +1181,35 @@ button svg {
     animation: none;
   }
 }
+
+.runtime-picker,
+.agent-setup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.runtime-picker label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.runtime-picker select {
+  max-width: 250px;
+}
+.runtime-picker button,
+.agent-setup button {
+  padding: 6px 10px;
+}
+.agent-setup {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.agent-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 8px;
+}

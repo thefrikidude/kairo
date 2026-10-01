@@ -5,7 +5,10 @@ const api: DesktopApi = {
   bootstrap: () => ipcRenderer.invoke("desktop:bootstrap"),
   openWorkspace: () => ipcRenderer.invoke("workspace:open"),
   openSession: (sessionId) => ipcRenderer.invoke("session:open", sessionId),
-  newSession: () => ipcRenderer.invoke("session:new"),
+  newSession: (runtime) => ipcRenderer.invoke("session:new", runtime),
+  setRuntime: (sessionId, runtime) => ipcRenderer.invoke("session:runtime", sessionId, runtime),
+  refreshAgents: () => ipcRenderer.invoke("agents:refresh"),
+  loginAgent: (agentId) => ipcRenderer.invoke("agents:login", agentId),
   archiveSession: (sessionId) => ipcRenderer.invoke("session:archive", sessionId),
   restoreSession: (sessionId) => ipcRenderer.invoke("session:restore", sessionId),
   deleteSession: (sessionId) => ipcRenderer.invoke("session:delete", sessionId),
@@ -23,6 +26,7 @@ const api: DesktopApi = {
   onTaskState: (listener) => subscribe("task:state", listener),
   onTaskEvent: (listener) => subscribe("task:event", listener),
   onApproval: (listener) => subscribe("approval:request", listener),
+  onRuntimeError: (listener) => subscribe("runtime:error", listener),
 };
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {

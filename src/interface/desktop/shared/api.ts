@@ -1,3 +1,4 @@
+import type { ExternalAgentInfo, SessionRuntime } from "../../../domain/agent-runtime.js";
 import type {
   Message,
   ModelSelection,
@@ -15,7 +16,18 @@ export type DesktopProvider = {
   models: Array<{ id: string; label: string; recommended?: boolean }>;
 };
 
+export type LiveSession = {
+  state: "running" | "waiting" | "cancelling" | "complete" | "cancelled" | "error";
+  startedAt: number;
+  finishedAt?: number;
+  stream: string;
+  events: TaskEvent[];
+  error?: string;
+};
 export type DesktopBootstrap = {
+  agents: ExternalAgentInfo[];
+  liveSessions: Record<string, LiveSession>;
+  approvals: DesktopApproval[];
   sessions: Session[];
   archivedSessions: Session[];
   activeSessionId?: string;
@@ -38,7 +50,10 @@ export interface DesktopApi {
   bootstrap(): Promise<DesktopBootstrap>;
   openWorkspace(): Promise<DesktopBootstrap | undefined>;
   openSession(sessionId: string): Promise<DesktopBootstrap>;
-  newSession(): Promise<DesktopBootstrap>;
+  newSession(runtime?: SessionRuntime): Promise<DesktopBootstrap>;
+  setRuntime(sessionId: string, runtime: SessionRuntime): Promise<DesktopBootstrap>;
+  refreshAgents(): Promise<ExternalAgentInfo[]>;
+  loginAgent(agentId: string): Promise<void>;
   archiveSession(sessionId: string): Promise<DesktopBootstrap>;
   restoreSession(sessionId: string): Promise<DesktopBootstrap>;
   deleteSession(sessionId: string): Promise<DesktopBootstrap>;
@@ -57,6 +72,7 @@ export interface DesktopApi {
   ): () => void;
   onTaskEvent(listener: (event: TaskEvent & { sessionId: string }) => void): () => void;
   onApproval(listener: (approval: DesktopApproval) => void): () => void;
+  onRuntimeError(listener: (event: { error: string }) => void): () => void;
 }
 
 declare global {
