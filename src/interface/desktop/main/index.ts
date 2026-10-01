@@ -7,7 +7,7 @@ import {
   type IpcMainEvent,
   type IpcMainInvokeEvent,
 } from "electron";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -144,6 +144,9 @@ function registerIpc(): void {
   handle("session:archive", "session:archive");
   handle("session:restore", "session:restore");
   handle("session:delete", "session:delete");
+  handle("sessions:delete-archived", "sessions:delete-archived");
+  handle("project:archive", "project:archive");
+  handle("project:delete", "project:delete");
   handle("task:send", "task:send");
   handle("task:cancel", "task:cancel");
   handle("workspace:list", "workspace:list");
@@ -151,6 +154,18 @@ function registerIpc(): void {
   handle("workspace:write", "workspace:write");
   handle("workspace:changes", "workspace:changes");
   handle("workspace:diff", "workspace:diff");
+  ipcMain.handle("workspace:open-cursor", async (event, sessionId: unknown, filePath: unknown) => {
+    assertTrusted(event);
+    if (process.platform !== "darwin")
+      throw new Error("Opening changed files in Cursor is currently supported on macOS.");
+    const absolutePath = await request<string>("workspace:cursor-path", [sessionId, filePath]);
+    await new Promise<void>((resolveOpen, rejectOpen) => {
+      execFile("open", ["-a", "Cursor", "--", absolutePath], (error) => {
+        if (error) rejectOpen(new Error(`Could not open Cursor: ${error.message}`));
+        else resolveOpen();
+      });
+    });
+  });
   handle("model:save", "model:save");
   handle("approval:resolve", "approval:resolve");
 }

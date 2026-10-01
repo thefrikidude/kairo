@@ -369,6 +369,23 @@ export class SqliteSessionStore {
       .run(Date.now(), Date.now(), id);
     if (result.changes !== 1) throw new Error("Active session not found.");
   }
+  /** Archives every active session for one workspace and returns the affected ids. */
+  archiveWorkspace(workspace: string): string[] {
+    const ids = (
+      this.db
+        .prepare("SELECT id FROM sessions WHERE workspace=? AND archived_at IS NULL")
+        .all(workspace) as { id: string }[]
+    ).map((row) => row.id);
+    const now = Date.now();
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          "UPDATE sessions SET archived_at=?, updated_at=? WHERE workspace=? AND archived_at IS NULL",
+        )
+        .run(now, now, workspace);
+    })();
+    return ids;
+  }
   /** Restores an archived session to the recent chats list. */
   restore(id: string): void {
     const result = this.db
@@ -380,24 +397,42 @@ export class SqliteSessionStore {
   }
   /** Permanently removes a session and its task/message history. */
   delete(id: string): void {
-    const remove = this.db.transaction(() => {
-      if (!this.get(id)) throw new Error("Session not found.");
-      this.db
-        .prepare(
-          "DELETE FROM repair_attempts WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)",
-        )
-        .run(id);
-      this.db
-        .prepare(
-          "DELETE FROM task_events WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)",
-        )
-        .run(id);
-      for (const table of ["messages", "tool_events", "context_checkpoints", "repository_profiles"])
-        this.db.prepare(`DELETE FROM ${table} WHERE session_id=?`).run(id);
-      this.db.prepare("DELETE FROM tasks WHERE session_id=?").run(id);
-      this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
-    });
-    remove();
+    this.db.transaction(() => this.deleteSessionRows(id))();
+  }
+  /** Permanently removes every active and archived session for one workspace. */
+  deleteWorkspace(workspace: string): string[] {
+    const ids = (
+      this.db.prepare("SELECT id FROM sessions WHERE workspace=?").all(workspace) as {
+        id: string;
+      }[]
+    ).map((row) => row.id);
+    this.db.transaction(() => {
+      for (const id of ids) this.deleteSessionRows(id);
+    })();
+    return ids;
+  }
+  /** Permanently removes every archived session and returns the affected ids. */
+  deleteArchived(): string[] {
+    const ids = this.listArchived().map((session) => session.id);
+    this.db.transaction(() => {
+      for (const id of ids) this.deleteSessionRows(id);
+    })();
+    return ids;
+  }
+  private deleteSessionRows(id: string): void {
+    if (!this.get(id)) throw new Error("Session not found.");
+    this.db
+      .prepare(
+        "DELETE FROM repair_attempts WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)",
+      )
+      .run(id);
+    this.db
+      .prepare("DELETE FROM task_events WHERE task_id IN (SELECT id FROM tasks WHERE session_id=?)")
+      .run(id);
+    for (const table of ["messages", "tool_events", "context_checkpoints", "repository_profiles"])
+      this.db.prepare(`DELETE FROM ${table} WHERE session_id=?`).run(id);
+    this.db.prepare("DELETE FROM tasks WHERE session_id=?").run(id);
+    this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
   }
   /** Loads all messages required to reconstruct a full conversation. */
   messages(sessionId: string): Message[] {

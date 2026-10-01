@@ -58,6 +58,9 @@ export interface DesktopApi {
   archiveSession(sessionId: string): Promise<DesktopBootstrap>;
   restoreSession(sessionId: string): Promise<DesktopBootstrap>;
   deleteSession(sessionId: string): Promise<DesktopBootstrap>;
+  deleteArchivedSessions(): Promise<DesktopBootstrap>;
+  archiveProject(workspace: string): Promise<DesktopBootstrap>;
+  deleteProject(workspace: string): Promise<DesktopBootstrap>;
   send(sessionId: string, prompt: string, mode: "build" | "plan"): Promise<void>;
   cancel(sessionId: string): Promise<void>;
   listFiles(sessionId: string): Promise<string[]>;
@@ -65,6 +68,7 @@ export interface DesktopApi {
   saveFile(sessionId: string, path: string, content: string): Promise<void>;
   changedFiles(sessionId: string): Promise<string[]>;
   diff(sessionId: string, path: string): Promise<{ diff: string; unavailable?: string }>;
+  openInCursor(sessionId: string, path: string): Promise<void>;
   saveModel(selection: ModelSelection, apiKey?: string): Promise<DesktopBootstrap>;
   resolveApproval(id: string, decision: "approve" | "task_file" | "deny"): Promise<void>;
   onChunk(listener: (event: { sessionId: string; chunk: string }) => void): () => void;

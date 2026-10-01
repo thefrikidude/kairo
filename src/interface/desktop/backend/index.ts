@@ -1,4 +1,5 @@
 import { realpath } from "node:fs/promises";
+import { relative, resolve } from "node:path";
 import type { ApprovalDecision, ApprovalPolicy, JevFeatures } from "../../../domain/ports.js";
 import type { ExternalAgentInfo, SessionRuntime } from "../../../domain/agent-runtime.js";
 import { AgentRegistry } from "../../../infrastructure/agents/agent-registry.js";
@@ -317,6 +318,58 @@ export async function createDesktopRuntime(
         if (activeSessionId === sessionId) activeSessionId = store.list()[0]?.id;
         return bootstrap(store, activeSessionId);
       }
+      case "sessions:delete-archived": {
+        const archivedSessions = store.listArchived();
+        if (archivedSessions.some((session) => runningSessions.has(session.id)))
+          throw new Error("Stop every running task before deleting archived chats.");
+        const removedIds = store.deleteArchived();
+        for (const sessionId of removedIds) {
+          delete liveSessions[sessionId];
+          toolsBySession.delete(sessionId);
+          agentsBySession.delete(sessionId);
+          externalControllers.delete(sessionId);
+        }
+        for (const [id, item] of pendingApprovals) {
+          if (removedIds.includes(item.approval.sessionId)) pendingApprovals.delete(id);
+        }
+        if (activeSessionId && removedIds.includes(activeSessionId))
+          activeSessionId = store.list()[0]?.id;
+        return bootstrap(store, activeSessionId);
+      }
+      case "project:archive": {
+        if (typeof first !== "string" || !first) throw new Error("Choose a project to archive.");
+        const projectSessions = store.list().filter((session) => session.workspace === first);
+        if (!projectSessions.length) throw new Error("Project has no active chats to archive.");
+        if (projectSessions.some((session) => runningSessions.has(session.id)))
+          throw new Error("Stop every running chat in this project before archiving it.");
+        const archivedIds = store.archiveWorkspace(first);
+        for (const sessionId of archivedIds) delete liveSessions[sessionId];
+        if (activeSessionId && archivedIds.includes(activeSessionId))
+          activeSessionId = store.list()[0]?.id;
+        return bootstrap(store, activeSessionId);
+      }
+      case "project:delete": {
+        if (typeof first !== "string" || !first) throw new Error("Choose a project to delete.");
+        const projectSessions = [...store.list(), ...store.listArchived()].filter(
+          (session) => session.workspace === first,
+        );
+        if (!projectSessions.length) throw new Error("Project not found.");
+        if (projectSessions.some((session) => runningSessions.has(session.id)))
+          throw new Error("Stop every running chat in this project before deleting it.");
+        const removedIds = store.deleteWorkspace(first);
+        for (const sessionId of removedIds) {
+          delete liveSessions[sessionId];
+          toolsBySession.delete(sessionId);
+          agentsBySession.delete(sessionId);
+          externalControllers.delete(sessionId);
+        }
+        for (const [id, item] of pendingApprovals) {
+          if (removedIds.includes(item.approval.sessionId)) pendingApprovals.delete(id);
+        }
+        if (activeSessionId && removedIds.includes(activeSessionId))
+          activeSessionId = store.list()[0]?.id;
+        return bootstrap(store, activeSessionId);
+      }
       case "session:restore": {
         store.restore(String(first));
         return bootstrap(store, activeSessionId);
@@ -535,6 +588,20 @@ export async function createDesktopRuntime(
           String(second),
         );
         return { diff: review.diff, unavailable: review.unavailable };
+      }
+      case "workspace:cursor-path": {
+        const session = requireSession(store, String(first));
+        if (typeof second !== "string" || !second.trim())
+          throw new Error("Choose a changed file to open in Cursor.");
+        const absolutePath = resolve(session.workspace, second);
+        const workspaceRelative = relative(session.workspace, absolutePath);
+        if (
+          !workspaceRelative ||
+          workspaceRelative === ".." ||
+          workspaceRelative.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+        )
+          throw new Error("This path is outside the active workspace.");
+        return absolutePath;
       }
       case "model:save": {
         const targetSessionId = activeSessionId;
