@@ -153,7 +153,19 @@ export async function createDesktopRuntime(
     const session = sessionId ? requireSession(store, sessionId) : undefined;
     const selection = session?.runtime.kind === "builtin" ? session.runtime.selection : undefined;
     const modelConfig = selection ?? { provider: config.provider, model: config.model };
-    const hasCredential = Boolean(await credentials.get(modelConfig.provider));
+    const providers = await Promise.all(
+      providerRegistry.map(async ({ id, name, environmentVariable, models }) => ({
+        id,
+        name,
+        environmentVariable,
+        hasCredential: Boolean(await credentials.get(id)),
+        models: models.map(({ id: modelId, label, recommended }) => ({
+          id: modelId,
+          label,
+          recommended,
+        })),
+      })),
+    );
     return {
       agents: agentInfo,
       liveSessions: structuredClone(liveSessions),
@@ -162,17 +174,10 @@ export async function createDesktopRuntime(
       archivedSessions: store.listArchived(),
       activeSessionId: session?.id,
       config: modelConfig,
-      hasCredential,
-      providers: providerRegistry.map(({ id, name, environmentVariable, models }) => ({
-        id,
-        name,
-        environmentVariable,
-        models: models.map(({ id: modelId, label, recommended }) => ({
-          id: modelId,
-          label,
-          recommended,
-        })),
-      })),
+      hasCredential: providers.some(
+        (provider) => provider.id === modelConfig.provider && provider.hasCredential,
+      ),
+      providers,
       messages: session ? store.messages(session.id) : [],
       task: session ? store.latestTask(session.id) : undefined,
     };

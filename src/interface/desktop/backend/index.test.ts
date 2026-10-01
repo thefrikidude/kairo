@@ -10,7 +10,7 @@ import { AgentRegistry } from "../../../infrastructure/agents/agent-registry.js"
 import { CodexAgentAdapter } from "../../../infrastructure/agents/codex-agent.js";
 import type { DesktopBootstrap, DesktopApproval } from "../shared/api.js";
 
-async function setup(t: TestContext) {
+async function setup(t: TestContext, credentialProvider?: string) {
   const root = await mkdtemp(join(tmpdir(), "kairo-desktop-bridge-"));
   const store = await SqliteSessionStore.open(join(root, "sessions.sqlite"));
   const builtin = store.create(root, {
@@ -32,7 +32,11 @@ async function setup(t: TestContext) {
           ],
         }),
       ]),
-      credentials: { get: async () => undefined, save: async () => {} },
+      credentials: {
+        get: async (provider) =>
+          provider === credentialProvider ? "private-fixture-key" : undefined,
+        save: async () => {},
+      },
     },
   );
   await runtime.ready;
@@ -181,4 +185,42 @@ test("desktop shutdown cancels a pending external approval before closing its st
   const reopened = await SqliteSessionStore.open(join(root, "sessions.sqlite"));
   assert.equal(reopened.latestTask(sessionId)?.status, "cancelled");
   reopened.close();
+});
+
+test("bootstrap reports credentials per provider without exposing keys", async (t) => {
+  const { request } = await setup(t, "groq");
+  const state = await request<DesktopBootstrap>("bootstrap");
+  assert.equal(state.hasCredential, false);
+  assert.equal(state.providers.find((provider) => provider.id === "groq")?.hasCredential, true);
+  assert.equal(state.providers.find((provider) => provider.id === "mistral")?.hasCredential, false);
+  assert.equal(JSON.stringify(state).includes("private-fixture-key"), false);
+});
+
+test("archive deletion removes only the chosen history and bulk deletion keeps active chats", async (t) => {
+  const { request, store, builtin, root } = await setup(t);
+  const archived = [store.create(root), store.create(root)];
+  const tasks = archived.map((session) => {
+    store.addMessage(session.id, { role: "user", content: "Archived history", createdAt: 1 });
+    const task = store.startTask(session.id, "Archived task");
+    store.archive(session.id);
+    return task;
+  });
+  store.addMessage(builtin.id, { role: "user", content: "Active history", createdAt: 2 });
+  const individual = await request<DesktopBootstrap>("session:delete", archived[0].id);
+  assert.equal(individual.archivedSessions.length, 1);
+  assert.equal(store.get(archived[0].id), undefined);
+  assert.equal(store.task(tasks[0].id), undefined);
+  assert.deepEqual(store.messages(archived[0].id), []);
+  const all = await request<DesktopBootstrap>("sessions:delete-archived");
+  assert.deepEqual(all.archivedSessions, []);
+  assert.equal(store.get(archived[1].id), undefined);
+  assert.equal(store.task(tasks[1].id), undefined);
+  assert.deepEqual(store.messages(archived[1].id), []);
+  assert.equal(all.activeSessionId, builtin.id);
+  assert.equal(all.sessions.length, 1);
+  assert.equal(store.messages(builtin.id)[0]?.content, "Active history");
+  assert.deepEqual(
+    (await request<DesktopBootstrap>("sessions:delete-archived")).archivedSessions,
+    [],
+  );
 });
