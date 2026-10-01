@@ -20,6 +20,7 @@ import type {
 export interface Session {
   id: string;
   workspace: string;
+  title: string;
   createdAt: number;
   updatedAt: number;
   permissionMode: WorkspaceEditPermission;
@@ -27,6 +28,12 @@ export interface Session {
   runtime: SessionRuntime;
   externalSessionId?: string;
 }
+
+function sessionTitle(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "New session";
+  return value.trim().replace(/\s+/g, " ");
+}
+
 export class SqliteSessionStore {
   /** Wraps an already-initialized database; callers use open() to guarantee setup. */
   private constructor(private readonly db: Database.Database) {}
@@ -266,7 +273,15 @@ export class SqliteSessionStore {
         "INSERT INTO sessions (id, workspace, created_at, updated_at, runtime_json) VALUES (?, ?, ?, ?, ?)",
       )
       .run(id, workspace, now, now, JSON.stringify(runtime));
-    return { id, workspace, createdAt: now, updatedAt: now, permissionMode: "workspace", runtime };
+    return {
+      id,
+      workspace,
+      title: "New session",
+      createdAt: now,
+      updatedAt: now,
+      permissionMode: "workspace",
+      runtime,
+    };
   }
   /** Persists a session runtime/model without discarding its conversation identity. */
   setSessionRuntime(id: string, runtime: SessionRuntime): void {
@@ -298,13 +313,14 @@ export class SqliteSessionStore {
   get(id: string): Session | undefined {
     const row = this.db
       .prepare(
-        "SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id FROM sessions WHERE id = ?",
+        "SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1) AS title FROM sessions WHERE id = ?",
       )
       .get(id) as Record<string, unknown> | undefined;
     return (
       row && {
         id: String(row.id),
         workspace: String(row.workspace),
+        title: sessionTitle(row.title),
         createdAt: Number(row.created_at),
         updatedAt: Number(row.updated_at),
         permissionMode: row.permission_mode === "ask" ? "ask" : "workspace",
@@ -329,12 +345,13 @@ export class SqliteSessionStore {
     return (
       this.db
         .prepare(
-          `SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
+          `SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1) AS title FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
         )
         .all() as Record<string, unknown>[]
     ).map((r) => ({
       id: String(r.id),
       workspace: String(r.workspace),
+      title: sessionTitle(r.title),
       createdAt: Number(r.created_at),
       updatedAt: Number(r.updated_at),
       permissionMode: r.permission_mode === "ask" ? "ask" : "workspace",

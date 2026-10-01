@@ -12,6 +12,24 @@ export function DesktopApp(): React.JSX.Element {
   const [state, setState] = useState<DesktopBootstrap>();
   const [, setClock] = useState(0);
   const activeSession = state?.sessions.find((item) => item.id === state.activeSessionId);
+  const projectGroups = useMemo(() => {
+    const sessions = state?.sessions ?? [];
+    const groups = new Map<string, typeof sessions>();
+    for (const session of sessions) {
+      const group = groups.get(session.workspace) ?? [];
+      group.push(session);
+      groups.set(session.workspace, group);
+    }
+    return [...groups].map(([workspace, groupedSessions]) => ({
+      workspace,
+      name: workspace.split("/").filter(Boolean).at(-1) ?? workspace,
+      sessions: groupedSessions,
+    }));
+  }, [state?.sessions]);
+  const activeModelSelection =
+    activeSession?.runtime.kind === "builtin"
+      ? activeSession.runtime.selection ?? state?.config
+      : state?.config;
   const live = state?.activeSessionId ? state.liveSessions[state.activeSessionId] : undefined;
   const busy = Boolean(live && ["running", "waiting", "cancelling"].includes(live.state));
   const stream = busy ? (live?.stream ?? "") : "";
@@ -34,7 +52,6 @@ export function DesktopApp(): React.JSX.Element {
             activeSession.runtime.kind === "external" && item.id === activeSession.runtime.agentId,
         )
       : undefined;
-  const runtimeLocked = Boolean(state?.messages.length || activeSession?.externalSessionId);
   const workspaceBusy = Boolean(
     state?.sessions.some(
       (session) =>
@@ -43,6 +60,10 @@ export function DesktopApp(): React.JSX.Element {
     ),
   );
   const [agentSetupBusy, setAgentSetupBusy] = useState(false);
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [newSessionChoice, setNewSessionChoice] = useState("");
+  const [newSessionWorkspace, setNewSessionWorkspace] = useState("");
+  const [workspacePickerBusy, setWorkspacePickerBusy] = useState(false);
   const [loginPending, setLoginPending] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const prompt = state?.activeSessionId ? (drafts[state.activeSessionId] ?? "") : "";
@@ -54,13 +75,6 @@ export function DesktopApp(): React.JSX.Element {
   const [pane, setPane] = useState<Pane>("changes");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [recentChatsOpen, setRecentChatsOpen] = useState(() => {
-    try {
-      return window.localStorage.getItem("kairo.recentChatsOpen") !== "false";
-    } catch {
-      return true;
-    }
-  });
   const [files, setFiles] = useState<string[]>([]);
   const [changes, setChanges] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState("");
@@ -106,14 +120,6 @@ export function DesktopApp(): React.JSX.Element {
       // The selected theme still applies for this window if storage is unavailable.
     }
   }, [theme]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("kairo.recentChatsOpen", String(recentChatsOpen));
-    } catch {
-      // Keep the state for this window if storage is unavailable.
-    }
-  }, [recentChatsOpen]);
 
   const applyState = useCallback((next: DesktopBootstrap) => {
     activeSessionRef.current = next.activeSessionId;
@@ -193,14 +199,47 @@ export function DesktopApp(): React.JSX.Element {
     }
   };
 
-  const newSession = async () => {
-    if (!activeSession) return;
+  const newSession = async (runtime: SessionRuntime, workspace: string) => {
     const revision = ++navigationRevision.current;
     try {
-      const next = await window.kairo.newSession(activeSession.runtime);
-      if (revision === navigationRevision.current) await focusSession(next);
+      const next = await window.kairo.newSession(runtime, workspace);
+      if (revision === navigationRevision.current) {
+        setNewSessionOpen(false);
+        setNewSessionChoice("");
+        setNewSessionWorkspace("");
+        await focusSession(next);
+      }
     } catch (cause) {
       setError((cause as Error).message);
+    }
+  };
+
+  const createSelectedSession = () => {
+    if (!newSessionChoice || !newSessionWorkspace || !state) return;
+    try {
+      const [kind, first, ...rest] = JSON.parse(newSessionChoice) as string[];
+      if (kind === "agent" && first) {
+        void newSession({ kind: "external", agentId: first }, newSessionWorkspace);
+      } else if (kind === "model" && first && rest.length) {
+        void newSession({
+          kind: "builtin",
+          selection: { provider: first as ModelSelection["provider"], model: rest.join(":") },
+        }, newSessionWorkspace);
+      }
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  };
+
+  const pickSessionWorkspace = async () => {
+    setWorkspacePickerBusy(true);
+    try {
+      const workspace = await window.kairo.pickWorkspace();
+      if (workspace) setNewSessionWorkspace(workspace);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setWorkspacePickerBusy(false);
     }
   };
 
@@ -388,6 +427,7 @@ export function DesktopApp(): React.JSX.Element {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (deleteSessionId) setDeleteSessionId(undefined);
+      else if (newSessionOpen) setNewSessionOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
       else if (busy && state?.activeSessionId) {
         void window.kairo.cancel(state.activeSessionId).catch((cause) => setError(String(cause)));
@@ -395,7 +435,7 @@ export function DesktopApp(): React.JSX.Element {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [settingsOpen, deleteSessionId, busy, state?.activeSessionId]);
+  }, [settingsOpen, deleteSessionId, newSessionOpen, busy, state?.activeSessionId]);
 
   const messages = useMemo(
     () =>
@@ -703,72 +743,81 @@ export function DesktopApp(): React.JSX.Element {
           <span className="brand-mark">K</span>
           <span>Kairo</span>
         </div>
-        <button className="new-chat" onClick={() => void newSession()} disabled={!activeSession}>
-          <Icon name="plus" /> New chat
+        <button
+          className="new-chat"
+          onClick={() => {
+            setNewSessionChoice("");
+            setNewSessionWorkspace("");
+            setNewSessionOpen(true);
+          }}
+        >
+          <Icon name="plus" /> New agent session
         </button>
         <button className="open-project-button" onClick={() => void openWorkspace()}>
           <Icon name="folder" /> Open project
         </button>
-        <button
-          className="section-label"
-          aria-expanded={recentChatsOpen}
-          aria-controls="recent-chats-list"
-          onClick={() => setRecentChatsOpen((open) => !open)}
-        >
-          <span>Recent chats</span>
-          <Icon name="chevron" className={recentChatsOpen ? "expanded" : "collapsed"} />
-        </button>
-        <div className="session-list" id="recent-chats-list" hidden={!recentChatsOpen}>
-          {state.sessions.map((session) => (
-            <div
-              key={session.id}
-              className={`session-row ${session.id === state.activeSessionId ? "selected" : ""}`}
-            >
-              <button className="session" onClick={() => void openSession(session.id)}>
-                <span>
-                  {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
-                </span>
-                <small>
-                  {session.runtime.kind === "builtin" ? "Kairo" : session.runtime.agentId} ·{" "}
-                  {state.liveSessions[session.id]?.state ?? "idle"}
-                </small>
-              </button>
-              <button
-                className="session-menu-button"
-                aria-label="Chat actions"
-                title="Chat actions"
-                onClick={() =>
-                  setSessionMenuId(sessionMenuId === session.id ? undefined : session.id)
-                }
-              >
-                ···
-              </button>
-              {sessionMenuId === session.id && (
-                <div className="session-menu">
-                  <button
-                    disabled={["running", "waiting", "cancelling"].includes(
-                      state.liveSessions[session.id]?.state,
-                    )}
-                    onClick={() => void changeSession("archive", session.id)}
-                  >
-                    Archive
+        <div className="section-label sidebar-section-title">Projects</div>
+        <div className="project-session-list">
+          {projectGroups.length ? projectGroups.map((group) => (
+            <section className="project-session-group" key={group.workspace}>
+              <div className="project-heading" title={group.workspace}>
+                <Icon name="folder" />
+                <span>{group.name}</span>
+              </div>
+              {group.sessions.map((session) => (
+                <div
+                  key={session.id}
+                  className={`session-row ${session.id === state?.activeSessionId ? "selected" : ""}`}
+                >
+                  <button className="session" onClick={() => void openSession(session.id)}>
+                    <span className="session-title" title={session.title}>{session.title}</span>
+                    <small>
+                      {session.runtime.kind === "external"
+                        ? state?.agents.find((agent) => agent.id === session.runtime.agentId)?.name ??
+                          session.runtime.agentId
+                        : "Kairo"} · {state?.liveSessions[session.id]?.state ?? "idle"}
+                    </small>
                   </button>
                   <button
-                    className="destructive"
-                    disabled={["running", "waiting", "cancelling"].includes(
-                      state.liveSessions[session.id]?.state,
-                    )}
-                    onClick={() => {
-                      setSessionMenuId(undefined);
-                      setDeleteSessionId(session.id);
-                    }}
+                    className="session-menu-button"
+                    aria-label="Chat actions"
+                    title="Chat actions"
+                    onClick={() =>
+                      setSessionMenuId(sessionMenuId === session.id ? undefined : session.id)
+                    }
                   >
-                    Delete
+                    ···
                   </button>
+                  {sessionMenuId === session.id && (
+                    <div className="session-menu">
+                      <button
+                        disabled={["running", "waiting", "cancelling"].includes(
+                          state?.liveSessions[session.id]?.state ?? "",
+                        )}
+                        onClick={() => void changeSession("archive", session.id)}
+                      >
+                        Archive
+                      </button>
+                      <button
+                        className="destructive"
+                        disabled={["running", "waiting", "cancelling"].includes(
+                          state?.liveSessions[session.id]?.state ?? "",
+                        )}
+                        onClick={() => {
+                          setSessionMenuId(undefined);
+                          setDeleteSessionId(session.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+              ))}
+            </section>
+          )) : (
+            <p className="empty-session-list">Open a project to see sessions</p>
+          )}
         </div>
         <button
           className="settings-link"
@@ -979,46 +1028,6 @@ export function DesktopApp(): React.JSX.Element {
                     Agent turn finished. Workspace changes still need verification.
                   </p>
                 )}
-              {runtimeLocked && (
-                <p className="agent-note">Create a new chat to use a different agent.</p>
-              )}
-              <div className="runtime-picker">
-                <label>
-                  Agent{" "}
-                  <select
-                    aria-label="Session agent"
-                    disabled={busy || agentSetupBusy || runtimeLocked}
-                    value={
-                      activeSession.runtime.kind === "builtin"
-                        ? "builtin"
-                        : activeSession.runtime.agentId
-                    }
-                    onChange={(event) =>
-                      void chooseRuntime(
-                        event.target.value === "builtin"
-                          ? { kind: "builtin", selection: state.config }
-                          : { kind: "external", agentId: event.target.value },
-                      )
-                    }
-                  >
-                    <option value="builtin">Kairo · API key</option>
-                    {state.agents.map((agent) => (
-                      <option key={agent.id} value={agent.id} disabled={!agent.installed}>
-                        {agent.name}
-                        {!agent.installed ? " · not installed" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  onClick={() =>
-                    void refreshAgents().catch((cause) => setError((cause as Error).message))
-                  }
-                  disabled={agentSetupBusy}
-                >
-                  Refresh agents
-                </button>
-              </div>
               <div className="composer">
                 <textarea
                   ref={composerRef}
@@ -1076,13 +1085,13 @@ export function DesktopApp(): React.JSX.Element {
                       <button
                         className="model-button"
                         disabled={busy}
-                        title={`${state.config.provider} / ${state.config.model}`}
+                        title={`${activeModelSelection?.provider} / ${activeModelSelection?.model}`}
                         onClick={() => {
                           setSettingsSection("models");
                           setSettingsOpen(true);
                         }}
                       >
-                        {state.config.model}
+                        {activeModelSelection?.model ?? state.config.model}
                         <span aria-hidden="true">⌄</span>
                       </button>
                     )}
@@ -1244,6 +1253,91 @@ export function DesktopApp(): React.JSX.Element {
           )}
         </div>
       </aside>
+
+      {newSessionOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setNewSessionOpen(false);
+          }}
+        >
+          <div
+            className="confirm-dialog session-picker-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-session-title"
+          >
+            <h2 id="new-session-title">New agent session</h2>
+            <p>Choose an agent or model, then select the project folder it can work in.</p>
+            <div className="session-folder-picker">
+              <span className="session-picker-caption">Project folder</span>
+              <button onClick={() => void pickSessionWorkspace()} disabled={workspacePickerBusy}>
+                <Icon name="folder" />
+                {workspacePickerBusy
+                  ? "Choose a folder…"
+                  : newSessionWorkspace
+                    ? newSessionWorkspace.split("/").filter(Boolean).at(-1)
+                    : "Choose folder"}
+              </button>
+              {newSessionWorkspace && (
+                <small title={newSessionWorkspace}>{newSessionWorkspace}</small>
+              )}
+            </div>
+            <label className="session-picker-label">
+              Agent or model
+              <select
+                autoFocus
+                value={newSessionChoice}
+                onChange={(event) => setNewSessionChoice(event.target.value)}
+              >
+                <option value="">Select an agent or model</option>
+                <optgroup label="Agents">
+                  {state?.agents.map((agent) => (
+                    <option
+                      key={agent.id}
+                      value={JSON.stringify(["agent", agent.id])}
+                      disabled={!agent.installed}
+                    >
+                      {agent.name}{!agent.installed ? " · not installed" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Models">
+                  {state?.providers.flatMap((provider) =>
+                    provider.models.map((model) => (
+                      <option
+                        key={`${provider.id}:${model.id}`}
+                        value={JSON.stringify(["model", provider.id, model.id])}
+                      >
+                        {provider.name} · {model.label}
+                      </option>
+                    )),
+                  )}
+                </optgroup>
+              </select>
+            </label>
+            <button
+              className="refresh-agents-button"
+              onClick={() =>
+                void refreshAgents().catch((cause) => setError((cause as Error).message))
+              }
+              disabled={agentSetupBusy}
+            >
+              Refresh agents
+            </button>
+            <div>
+              <button onClick={() => setNewSessionOpen(false)}>Cancel</button>
+              <button
+                className="primary"
+                disabled={!newSessionChoice || !newSessionWorkspace || workspacePickerBusy}
+                onClick={createSelectedSession}
+              >
+                Start session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteSessionId && (
         <div className="modal-backdrop">

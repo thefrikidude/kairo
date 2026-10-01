@@ -49,8 +49,9 @@ export type DesktopApproval = {
 export interface DesktopApi {
   bootstrap(): Promise<DesktopBootstrap>;
   openWorkspace(): Promise<DesktopBootstrap | undefined>;
+  pickWorkspace(): Promise<string | undefined>;
   openSession(sessionId: string): Promise<DesktopBootstrap>;
-  newSession(runtime?: SessionRuntime): Promise<DesktopBootstrap>;
+  newSession(runtime: SessionRuntime, workspace: string): Promise<DesktopBootstrap>;
   setRuntime(sessionId: string, runtime: SessionRuntime): Promise<DesktopBootstrap>;
   refreshAgents(): Promise<ExternalAgentInfo[]>;
   loginAgent(agentId: string): Promise<void>;

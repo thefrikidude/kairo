@@ -4,8 +4,9 @@ import type { DesktopApi } from "../shared/api.js";
 const api: DesktopApi = {
   bootstrap: () => ipcRenderer.invoke("desktop:bootstrap"),
   openWorkspace: () => ipcRenderer.invoke("workspace:open"),
+  pickWorkspace: () => ipcRenderer.invoke("workspace:pick"),
   openSession: (sessionId) => ipcRenderer.invoke("session:open", sessionId),
-  newSession: (runtime) => ipcRenderer.invoke("session:new", runtime),
+  newSession: (runtime, workspace) => ipcRenderer.invoke("session:new", runtime, workspace),
   setRuntime: (sessionId, runtime) => ipcRenderer.invoke("session:runtime", sessionId, runtime),
   refreshAgents: () => ipcRenderer.invoke("agents:refresh"),
   loginAgent: (agentId) => ipcRenderer.invoke("agents:login", agentId),

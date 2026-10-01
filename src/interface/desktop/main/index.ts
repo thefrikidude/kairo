@@ -124,6 +124,11 @@ function registerIpc(): void {
     if (result.canceled || !result.filePaths[0]) return undefined;
     return request("workspace:open", [result.filePaths[0]]);
   });
+  ipcMain.handle("workspace:pick", async (event) => {
+    assertTrusted(event);
+    const result = await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory"] });
+    return result.canceled ? undefined : result.filePaths[0];
+  });
   handle("session:open", "session:open");
   handle("session:new", "session:new");
   handle("session:runtime", "session:runtime");

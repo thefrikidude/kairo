@@ -263,7 +263,13 @@ export async function createDesktopRuntime(
         return bootstrap(store, activeSessionId);
       }
       case "session:new": {
-        if (!activeSessionId) throw new Error("Open a project folder first.");
+        const workspace =
+          typeof second === "string"
+            ? await realpath(second)
+            : activeSessionId
+              ? requireSession(store, activeSessionId).workspace
+              : undefined;
+        if (!workspace) throw new Error("Choose a project folder first.");
         const config = await loadConfig();
         const runtime =
           first === undefined
@@ -272,8 +278,9 @@ export async function createDesktopRuntime(
                 selection: { provider: config.provider, model: config.model },
               } as const)
             : await validateRuntime(first);
-        const session = store.create(requireSession(store, activeSessionId).workspace, runtime);
+        const session = store.create(workspace, runtime);
         activeSessionId = session.id;
+        await new RepositoryAwareness(store).ensureFresh(session.id, workspace);
         return bootstrap(store, session.id);
       }
       case "agents:refresh":
