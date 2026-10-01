@@ -4,6 +4,7 @@ import {
   dialog,
   shell,
   ipcMain,
+  nativeImage,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
 } from "electron";
@@ -13,6 +14,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const appRoot = process.cwd();
+const appIconPath = join(appRoot, "src/interface/desktop/assets/kairo-icon.png");
 let mainWindow: BrowserWindow | undefined;
 let backend: ChildProcessWithoutNullStreams | undefined;
 let backendReady: Promise<void>;
@@ -177,6 +179,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 640,
     title: "Kairo",
+    icon: appIconPath,
     webPreferences: {
       preload: join(appRoot, "out/preload/index.cjs"),
       contextIsolation: true,
@@ -202,6 +205,10 @@ function createWindow(): void {
 app
   .whenReady()
   .then(async () => {
+    app.setName("Kairo");
+    if (process.platform === "darwin") {
+      app.dock?.setIcon(nativeImage.createFromPath(appIconPath));
+    }
     await startBackend();
     registerIpc();
     createWindow();
