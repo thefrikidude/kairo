@@ -13,6 +13,7 @@ export type DesktopProvider = {
   id: ModelSelection["provider"];
   name: string;
   environmentVariable: string;
+  hasCredential: boolean;
   models: Array<{ id: string; label: string; recommended?: boolean }>;
 };
 
