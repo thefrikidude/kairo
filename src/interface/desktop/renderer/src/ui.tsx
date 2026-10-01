@@ -278,7 +278,10 @@ export function DesktopApp(): React.JSX.Element {
     const textarea = composerRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
+    const maxHeight = Math.min(240, Math.max(112, window.innerHeight * 0.3));
+    const contentHeight = textarea.scrollHeight;
+    textarea.style.height = `${Math.min(contentHeight, maxHeight)}px`;
+    textarea.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
   }, [prompt]);
 
   useEffect(() => {
