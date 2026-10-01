@@ -3,16 +3,21 @@ import type { TaskStore } from "../domain/ports.js";
 import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ContextSelector } from "./context-selector.js";
+import { SourceContextRetriever } from "./source-context-retriever.js";
 
 const AUTO_COMPACT_AFTER = 48;
 const MODEL_MESSAGE_LIMIT = 32;
-const MAX_INSTRUCTION_BYTES = 16 * 1024;
-const MAX_INSTRUCTION_TOTAL_BYTES = 32 * 1024;
+const MAX_INSTRUCTION_BYTES = 6 * 1024;
+const MAX_INSTRUCTION_TOTAL_BYTES = 10 * 1024;
+const MAX_REQUEST_CONTEXT_CHARS = 6_000;
+const MAX_PROFILE_CONTEXT_CHARS = 4_000;
+const MAX_REPOSITORY_CONTEXT_CHARS = 34_000;
 const excerpt = (value: string, length = 700) =>
   value.length > length ? `${value.slice(0, length)}…` : value;
 
 export class ContextManager {
   private readonly selector = new ContextSelector();
+  private readonly retriever = new SourceContextRetriever();
   constructor(private readonly store: TaskStore) {}
   /** Builds the bounded message list that is sent to the model for the next turn. */
   async prepare(sessionId: string, task: Task): Promise<Message[]> {
@@ -87,34 +92,49 @@ export class ContextManager {
     profile: NonNullable<ReturnType<TaskStore["repositorySnapshot"]>>,
   ): Promise<string> {
     const relevantFiles = this.selector.select(this.retrievalQuery(task), profile);
-    const instructions = await this.instructions(profile, relevantFiles);
+    const [instructions, excerpts] = await Promise.all([
+      this.instructions(profile, relevantFiles),
+      this.retriever.retrieve(profile.root, relevantFiles, this.retrievalQuery(task)),
+    ]);
     const verification = profile.verificationCandidates.map((candidate) => {
       const evidence = candidate.evidence?.map((item) => item.path).join(", ");
       return `${candidate.label} = ${candidate.command}${evidence ? ` [${evidence}]` : ""}`;
     });
-    return [
+    const repositoryProfile = [
       "Repository snapshot:",
-      `Root: ${profile.root}`,
+      `Root: ${excerpt(profile.root, 500)}`,
       `Ecosystems: ${profile.ecosystems.join(", ") || "none detected"}`,
       `Repository state: ${profile.fingerprint.kind}${profile.fingerprint.branch ? ` branch=${profile.fingerprint.branch}` : ""}${profile.fingerprint.head ? ` head=${profile.fingerprint.head.slice(0, 12)}` : ""}${profile.truncated ? " (inventory truncated)" : ""}`,
-      `Changed paths: ${profile.changedPaths.join(", ") || "clean or unavailable"}`,
+      `Changed paths: ${excerpt(profile.changedPaths.join(", ") || "clean or unavailable", 900)}`,
       `Package: ${profile.packageName ?? "unknown"}`,
       `Package manager: ${profile.packageManager}`,
-      `Scripts: ${Object.keys(profile.scripts).length ? Object.keys(profile.scripts).sort().join(", ") : "none detected"}`,
+      `Scripts: ${excerpt(Object.keys(profile.scripts).sort().join(", ") || "none detected", 500)}`,
       `Source roots: ${profile.sourceRoots.join(", ") || "none detected"}`,
       `Test roots: ${profile.testRoots.join(", ") || "none detected"}`,
-      `Instruction files: ${profile.instructionFiles.join(", ") || "none detected"}`,
-      `Manifests: ${profile.manifestFiles.join(", ") || "none detected"}`,
-      `CI files: ${profile.ciFiles.join(", ") || "none detected"}`,
-      `Build files: ${profile.buildFiles.join(", ") || "none detected"}`,
-      `Documentation: ${profile.documentationFiles.join(", ") || "none detected"}`,
-      `Available verification: ${verification.join("; ") || "none detected"}`,
-      `Relevant files for this task: ${relevantFiles.join(", ") || "use search_files to locate files"}`,
+      `Instruction files: ${excerpt(profile.instructionFiles.join(", ") || "none detected", 600)}`,
+      `Manifests: ${excerpt(profile.manifestFiles.join(", ") || "none detected", 600)}`,
+      `CI files: ${excerpt(profile.ciFiles.join(", ") || "none detected", 600)}`,
+      `Build files: ${excerpt(profile.buildFiles.join(", ") || "none detected", 600)}`,
+      `Documentation: ${excerpt(profile.documentationFiles.join(", ") || "none detected", 600)}`,
+      `Available verification: ${excerpt(verification.join("; ") || "none detected", 900)}`,
+      `Relevant files: ${relevantFiles.join(", ") || "use search_files to locate files"}`,
+    ].join("\n");
+    const sections = [
+      `Current task request:\n${excerpt(task.prompt, MAX_REQUEST_CONTEXT_CHARS)}`,
+      excerpt(repositoryProfile, MAX_PROFILE_CONTEXT_CHARS),
       instructions,
+      excerpts,
       "Use the profile as a guide, inspect files before edits, and choose an appropriate verification command after changes. For custom checks use run_command with verification=true; ordinary inspection commands do not verify a task. Every edit invalidates earlier verification.",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    ].filter(Boolean);
+    let remaining = MAX_REPOSITORY_CONTEXT_CHARS;
+    const bounded: string[] = [];
+    for (const section of sections) {
+      if (remaining <= 0) break;
+      const included = section.slice(0, remaining);
+      bounded.push(included);
+      remaining -= included.length;
+    }
+    return bounded.join("\n\n");
   }
 
   /** Loads applicable agent instructions for this request without retaining their text. */
