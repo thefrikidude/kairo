@@ -741,6 +741,30 @@ export function DesktopApp(): React.JSX.Element {
     }
   };
 
+  const chooseComposerModel = async (choice: ModelSelection) => {
+    if (busy || modelSaving) return;
+    const provider = state?.providers.find((item) => item.id === choice.provider);
+    if (!provider) return;
+    if (!provider.hasCredential) {
+      setSelection(choice);
+      setApiKey("");
+      setEditingApiKey(false);
+      setSettingsSection("models");
+      setSettingsOpen(true);
+      return;
+    }
+    setModelSaving(true);
+    setError("");
+    try {
+      const next = await window.kairo.saveModel(choice);
+      applyState(next);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setModelSaving(false);
+    }
+  };
+
   const archiveSession = async (sessionId: string) => {
     try {
       const next = await window.kairo.archiveSession(sessionId);
@@ -947,7 +971,7 @@ export function DesktopApp(): React.JSX.Element {
                   <label>
                     {editingApiKey ? "New API key" : "API key"}
                     <input
-                      autoFocus={editingApiKey}
+                      autoFocus={editingApiKey || !selectedProvider?.hasCredential}
                       type="password"
                       autoComplete="off"
                       spellCheck={false}
@@ -1557,18 +1581,51 @@ export function DesktopApp(): React.JSX.Element {
                         ))}
                       </select>
                     ) : (
-                      <button
-                        className="model-button"
-                        disabled={busy}
-                        title={`${activeModelSelection?.provider} / ${activeModelSelection?.model}`}
-                        onClick={() => {
-                          setSettingsSection("models");
-                          setSettingsOpen(true);
+                      <select
+                        className="composer-model-select"
+                        aria-label="Model"
+                        disabled={busy || modelSaving}
+                        title={`${state.providers.find((provider) => provider.id === activeModelSelection?.provider)?.name ?? activeModelSelection?.provider} / ${activeModelSelection?.model}`}
+                        value={JSON.stringify([
+                          activeModelSelection?.provider ?? state.config.provider,
+                          activeModelSelection?.model ?? state.config.model,
+                        ])}
+                        onChange={(event) => {
+                          if (event.target.value === "__settings") {
+                            setSelection(activeModelSelection ?? state.config);
+                            setSettingsSection("models");
+                            setSettingsOpen(true);
+                            return;
+                          }
+                          try {
+                            const [provider, model] = JSON.parse(event.target.value) as [
+                              string,
+                              string,
+                            ];
+                            void chooseComposerModel({
+                              provider: provider as ModelSelection["provider"],
+                              model,
+                            });
+                          } catch {
+                            setError("Choose a valid model.");
+                          }
                         }}
                       >
-                        {activeModelSelection?.model ?? state.config.model}
-                        <span aria-hidden="true">⌄</span>
-                      </button>
+                        {state.providers.map((provider) => (
+                          <optgroup key={provider.id} label={provider.name}>
+                            {provider.models.map((model) => (
+                              <option
+                                key={model.id}
+                                value={JSON.stringify([provider.id, model.id])}
+                              >
+                                {model.label}
+                                {!provider.hasCredential ? " · set up key" : ""}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                        <option value="__settings">Manage models and API keys…</option>
+                      </select>
                     )}
                   </div>
                   <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>

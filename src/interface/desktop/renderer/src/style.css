@@ -231,7 +231,7 @@ button svg {
 .session:hover,
 .icon-button:hover,
 .review-toggle:hover,
-.model-button:hover {
+.composer-model-select:hover {
   background: var(--hover);
 }
 .open-project-button {
@@ -835,11 +835,9 @@ button svg {
   font-size: 12px;
   padding: 4px;
 }
-.model-button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  overflow: hidden;
+.composer-controls .composer-model-select {
+  width: min(240px, 36cqw);
+  min-width: 100px;
   max-width: 240px;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -1737,8 +1735,8 @@ button svg {
   .transcript {
     padding: 24px;
   }
-  .model-button {
-    max-width: 180px;
+  .composer-controls .composer-model-select {
+    width: min(180px, 36cqw);
   }
 }
 @media (max-width: 900px) {
