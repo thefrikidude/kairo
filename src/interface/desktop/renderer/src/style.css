@@ -204,20 +204,14 @@ button svg {
   font-weight: 650;
   letter-spacing: -0.4px;
 }
-.brand-mark,
-.welcome-logo,
-.chat-start-mark {
-  display: grid;
-  place-items: center;
-  font-weight: 700;
+.kairo-logo {
+  display: block;
+  flex: none;
   color: var(--text);
 }
 .brand-mark {
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--muted);
-  border-radius: 7px;
-  font-size: 13px;
+  width: 26px;
+  height: 26px;
 }
 .new-chat,
 .open-project-button,
@@ -360,7 +354,7 @@ button svg {
 .session {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   flex: 1;
   padding: 7px 68px 7px 34px;
   text-align: left;
@@ -496,6 +490,9 @@ button svg {
   flex-direction: column;
 }
 .workspace-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 550;
 }
@@ -773,6 +770,7 @@ button svg {
 }
 /* Composer remains visible while the transcript alone scrolls. */
 .composer-wrap {
+  container-type: inline-size;
   flex: none;
   width: 100%;
   max-width: 808px;
@@ -824,7 +822,7 @@ button svg {
   min-width: 0;
 }
 .composer-hint {
-  margin-left: 8px;
+  margin-left: auto;
   color: var(--muted);
   font-size: 10px;
   white-space: nowrap;
@@ -870,12 +868,9 @@ button svg {
 }
 .chat-start-mark,
 .welcome-logo {
-  margin: 0 auto 16px;
-  width: 40px;
-  height: 40px;
-  font-size: 24px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  margin: 0 auto 20px;
+  width: 48px;
+  height: 48px;
 }
 .chat-start h1,
 .welcome h1 {
@@ -1374,7 +1369,94 @@ button svg {
 }
 .model-settings {
   display: grid;
-  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px 20px;
+}
+.credential-setting,
+.model-settings-footer {
+  grid-column: 1 / -1;
+}
+.credential-setting {
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+.credential-status,
+.credential-help-row,
+.model-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.credential-help-row {
+  margin-top: 9px;
+}
+.credential-status-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 5px;
+  font-weight: 550;
+}
+.credential-status-title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--positive);
+}
+.model-settings-footer {
+  padding-top: 4px;
+  min-height: 38px;
+}
+.settings-notice {
+  color: var(--positive);
+  font-size: 12px;
+}
+.secondary-button,
+.danger-outline-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  white-space: nowrap;
+  flex: none;
+  font-size: 12px;
+}
+.secondary-button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.danger-outline-button {
+  color: var(--negative);
+  border-color: color-mix(in srgb, var(--negative) 30%, var(--line));
+}
+.danger-outline-button:hover:not(:disabled) {
+  background: var(--negative-bg);
+  border-color: var(--negative);
+}
+.text-button {
+  color: var(--muted);
+  padding: 4px 0;
+  font-size: 12px;
+}
+.text-button:hover {
+  color: var(--text);
+}
+.danger-outline-button svg {
+  width: 15px;
+  height: 15px;
+}
+@container (max-width: 600px) {
+  .composer-hint {
+    display: none;
+  }
+}
+@media (max-width: 1000px) {
+  .model-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .model-settings label,
 .theme-setting {
@@ -1396,10 +1478,12 @@ button svg {
 .model-settings p {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .archived-list {
-  padding: 4px 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .archived-row {
   display: flex;
@@ -1427,7 +1511,8 @@ button svg {
   gap: 7px;
   flex: none;
 }
-.archived-row div {
+.archived-chat-details {
+  flex: 1;
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -1437,6 +1522,20 @@ button svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.archived-chat-details strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.archived-chat-details small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.archived-chat-details small svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
 }
 .archived-row small,
 .empty-settings {
@@ -1451,6 +1550,23 @@ button svg {
 }
 .archived-row button:hover {
   background: var(--hover);
+}
+.archived-row .archive-delete-button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  border-color: transparent;
+  color: var(--muted);
+}
+.archived-row .archive-delete-button:hover {
+  background: var(--negative-bg);
+  color: var(--negative);
+}
+.archive-delete-button svg {
+  width: 16px;
+  height: 16px;
 }
 .archived-list-header button:disabled {
   opacity: 0.45;
@@ -1488,8 +1604,43 @@ button svg {
   background: var(--surface);
 }
 .confirm-dialog .destructive-button {
-  background: var(--negative-bg);
+  background: var(--negative);
+  color: var(--bg);
+}
+.confirm-dialog .primary {
+  background: var(--strong);
+  color: var(--on-strong);
+}
+.archive-confirm-dialog {
+  color: var(--text);
+  width: min(calc(100vw - 48px), 420px);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+.archive-confirm-dialog p {
+  overflow-wrap: anywhere;
+}
+.archive-confirm-dialog::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(3px);
+}
+.dialog-danger-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 16px;
+  border-radius: 10px;
   color: var(--negative);
+  background: var(--negative-bg);
+}
+.dialog-danger-icon svg {
+  width: 19px;
+  height: 19px;
+}
+.confirm-dialog .dialog-error {
+  color: var(--negative);
+  overflow-wrap: anywhere;
 }
 .session-picker-dialog > p {
   margin-bottom: 18px;

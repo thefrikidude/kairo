@@ -247,11 +247,26 @@ export function DesktopApp(): React.JSX.Element {
     model: "gemini-2.5-flash",
   });
   const [apiKey, setApiKey] = useState("");
+  const [editingApiKey, setEditingApiKey] = useState(false);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelNotice, setModelNotice] = useState("");
+  const selectedProvider = state?.providers.find((provider) => provider.id === selection.provider);
+  const needsApiKey = !selectedProvider?.hasCredential || editingApiKey;
+  const [archiveDeleteBusy, setArchiveDeleteBusy] = useState(false);
+  const [archiveDeleteError, setArchiveDeleteError] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const followTranscript = useRef(true);
   const activeSessionRef = useRef<string | undefined>(undefined);
   const navigationRevision = useRef(0);
+
+  useEffect(() => {
+    if (settingsOpen && settingsSection === "models") return;
+    if (state?.config) setSelection(state.config);
+    setApiKey("");
+    setEditingApiKey(false);
+    setModelNotice("");
+  }, [state?.config.provider, state?.config.model, settingsOpen, settingsSection]);
 
   useEffect(() => {
     if (!busy) return;
@@ -312,7 +327,6 @@ export function DesktopApp(): React.JSX.Element {
   const applyState = useCallback((next: DesktopBootstrap) => {
     activeSessionRef.current = next.activeSessionId;
     setState(next);
-    setSelection(next.config);
     setError("");
   }, []);
 
@@ -604,7 +618,8 @@ export function DesktopApp(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (archiveDeleteBusy) return;
       if (deleteSessionId) setDeleteSessionId(undefined);
       else if (deleteAllArchivedOpen) setDeleteAllArchivedOpen(false);
       else if (deleteProjectWorkspace) setDeleteProjectWorkspace(undefined);
@@ -621,6 +636,7 @@ export function DesktopApp(): React.JSX.Element {
     settingsOpen,
     deleteSessionId,
     deleteAllArchivedOpen,
+    archiveDeleteBusy,
     deleteProjectWorkspace,
     newSessionOpen,
     projectMenuWorkspace,
@@ -708,22 +724,26 @@ export function DesktopApp(): React.JSX.Element {
   };
 
   const chooseModel = async () => {
+    if (modelSaving || (needsApiKey && !apiKey.trim())) return;
+    setModelSaving(true);
+    setModelNotice("");
+    setError("");
     try {
       const next = await window.kairo.saveModel(selection, apiKey);
       setApiKey("");
+      setEditingApiKey(false);
       applyState(next);
+      setModelNotice("Model settings saved.");
     } catch (cause) {
       setError((cause as Error).message);
+    } finally {
+      setModelSaving(false);
     }
   };
 
-  const changeSession = async (action: "archive" | "delete", sessionId: string) => {
+  const archiveSession = async (sessionId: string) => {
     try {
-      const next =
-        action === "archive"
-          ? await window.kairo.archiveSession(sessionId)
-          : await window.kairo.deleteSession(sessionId);
-      setDeleteSessionId(undefined);
+      const next = await window.kairo.archiveSession(sessionId);
       await focusSession(next);
     } catch (cause) {
       setError((cause as Error).message);
@@ -776,13 +796,21 @@ export function DesktopApp(): React.JSX.Element {
     );
   };
 
-  const deleteAllArchived = async () => {
+  const deleteArchivedChats = async () => {
+    if (archiveDeleteBusy) return;
+    setArchiveDeleteBusy(true);
+    setArchiveDeleteError("");
     try {
-      const next = await window.kairo.deleteArchivedSessions();
+      const next = deleteSessionId
+        ? await window.kairo.deleteSession(deleteSessionId)
+        : await window.kairo.deleteArchivedSessions();
+      setDeleteSessionId(undefined);
       setDeleteAllArchivedOpen(false);
       applyState(next);
     } catch (cause) {
-      setError((cause as Error).message);
+      setArchiveDeleteError((cause as Error).message);
+    } finally {
+      setArchiveDeleteBusy(false);
     }
   };
 
@@ -826,6 +854,7 @@ export function DesktopApp(): React.JSX.Element {
           <button
             key={section}
             className={`settings-nav ${settingsSection === section ? "selected" : ""}`}
+            aria-current={settingsSection === section ? "page" : undefined}
             onClick={() => setSettingsSection(section)}
           >
             {section === "general" ? "General" : section === "models" ? "Models" : "Archived chats"}
@@ -868,9 +897,14 @@ export function DesktopApp(): React.JSX.Element {
             <label>
               Provider
               <select
+                disabled={modelSaving}
                 value={selection.provider}
                 onChange={(event) => {
                   const provider = state.providers.find((item) => item.id === event.target.value);
+                  setApiKey("");
+                  setEditingApiKey(false);
+                  setModelNotice("");
+                  setError("");
                   if (provider)
                     setSelection({
                       provider: provider.id,
@@ -891,10 +925,12 @@ export function DesktopApp(): React.JSX.Element {
             <label>
               Model
               <select
+                disabled={modelSaving}
                 value={selection.model}
-                onChange={(event) =>
-                  setSelection((current) => ({ ...current, model: event.target.value }))
-                }
+                onChange={(event) => {
+                  setSelection((current) => ({ ...current, model: event.target.value }));
+                  setModelNotice("");
+                }}
               >
                 {state.providers
                   .find((item) => item.id === selection.provider)
@@ -905,54 +941,115 @@ export function DesktopApp(): React.JSX.Element {
                   ))}
               </select>
             </label>
-            <label>
-              API key
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder={
-                  state.hasCredential
-                    ? "Saved in macOS Keychain"
-                    : state.providers.find((item) => item.id === selection.provider)
-                        ?.environmentVariable
-                }
-              />
-            </label>
-            <p>Your key is validated and saved in macOS Keychain.</p>
-            <button className="primary" onClick={() => void chooseModel()}>
-              Save model
-            </button>
+            <div className="credential-setting">
+              {needsApiKey ? (
+                <>
+                  <label>
+                    {editingApiKey ? "New API key" : "API key"}
+                    <input
+                      autoFocus={editingApiKey}
+                      type="password"
+                      autoComplete="off"
+                      spellCheck={false}
+                      disabled={modelSaving}
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                      placeholder={`Enter your ${selectedProvider?.name ?? "provider"} API key`}
+                      aria-describedby="credential-help"
+                    />
+                  </label>
+                  <div className="credential-help-row">
+                    <p id="credential-help">New keys are validated and stored in macOS Keychain.</p>
+                    {editingApiKey && (
+                      <button
+                        className="text-button"
+                        disabled={modelSaving}
+                        onClick={() => {
+                          setEditingApiKey(false);
+                          setApiKey("");
+                          setError("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="credential-status">
+                  <div>
+                    <span className="credential-status-title">
+                      <Icon name="check" /> API key configured
+                    </span>
+                    <p>Ready to use with {selectedProvider?.name}.</p>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    disabled={modelSaving}
+                    onClick={() => {
+                      setEditingApiKey(true);
+                      setModelNotice("");
+                    }}
+                  >
+                    Update key
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="model-settings-footer">
+              <span className="settings-notice" role="status">
+                {modelNotice}
+              </span>
+              <button
+                className="primary"
+                disabled={modelSaving || (needsApiKey && !apiKey.trim())}
+                onClick={() => void chooseModel()}
+              >
+                {modelSaving ? "Saving…" : editingApiKey ? "Update key & save" : "Save model"}
+              </button>
+            </div>
           </section>
         )}
         {settingsSection === "archived" && (
           <section className="settings-card archived-list">
             <div className="archived-list-header">
-              <span>{state.archivedSessions.length} archived chats</span>
+              <span>
+                {state.archivedSessions.length} archived{" "}
+                {state.archivedSessions.length === 1 ? "chat" : "chats"}
+              </span>
               <button
-                className="destructive-button"
+                className="danger-outline-button"
                 disabled={!state.archivedSessions.length}
-                onClick={() => setDeleteAllArchivedOpen(true)}
+                onClick={() => {
+                  setArchiveDeleteError("");
+                  setDeleteAllArchivedOpen(true);
+                }}
               >
-                Delete all
+                <Icon name="trash" /> Delete all
               </button>
             </div>
             {state.archivedSessions.length ? (
               state.archivedSessions.map((session) => (
                 <div className="archived-row" key={session.id}>
-                  <div>
-                    <strong>
+                  <div className="archived-chat-details">
+                    <strong title={session.title}>{session.title}</strong>
+                    <small title={session.workspace}>
+                      <Icon name="folder" />{" "}
                       {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
-                    </strong>
-                    <small>{session.workspace}</small>
+                    </small>
                   </div>
                   <div className="archived-actions">
                     <button onClick={() => void restoreSession(session.id)}>Restore</button>
                     <button
-                      className="destructive-button"
-                      onClick={() => setDeleteSessionId(session.id)}
+                      className="archive-delete-button"
+                      aria-label={`Delete ${session.title}`}
+                      title="Delete chat"
+                      onClick={() => {
+                        setArchiveDeleteError("");
+                        setDeleteSessionId(session.id);
+                      }}
                     >
-                      Delete
+                      <Icon name="trash" />
                     </button>
                   </div>
                 </div>
@@ -962,8 +1059,30 @@ export function DesktopApp(): React.JSX.Element {
             )}
           </section>
         )}
-        {error && <p className="settings-error">{error}</p>}
+        {error && (
+          <p className="settings-error" role="alert">
+            {error}
+          </p>
+        )}
       </main>
+      {(deleteSessionId || deleteAllArchivedOpen) && (
+        <DeleteChatDialog
+          title={deleteSessionId ? "Delete this chat?" : "Delete all archived chats?"}
+          description={
+            deleteSessionId
+              ? `“${state.archivedSessions.find((session) => session.id === deleteSessionId)?.title ?? "This chat"}” and its task history will be permanently deleted.`
+              : `All ${state.archivedSessions.length} archived chats and their task history will be permanently deleted. Active chats will be kept.`
+          }
+          busy={archiveDeleteBusy}
+          error={archiveDeleteError}
+          onCancel={() => {
+            setDeleteSessionId(undefined);
+            setDeleteAllArchivedOpen(false);
+          }}
+          onConfirm={() => void deleteArchivedChats()}
+          confirmLabel={deleteSessionId ? "Delete chat" : "Delete all chats"}
+        />
+      )}
     </div>
   );
 
@@ -977,7 +1096,7 @@ export function DesktopApp(): React.JSX.Element {
     >
       <aside className="sidebar" aria-label="Chats" hidden={!sidebarOpen}>
         <div className="brand">
-          <span className="brand-mark">K</span>
+          <KairoLogo className="brand-mark" />
           <span>Kairo</span>
         </div>
         <button
@@ -1104,7 +1223,7 @@ export function DesktopApp(): React.JSX.Element {
                               aria-label="Archive chat"
                               title="Archive chat"
                               disabled={isSessionBusy}
-                              onClick={() => void changeSession("archive", session.id)}
+                              onClick={() => void archiveSession(session.id)}
                             >
                               <Icon name="archive" />
                             </button>
@@ -1219,7 +1338,7 @@ export function DesktopApp(): React.JSX.Element {
 
         {!activeSession ? (
           <div className="welcome">
-            <div className="welcome-logo">K</div>
+            <KairoLogo className="welcome-logo" />
             <h1>What should we work on?</h1>
             <p>Open a local project to start a chat with Kairo.</p>
             <button className="primary" onClick={() => void openWorkspace()}>
@@ -1240,7 +1359,7 @@ export function DesktopApp(): React.JSX.Element {
             >
               {messages.length === 0 && !stream && !state.task && (
                 <div className="chat-start">
-                  <div className="chat-start-mark">K</div>
+                  <KairoLogo className="chat-start-mark" />
                   <h1>Let’s build.</h1>
                   <p className="chat-start-copy">What would you like to work on?</p>
                   <div className="prompt-suggestions">
@@ -1682,52 +1801,6 @@ export function DesktopApp(): React.JSX.Element {
         </div>
       )}
 
-      {deleteSessionId && (
-        <div className="modal-backdrop">
-          <div
-            className="confirm-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-chat-title"
-          >
-            <h2 id="delete-chat-title">Delete this chat?</h2>
-            <p>This permanently deletes the conversation and its task history.</p>
-            <div>
-              <button onClick={() => setDeleteSessionId(undefined)}>Cancel</button>
-              <button
-                className="destructive-button"
-                onClick={() => void changeSession("delete", deleteSessionId)}
-              >
-                Delete chat
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteAllArchivedOpen && (
-        <div className="modal-backdrop">
-          <div
-            className="confirm-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-all-archived-title"
-          >
-            <h2 id="delete-all-archived-title">Delete all archived chats?</h2>
-            <p>
-              This permanently deletes all {state?.archivedSessions.length ?? 0} archived chats and
-              their task history. This cannot be undone.
-            </p>
-            <div>
-              <button onClick={() => setDeleteAllArchivedOpen(false)}>Cancel</button>
-              <button className="destructive-button" onClick={() => void deleteAllArchived()}>
-                Delete all chats
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {deleteProjectWorkspace && (
         <div className="modal-backdrop">
           <div
@@ -1756,6 +1829,89 @@ export function DesktopApp(): React.JSX.Element {
         </div>
       )}
     </div>
+  );
+}
+
+function KairoLogo({ className }: { className?: string }): React.JSX.Element {
+  return (
+    <svg
+      className={`kairo-logo ${className ?? ""}`}
+      viewBox="0 0 32 32"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M18 4 6 16l6 6M14 28l12-12-6-6"
+        stroke="currentColor"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function DeleteChatDialog({
+  title,
+  description,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+  confirmLabel,
+}: {
+  title: string;
+  description: string;
+  busy: boolean;
+  error: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+  confirmLabel: string;
+}): React.JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => {
+      dialog?.close();
+      previouslyFocused?.focus();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={dialogRef}
+      className="confirm-dialog archive-confirm-dialog"
+      aria-labelledby="archive-delete-title"
+      aria-describedby="archive-delete-description"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onCancel();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") event.stopPropagation();
+      }}
+    >
+      <div className="dialog-danger-icon">
+        <Icon name="trash" />
+      </div>
+      <h2 id="archive-delete-title">{title}</h2>
+      <p id="archive-delete-description">{description} This cannot be undone.</p>
+      {error && (
+        <p className="dialog-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="dialog-actions">
+        <button autoFocus disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="destructive-button" disabled={busy} onClick={onConfirm}>
+          {busy ? "Deleting…" : confirmLabel}
+        </button>
+      </div>
+    </dialog>
   );
 }
 
@@ -1969,6 +2125,8 @@ function ChatMessage({
 
 type IconName =
   | "plus"
+  | "check"
+  | "trash"
   | "folder"
   | "pin"
   | "archive"
@@ -1983,6 +2141,12 @@ type IconName =
 function Icon({ name, className }: { name: IconName; className?: string }): React.JSX.Element {
   const paths: Record<IconName, React.ReactNode> = {
     plus: <path d="M12 5v14M5 12h14" />,
+    check: <path d="m5 12 4 4L19 6" />,
+    trash: (
+      <>
+        <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7" />
+      </>
+    ),
     folder: <path d="M3 7V5h6l2 2h10v12H3Z" />,
     pin: (
       <>
