@@ -344,3 +344,49 @@ test("legacy evaluation runs migrate to the Gemini provider", async () => {
     store.close();
   }
 });
+
+test("session runtimes and external conversation identity survive restart and archive", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-runtime-store-"));
+  const path = join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(path);
+  const builtin = store.create("/workspace", {
+    kind: "builtin",
+    selection: { provider: "mistral", model: "example-model" },
+  });
+  const external = store.create("/workspace", {
+    kind: "external",
+    agentId: "codex",
+    model: "example-codex-model",
+  });
+  store.setExternalSessionId(external.id, "official-thread-id");
+  store.archive(external.id);
+  store.close();
+  const reopened = await SqliteSessionStore.open(path);
+  assert.deepEqual(reopened.get(builtin.id)?.runtime, builtin.runtime);
+  assert.deepEqual(reopened.listArchived()[0]?.runtime, external.runtime);
+  assert.equal(reopened.get(external.id)?.externalSessionId, "official-thread-id");
+  reopened.restore(external.id);
+  reopened.setSessionRuntime(external.id, {
+    kind: "external",
+    agentId: "codex",
+    model: "another-model",
+  });
+  assert.equal(reopened.get(external.id)?.externalSessionId, "official-thread-id");
+  reopened.close();
+});
+
+test("legacy session schemas migrate to the built-in runtime without losing messages", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kairo-runtime-legacy-"));
+  const path = join(dir, "sessions.sqlite");
+  const db = new Database(path);
+  db.exec(
+    "CREATE TABLE sessions (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+  );
+  db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?)").run("legacy-session", "/workspace", 1, 1);
+  db.close();
+  const migrated = await SqliteSessionStore.open(path);
+  assert.deepEqual(migrated.get("legacy-session")?.runtime, { kind: "builtin" });
+  migrated.addMessage("legacy-session", { role: "user", content: "still works", createdAt: 2 });
+  assert.equal(migrated.messages("legacy-session")[0]?.content, "still works");
+  migrated.close();
+});

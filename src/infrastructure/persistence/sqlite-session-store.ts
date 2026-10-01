@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import type { SessionRuntime } from "../../domain/agent-runtime.js";
 import { databasePath, ensureStateDir } from "../filesystem/platform-paths.js";
 import type {
   ContextCheckpoint,
@@ -23,6 +24,8 @@ export interface Session {
   updatedAt: number;
   permissionMode: WorkspaceEditPermission;
   archivedAt?: number;
+  runtime: SessionRuntime;
+  externalSessionId?: string;
 }
 export class SqliteSessionStore {
   /** Wraps an already-initialized database; callers use open() to guarantee setup. */
@@ -49,6 +52,10 @@ export class SqliteSessionStore {
       db.exec("ALTER TABLE sessions ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'workspace'");
     if (!sessionColumns.some((column) => column.name === "archived_at"))
       db.exec("ALTER TABLE sessions ADD COLUMN archived_at INTEGER");
+    if (!sessionColumns.some((column) => column.name === "runtime_json"))
+      db.exec("ALTER TABLE sessions ADD COLUMN runtime_json TEXT");
+    if (!sessionColumns.some((column) => column.name === "external_session_id"))
+      db.exec("ALTER TABLE sessions ADD COLUMN external_session_id TEXT");
     db.exec(`CREATE TABLE IF NOT EXISTS repair_attempts (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, command TEXT NOT NULL, evidence_json TEXT NOT NULL, selected_files_json TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(task_id) REFERENCES tasks(id));
       CREATE INDEX IF NOT EXISTS repair_attempts_task_created ON repair_attempts(task_id, created_at DESC);`);
     const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as {
@@ -251,13 +258,28 @@ export class SqliteSessionStore {
     ).map((row) => ({ ...(JSON.parse(row.event_json) as TaskEvent), id: row.id }));
   }
   /** Creates a durable session associated with one resolved workspace. */
-  create(workspace: string): Session {
+  create(workspace: string, runtime: SessionRuntime = { kind: "builtin" }): Session {
     const now = Date.now();
     const id = `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
     this.db
-      .prepare("INSERT INTO sessions (id, workspace, created_at, updated_at) VALUES (?, ?, ?, ?)")
-      .run(id, workspace, now, now);
-    return { id, workspace, createdAt: now, updatedAt: now, permissionMode: "workspace" };
+      .prepare(
+        "INSERT INTO sessions (id, workspace, created_at, updated_at, runtime_json) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(id, workspace, now, now, JSON.stringify(runtime));
+    return { id, workspace, createdAt: now, updatedAt: now, permissionMode: "workspace", runtime };
+  }
+  /** Persists a session runtime/model without discarding its conversation identity. */
+  setSessionRuntime(id: string, runtime: SessionRuntime): void {
+    const result = this.db
+      .prepare("UPDATE sessions SET runtime_json=?, updated_at=? WHERE id=?")
+      .run(JSON.stringify(runtime), Date.now(), id);
+    if (result.changes !== 1) throw new Error("Session not found.");
+  }
+  setExternalSessionId(id: string, externalId: string): void {
+    const result = this.db
+      .prepare("UPDATE sessions SET external_session_id=? WHERE id=?")
+      .run(externalId, id);
+    if (result.changes !== 1) throw new Error("Session not found.");
   }
   /** Reads the permission mode saved for one session. */
   sessionPermissionMode(sessionId: string): WorkspaceEditPermission {
@@ -276,7 +298,7 @@ export class SqliteSessionStore {
   get(id: string): Session | undefined {
     const row = this.db
       .prepare(
-        "SELECT id, workspace, created_at, updated_at, permission_mode, archived_at FROM sessions WHERE id = ?",
+        "SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id FROM sessions WHERE id = ?",
       )
       .get(id) as Record<string, unknown> | undefined;
     return (
@@ -287,6 +309,11 @@ export class SqliteSessionStore {
         updatedAt: Number(row.updated_at),
         permissionMode: row.permission_mode === "ask" ? "ask" : "workspace",
         archivedAt: row.archived_at == null ? undefined : Number(row.archived_at),
+        runtime: row.runtime_json
+          ? (JSON.parse(String(row.runtime_json)) as SessionRuntime)
+          : { kind: "builtin" },
+        externalSessionId:
+          row.external_session_id == null ? undefined : String(row.external_session_id),
       }
     );
   }
@@ -302,7 +329,7 @@ export class SqliteSessionStore {
     return (
       this.db
         .prepare(
-          `SELECT id, workspace, created_at, updated_at, permission_mode, archived_at FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
+          `SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
         )
         .all() as Record<string, unknown>[]
     ).map((r) => ({
@@ -312,6 +339,10 @@ export class SqliteSessionStore {
       updatedAt: Number(r.updated_at),
       permissionMode: r.permission_mode === "ask" ? "ask" : "workspace",
       archivedAt: r.archived_at == null ? undefined : Number(r.archived_at),
+      runtime: r.runtime_json
+        ? (JSON.parse(String(r.runtime_json)) as SessionRuntime)
+        : { kind: "builtin" },
+      externalSessionId: r.external_session_id == null ? undefined : String(r.external_session_id),
     }));
   }
   /** Archives a session while keeping its conversation available for restoration. */
