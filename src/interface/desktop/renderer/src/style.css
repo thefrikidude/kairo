@@ -778,6 +778,7 @@ button svg {
   padding: 10px 24px 18px;
 }
 .composer {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -785,6 +786,56 @@ button svg {
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease;
+}
+.codex-command-menu {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 460px);
+  max-height: 300px;
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px #0005;
+}
+.codex-command-menu button {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 36px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  text-align: left;
+}
+.codex-command-menu button:hover,
+.codex-command-menu button.selected {
+  background: var(--hover);
+}
+.codex-command-name {
+  min-width: 76px;
+  color: var(--text);
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.codex-command-description {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-command-hint {
+  padding: 6px 10px 3px;
+  color: var(--muted);
+  font-size: 10px;
 }
 .composer:focus-within {
   border-color: var(--focus);

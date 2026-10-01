@@ -131,6 +131,17 @@ function fileExtension(path: string): string {
   return (extension || name.slice(0, 2)).slice(0, 3).toUpperCase();
 }
 
+const codexCommands = [
+  { name: "/plan", command: "plan" as const, description: "Switch Codex to Plan mode" },
+  {
+    name: "/default",
+    command: "default" as const,
+    description: "Switch Codex to its default mode",
+  },
+  { name: "/model", command: "model" as const, description: "Change the Codex model" },
+  { name: "/compact", command: "compact" as const, description: "Compact this conversation" },
+];
+
 export function DesktopApp(): React.JSX.Element {
   const [state, setState] = useState<DesktopBootstrap>();
   const [, setClock] = useState(0);
@@ -195,6 +206,22 @@ export function DesktopApp(): React.JSX.Element {
       setDrafts((current) => ({ ...current, [state.activeSessionId!]: text }));
   };
   const [mode, setMode] = useState<Mode>("build");
+  const isCodexSession =
+    activeSession?.runtime.kind === "external" && activeSession.runtime.agentId === "codex";
+  const [codexModes, setCodexModes] = useState<Record<string, "default" | "plan">>(() => {
+    try {
+      const saved: unknown = JSON.parse(window.localStorage.getItem("kairo.codexModes") ?? "{}");
+      return saved && typeof saved === "object"
+        ? (saved as Record<string, "default" | "plan">)
+        : {};
+    } catch {
+      return {};
+    }
+  });
+  const codexMode = state?.activeSessionId
+    ? (codexModes[state.activeSessionId] ?? "default")
+    : "default";
+  const [commandIndex, setCommandIndex] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -674,9 +701,106 @@ export function DesktopApp(): React.JSX.Element {
     }
   };
 
+  const commandQuery = isCodexSession ? prompt.trimStart() : "";
+  const commandSuggestions = (() => {
+    if (!commandQuery.startsWith("/") || commandQuery.includes("\n")) return [];
+    const [typedName, ...argumentParts] = commandQuery.split(/\s+/);
+    if (typedName === "/model" && (argumentParts.length || commandQuery === "/model")) {
+      const modelPrefix = argumentParts.join(" ").toLowerCase();
+      return (externalAgent?.models ?? [])
+        .filter(
+          (item) =>
+            item.id.toLowerCase().includes(modelPrefix) ||
+            item.label.toLowerCase().includes(modelPrefix),
+        )
+        .slice(0, 8)
+        .map((item) => ({
+          key: item.id,
+          value: `/model ${item.id}`,
+          title: item.label,
+          description: item.id,
+        }));
+    }
+    return codexCommands
+      .filter((item) => item.name.startsWith(typedName))
+      .map((item) => ({
+        key: item.name,
+        value: item.name,
+        title: item.name,
+        description: item.description,
+      }));
+  })();
+
+  const setCodexMode = async (nextMode: "default" | "plan") => {
+    if (!state?.activeSessionId) return;
+    try {
+      await window.kairo.codexCommand(state.activeSessionId, nextMode);
+      setCodexModes((current) => {
+        const next = { ...current, [state.activeSessionId!]: nextMode };
+        try {
+          window.localStorage.setItem("kairo.codexModes", JSON.stringify(next));
+        } catch {
+          // The native Codex setting is already applied; local mode memory is optional.
+        }
+        return next;
+      });
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  };
+
   const sendTask = async () => {
     if (!state?.activeSessionId || !prompt.trim() || busy) return;
     const text = prompt.trim();
+    if (isCodexSession && text.startsWith("/")) {
+      const [typedName, ...argumentParts] = text.split(/\s+/);
+      const definition = codexCommands.find((item) => item.name === typedName);
+      if (!definition) {
+        setError(`Unsupported Codex command: ${typedName}. Type / to see available commands.`);
+        return;
+      }
+      const argument = argumentParts.join(" ").trim();
+      if (definition.command === "model" && !argument) {
+        setError("Choose a model from the command suggestions.");
+        return;
+      }
+      setPrompt("");
+      setError("");
+      try {
+        const result = await window.kairo.codexCommand(
+          state.activeSessionId,
+          definition.command,
+          argument || undefined,
+        );
+        setState((current) =>
+          current && current.activeSessionId === state.activeSessionId
+            ? {
+                ...current,
+                messages: [
+                  ...current.messages,
+                  { role: "model", content: result, createdAt: Date.now() },
+                ],
+              }
+            : current,
+        );
+        if (definition.command === "plan" || definition.command === "default") {
+          const nextMode = definition.command;
+          setCodexModes((current) => {
+            const next = { ...current, [state.activeSessionId!]: nextMode };
+            try {
+              window.localStorage.setItem("kairo.codexModes", JSON.stringify(next));
+            } catch {
+              // The native Codex setting is already applied; local mode memory is optional.
+            }
+            return next;
+          });
+        }
+      } catch (cause) {
+        setPrompt(text);
+        setError((cause as Error).message);
+      }
+      return;
+    }
     setPrompt("");
     followTranscript.current = true;
     setState((current) =>
@@ -1531,17 +1655,61 @@ export function DesktopApp(): React.JSX.Element {
                   </p>
                 )}
               <div className="composer">
+                {commandSuggestions.length > 0 && !busy && (
+                  <div className="codex-command-menu" role="listbox" aria-label="Codex commands">
+                    {commandSuggestions.map((item, index) => (
+                      <button
+                        key={item.key}
+                        className={index === commandIndex ? "selected" : ""}
+                        role="option"
+                        aria-selected={index === commandIndex}
+                        onMouseEnter={() => setCommandIndex(index)}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => setPrompt(item.value)}
+                      >
+                        <span className="codex-command-name">{item.title}</span>
+                        <span className="codex-command-description">{item.description}</span>
+                      </button>
+                    ))}
+                    <span className="codex-command-hint">↑ ↓ to navigate · Enter to select</span>
+                  </div>
+                )}
                 <textarea
                   ref={composerRef}
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
                   onKeyDown={(event) => {
+                    if (commandSuggestions.length && event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setCommandIndex((index) => (index + 1) % commandSuggestions.length);
+                      return;
+                    }
+                    if (commandSuggestions.length && event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setCommandIndex(
+                        (index) =>
+                          (index - 1 + commandSuggestions.length) % commandSuggestions.length,
+                      );
+                      return;
+                    }
                     if (
                       event.key === "Enter" &&
                       !event.shiftKey &&
                       !event.nativeEvent.isComposing
                     ) {
                       event.preventDefault();
+                      const typedName = prompt.trim().split(/\s+/)[0];
+                      const hasModelArgument = /^\/model\s+\S/.test(prompt.trim());
+                      const exactCommand = codexCommands.some((item) => item.name === typedName);
+                      if (
+                        commandSuggestions.length &&
+                        (!exactCommand || (typedName === "/model" && !hasModelArgument))
+                      ) {
+                        setPrompt(
+                          commandSuggestions[commandIndex % commandSuggestions.length]!.value,
+                        );
+                        return;
+                      }
                       void sendTask();
                     }
                   }}
@@ -1551,15 +1719,29 @@ export function DesktopApp(): React.JSX.Element {
                 />
                 <div className="composer-footer">
                   <div className="composer-controls">
-                    <select
-                      aria-label="Task mode"
-                      value={mode}
-                      onChange={(event) => setMode(event.target.value as Mode)}
-                      disabled={busy}
-                    >
-                      <option value="build">Build</option>
-                      <option value="plan">Plan</option>
-                    </select>
+                    {isCodexSession ? (
+                      <select
+                        aria-label="Codex collaboration mode"
+                        value={codexMode}
+                        onChange={(event) =>
+                          void setCodexMode(event.target.value as "default" | "plan")
+                        }
+                        disabled={busy}
+                      >
+                        <option value="default">Default</option>
+                        <option value="plan">Plan</option>
+                      </select>
+                    ) : activeSession.runtime.kind !== "external" ? (
+                      <select
+                        aria-label="Task mode"
+                        value={mode}
+                        onChange={(event) => setMode(event.target.value as Mode)}
+                        disabled={busy}
+                      >
+                        <option value="build">Build</option>
+                        <option value="plan">Plan</option>
+                      </select>
+                    ) : null}
                     {activeSession.runtime.kind === "external" ? (
                       <select
                         aria-label="Agent model"
