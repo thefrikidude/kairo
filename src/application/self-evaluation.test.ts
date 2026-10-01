@@ -72,6 +72,7 @@ test("self-evaluation hidden graders reject every seeded implementation", async 
     try {
       await Promise.all([
         cp(join(process.cwd(), "src"), join(workspace, "src"), { recursive: true }),
+        cp(join(process.cwd(), "package.json"), join(workspace, "package.json")),
         symlink(join(process.cwd(), "node_modules"), join(workspace, "node_modules")),
         writeFile(
           join(workspace, "tsconfig.json"),
