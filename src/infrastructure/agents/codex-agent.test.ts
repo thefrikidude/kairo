@@ -64,7 +64,7 @@ test("Codex discovers account/models, streams once, and resumes the saved thread
   assert.match((await agent.login()).url, /^https:\/\/auth.openai.com\//);
 });
 
-test("Codex commands use native App Server thread settings and compaction", async (t) => {
+test("Codex mode and model commands do not start an empty thread", async (t) => {
   const agent = adapter();
   t.after(() => agent.close());
   let threadId = "";
@@ -72,30 +72,100 @@ test("Codex commands use native App Server thread settings and compaction", asyn
     await agent.executeCommand!({
       workspace: "/tmp",
       command: "plan",
-      onThread: (id) => (threadId = id),
     }),
-    /Plan mode/,
+    /first turn in Plan mode/,
+  );
+  assert.match(
+    await agent.executeCommand!({
+      workspace: "/tmp",
+      command: "model",
+      argument: "fixture-model",
+    }),
+    /used when the first turn starts/,
+  );
+  await assert.rejects(
+    agent.executeCommand!({ workspace: "/tmp", command: "compact" }),
+    /Send a Codex message/,
+  );
+  assert.equal(threadId, "");
+  let text = "";
+  assert.equal(
+    await agent.run(
+      input("first", {
+        model: "fixture-model",
+        codexMode: "plan",
+        onThread: (id) => (threadId = id),
+        onText: (chunk) => (text += chunk),
+      }),
+    ),
+    "complete",
   );
   assert.equal(threadId, "thread-1");
+  assert.equal(text, `${threadId}:fixture-model:first:plan`);
   assert.equal(
     await agent.executeCommand!({
       threadId,
       workspace: "/tmp",
       command: "model",
       argument: "fixture-model",
-      onThread: () => {},
     }),
     "Codex model set to fixture-model.",
+  );
+  assert.match(
+    await agent.executeCommand!({ threadId, workspace: "/tmp", command: "default" }),
+    /default mode/,
   );
   assert.match(
     await agent.executeCommand!({
       threadId,
       workspace: "/tmp",
       command: "compact",
-      onThread: () => {},
     }),
     /compaction/,
   );
+});
+
+test("Codex replaces only missing-rollout threads and keeps non-rollout errors visible", async (t) => {
+  const agent = adapter();
+  t.after(() => agent.close());
+  let threadId = "missing-rollout";
+  let text = "";
+  assert.equal(
+    await agent.run(
+      input("recover", {
+        threadId,
+        model: "fixture-model",
+        codexMode: "plan",
+        onThread: (id) => (threadId = id),
+        onText: (chunk) => (text += chunk),
+      }),
+    ),
+    "complete",
+  );
+  assert.equal(threadId, "thread-1");
+  assert.match(text, /retrying once in a fresh thread/);
+  assert.match(text, /earlier Kairo messages remain visible/i);
+  assert.match(text, /thread-1:fixture-model:recover:plan/);
+
+  let persistedId = "";
+  await assert.rejects(
+    agent.run(
+      input("not-recoverable", { threadId: "resume-error", onThread: (id) => (persistedId = id) }),
+    ),
+    /temporary resume failure/,
+  );
+  assert.equal(persistedId, "");
+});
+
+test("Codex stores a thread id only after turn/start accepts the prompt", async (t) => {
+  const agent = adapter();
+  t.after(() => agent.close());
+  let threadId = "";
+  await assert.rejects(
+    agent.run(input("start-rejected", { onThread: (id) => (threadId = id) })),
+    /turn start rejected/,
+  );
+  assert.equal(threadId, "");
 });
 
 test("Codex concurrent threads keep responses isolated and route approvals to the requesting session", async (t) => {

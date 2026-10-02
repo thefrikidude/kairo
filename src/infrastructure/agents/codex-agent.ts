@@ -19,6 +19,8 @@ type RunningTurn = {
   cancelTimer?: ReturnType<typeof setTimeout>;
 };
 
+const MISSING_ROLLOUT = /no rollout found for thread id\b/i;
+
 /** Uses the installed CLI's official app-server protocol and existing account configuration. */
 export class CodexAgentAdapter implements ExternalAgentAdapter {
   readonly id = "codex";
@@ -114,18 +116,19 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
 
   async executeCommand(input: ExternalCommand): Promise<string> {
     const rpc = await this.connect();
-    let threadId = input.threadId;
-    if (!threadId) {
-      const thread = await rpc.request<ThreadResponse>("thread/start", {
-        cwd: input.workspace,
-        model: input.model ?? null,
-        approvalPolicy: "on-request",
-        approvalsReviewer: "user",
-        sandbox: "workspace-write",
-      });
-      threadId = thread.thread.id;
-      input.onThread(threadId);
+    if (!input.threadId) {
+      if (input.command === "compact")
+        throw new Error("Send a Codex message before using /compact.");
+      if (input.command === "model") {
+        const model = input.argument?.trim();
+        if (!model) throw new Error("Choose a model with /model <model>.");
+        return `Codex model set to ${model}. It will be used when the first turn starts.`;
+      }
+      return input.command === "plan"
+        ? "Codex will start the first turn in Plan mode."
+        : "Codex will start the first turn in its default mode.";
     }
+    const threadId = input.threadId;
     if (this.running.has(threadId)) throw new Error("Wait for the Codex turn to finish first.");
     switch (input.command) {
       case "plan":
@@ -149,6 +152,14 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
         return `Codex model set to ${model}.`;
       }
       case "compact":
+        await rpc.request<ThreadResponse>("thread/resume", {
+          threadId,
+          cwd: input.workspace,
+          model: input.model ?? null,
+          approvalPolicy: "on-request",
+          approvalsReviewer: "user",
+          sandbox: "workspace-write",
+        });
         await rpc.request("thread/compact/start", { threadId });
         return "Codex started conversation compaction.";
     }
@@ -177,16 +188,35 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
       model: input.model ?? null,
       approvalPolicy: "on-request",
       approvalsReviewer: "user",
-      sandbox: input.mode === "plan" ? "read-only" : "workspace-write",
+      sandbox: "workspace-write",
     };
-    const thread = input.threadId
-      ? await rpc.request<ThreadResponse>("thread/resume", {
+    let recoveredMissingRollout = false;
+    let thread: ThreadResponse;
+    if (input.threadId) {
+      try {
+        thread = await rpc.request<ThreadResponse>("thread/resume", {
           ...settings,
           threadId: input.threadId,
-        })
-      : await rpc.request<ThreadResponse>("thread/start", settings);
+        });
+      } catch (error) {
+        if (!(error instanceof Error) || !MISSING_ROLLOUT.test(error.message)) throw error;
+        thread = await rpc.request<ThreadResponse>("thread/start", settings);
+        recoveredMissingRollout = true;
+      }
+    } else {
+      thread = await rpc.request<ThreadResponse>("thread/start", settings);
+    }
     const threadId = thread.thread.id;
-    input.onThread(threadId);
+    if ((recoveredMissingRollout || !input.threadId) && input.codexMode) {
+      const model = input.model ?? (await this.defaultModel(rpc));
+      await rpc.request("thread/settings/update", {
+        threadId,
+        collaborationMode: {
+          mode: input.codexMode,
+          settings: { model, reasoningEffort: null, developerInstructions: null },
+        },
+      });
+    }
     if (input.signal.aborted) return "cancelled";
     if (this.running.has(threadId))
       throw new Error("A turn is already running in this Codex thread.");
@@ -200,6 +230,10 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
     void completed.catch(() => {});
     const turn: RunningTurn = { input, finish: resolve, fail: reject, seenText: new Set() };
     this.running.set(threadId, turn);
+    if (recoveredMissingRollout)
+      input.onText(
+        "Kairo could not resume the saved Codex history and is retrying once in a fresh thread. Earlier Kairo messages remain visible but are not part of Codex context.\n\n",
+      );
     const cancel = () => {
       if (!turn.turnId) return;
       void rpc.request("turn/interrupt", { threadId, turnId: turn.turnId }).catch(reject);
@@ -216,12 +250,14 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
         model: input.model ?? null,
         approvalPolicy: "on-request",
         approvalsReviewer: "user",
-        sandboxPolicy:
-          input.mode === "plan"
-            ? { type: "readOnly", networkAccess: false }
-            : { type: "workspaceWrite", writableRoots: [input.workspace], networkAccess: false },
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          writableRoots: [input.workspace],
+          networkAccess: false,
+        },
       });
       turn.turnId = result.turn.id;
+      input.onThread(threadId);
       if (input.signal.aborted) cancel();
       return await completed;
     } finally {

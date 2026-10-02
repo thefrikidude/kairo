@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 const input = createInterface({ input: process.stdin });
 const turns = new Map<string, { prompt: string; id: string }>();
 const approvals = new Map<string, string>();
+const modes = new Map<string, string>();
 let nextThread = 0;
 const output = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const notify = (method: string, params: unknown) => output({ method, params });
@@ -47,9 +48,19 @@ input.on("line", (line) => {
     reply({ data: [{ model: "fixture-model", displayName: "Fixture model" }], nextCursor: null });
   else if (method === "account/login/start")
     reply({ authUrl: "https://auth.openai.com/authorize?fixture=true" });
-  else if (method === "thread/settings/update") reply({});
-  else if (method === "thread/compact/start") reply({});
-  else if (method === "thread/start" || method === "thread/resume") {
+  else if (method === "thread/settings/update") {
+    const mode = params.collaborationMode?.mode;
+    if (typeof mode === "string") modes.set(params.threadId, mode);
+    reply({});
+  } else if (method === "thread/compact/start") reply({});
+  else if (method === "thread/resume" && params.threadId === "missing-rollout") {
+    output({
+      id,
+      error: { code: -32000, message: `no rollout found for thread id ${params.threadId}` },
+    });
+  } else if (method === "thread/resume" && params.threadId === "resume-error") {
+    output({ id, error: { code: -32000, message: "temporary resume failure" } });
+  } else if (method === "thread/start" || method === "thread/resume") {
     if (params.sandbox !== "read-only" && params.sandbox !== "workspace-write")
       throw new Error("Missing sandbox");
     reply({
@@ -60,10 +71,17 @@ input.on("line", (line) => {
     if (params.approvalPolicy !== "on-request" || params.approvalsReviewer !== "user")
       throw new Error("Unsafe approvals");
     if (!Array.isArray(params.input[0].text_elements)) throw new Error("Missing text elements");
-    if (prompt === "plan" && params.sandboxPolicy.type !== "readOnly")
-      throw new Error("Plan permits writes");
+    if (
+      params.sandboxPolicy.type !== "workspaceWrite" ||
+      !Array.isArray(params.sandboxPolicy.writableRoots)
+    )
+      throw new Error("Codex must use its own collaboration mode without Kairo Plan sandboxing");
     if (prompt === "crash") {
       process.exit(2);
+    }
+    if (prompt === "start-rejected") {
+      output({ id, error: { code: -32000, message: "turn start rejected" } });
+      return;
     }
     const turn = { prompt, id: `turn-${params.threadId}-${Date.now()}` };
     turns.set(params.threadId, turn);
@@ -95,7 +113,11 @@ input.on("line", (line) => {
         item: { id: `command-${turn.id}`, type: "commandExecution", status: "completed" },
       });
       setTimeout(
-        () => finish(params.threadId, `${params.threadId}:${params.model ?? "default"}:${prompt}`),
+        () =>
+          finish(
+            params.threadId,
+            `${params.threadId}:${params.model ?? "default"}:${prompt}${modes.has(params.threadId) ? `:${modes.get(params.threadId)}` : ""}`,
+          ),
         20,
       );
     }

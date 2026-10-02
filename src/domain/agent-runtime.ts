@@ -3,7 +3,13 @@ import type { ModelSelection } from "./models.js";
 /** Runtime identity is fixed once a conversation starts; its model may change between turns. */
 export type SessionRuntime =
   | { kind: "builtin"; selection?: ModelSelection }
-  | { kind: "external"; agentId: string; model?: string };
+  | {
+      kind: "external";
+      agentId: string;
+      model?: string;
+      /** Codex-native collaboration preference queued until its first real turn. */
+      codexMode?: "default" | "plan";
+    };
 
 export type AgentModel = { id: string; label: string };
 export type ExternalAgentInfo = {
@@ -21,6 +27,7 @@ export type ExternalRun = {
   model?: string;
   prompt: string;
   mode: "build" | "plan";
+  codexMode?: "default" | "plan";
   signal: AbortSignal;
   onThread(id: string): void;
   onText(text: string): void;
@@ -31,7 +38,6 @@ export type ExternalRun = {
 export type ExternalCommand = {
   threadId?: string;
   workspace: string;
-  onThread(id: string): void;
   command: "plan" | "default" | "model" | "compact";
   argument?: string;
   model?: string;
