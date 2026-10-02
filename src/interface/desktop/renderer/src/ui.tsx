@@ -286,6 +286,8 @@ export function DesktopApp(): React.JSX.Element {
   const needsApiKey = !selectedProvider?.hasCredential || editingApiKey;
   const [archiveDeleteBusy, setArchiveDeleteBusy] = useState(false);
   const [archiveDeleteError, setArchiveDeleteError] = useState("");
+  const projectMenuRef = useRef<HTMLDivElement>(null);
+  const projectMenuButtonRef = useRef<HTMLButtonElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const followTranscript = useRef(true);
@@ -704,6 +706,21 @@ export function DesktopApp(): React.JSX.Element {
     busy,
     state?.activeSessionId,
   ]);
+
+  useEffect(() => {
+    if (!projectMenuWorkspace) return;
+    const dismissOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (
+        !projectMenuRef.current?.contains(target) &&
+        !projectMenuButtonRef.current?.contains(target)
+      )
+        setProjectMenuWorkspace(undefined);
+    };
+    document.addEventListener("pointerdown", dismissOutside, true);
+    return () => document.removeEventListener("pointerdown", dismissOutside, true);
+  }, [projectMenuWorkspace]);
 
   const messages = useMemo(
     () =>
@@ -1364,8 +1381,12 @@ export function DesktopApp(): React.JSX.Element {
                       <span>{group.name}</span>
                     </button>
                     <button
+                      ref={
+                        projectMenuWorkspace === group.workspace ? projectMenuButtonRef : undefined
+                      }
                       className="project-menu-button"
                       aria-label={`Project actions for ${group.name}`}
+                      aria-expanded={projectMenuWorkspace === group.workspace}
                       title="Project actions"
                       onClick={() =>
                         setProjectMenuWorkspace(
@@ -1376,7 +1397,7 @@ export function DesktopApp(): React.JSX.Element {
                       ···
                     </button>
                     {projectMenuWorkspace === group.workspace && (
-                      <div className="session-menu project-menu">
+                      <div className="session-menu project-menu" ref={projectMenuRef}>
                         <button
                           disabled={projectBusy}
                           title={projectBusy ? "Stop project chats before archiving" : undefined}
