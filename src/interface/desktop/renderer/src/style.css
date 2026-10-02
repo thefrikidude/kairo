@@ -16,7 +16,7 @@
   --negative-bg: #402725;
   --warning: #e9ce94;
   --warning-bg: #363020;
-  --focus: #8ab4f8;
+  --focus: #a0a0a0;
   --backdrop: #0008;
   font:
     13px/1.5 -apple-system,
@@ -45,7 +45,7 @@
   --negative-bg: #fcece9;
   --warning: #785619;
   --warning-bg: #fff5de;
-  --focus: #1a73e8;
+  --focus: #707070;
   --backdrop: #0004;
 }
 * {
@@ -86,10 +86,12 @@ button,
 select {
   -webkit-app-region: no-drag;
 }
+input:focus,
+textarea:focus {
+  outline: none;
+}
 button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
+select:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
@@ -836,10 +838,6 @@ button svg {
   padding: 6px 10px 3px;
   color: var(--muted);
   font-size: 10px;
-}
-.composer:focus-within {
-  border-color: var(--focus);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--focus) 35%, transparent);
 }
 .composer textarea {
   display: block;
