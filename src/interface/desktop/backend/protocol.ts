@@ -8,6 +8,7 @@ const methods = new Set([
   "session:new",
   "session:runtime",
   "agents:refresh",
+  "agents:usage",
   "agents:login",
   "session:archive",
   "session:restore",

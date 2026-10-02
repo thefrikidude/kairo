@@ -135,6 +135,7 @@ function registerIpc(): void {
   handle("session:new", "session:new");
   handle("session:runtime", "session:runtime");
   handle("agents:refresh", "agents:refresh");
+  handle("agents:usage", "agents:usage");
   ipcMain.handle("agents:login", async (event, agentId: unknown) => {
     assertTrusted(event);
     const result = await request<{ url: string }>("agents:login", [agentId]);

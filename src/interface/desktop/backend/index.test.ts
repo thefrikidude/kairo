@@ -1,3 +1,5 @@
+import type { ExternalAgentAdapter } from "../../../domain/agent-runtime.js";
+import type { AgentUsage, UsageChange } from "../../../domain/agent-usage.js";
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -10,7 +12,11 @@ import { AgentRegistry } from "../../../infrastructure/agents/agent-registry.js"
 import { CodexAgentAdapter } from "../../../infrastructure/agents/codex-agent.js";
 import type { DesktopBootstrap, DesktopApproval } from "../shared/api.js";
 
-async function setup(t: TestContext, credentialProvider?: string) {
+async function setup(
+  t: TestContext,
+  credentialProvider?: string,
+  externalAdapter?: ExternalAgentAdapter,
+) {
   const root = await mkdtemp(join(tmpdir(), "kairo-desktop-bridge-"));
   const store = await SqliteSessionStore.open(join(root, "sessions.sqlite"));
   const builtin = store.create(root, {
@@ -23,14 +29,15 @@ async function setup(t: TestContext, credentialProvider?: string) {
     {
       store,
       agents: new AgentRegistry([
-        new CodexAgentAdapter({
-          executable: process.execPath,
-          args: [
-            fileURLToPath(
-              new URL("../../../infrastructure/agents/fixtures/codex-server.js", import.meta.url),
-            ),
-          ],
-        }),
+        externalAdapter ??
+          new CodexAgentAdapter({
+            executable: process.execPath,
+            args: [
+              fileURLToPath(
+                new URL("../../../infrastructure/agents/fixtures/codex-server.js", import.meta.url),
+              ),
+            ],
+          }),
       ]),
       credentials: {
         get: async (provider) =>
@@ -342,4 +349,130 @@ test("Codex server resolution and shutdown release unanswered questions", async 
   await request("task:send", id, "questions", "build");
   await wait(() => events.filter((event) => event.event === "user-input:request").length === 2);
   await runtime.close();
+});
+
+test("agent usage is cached, deduplicated and failures stay out of chat state", async (t) => {
+  let reads = 0;
+  let fail = false;
+  let notify: (reason: UsageChange) => void = () => {};
+  const adapter: ExternalAgentAdapter = {
+    id: "codex",
+    name: "Codex",
+    inspect: async () => ({
+      id: "codex",
+      name: "Codex",
+      installed: true,
+      authenticated: true,
+      models: [],
+    }),
+    login: async () => ({ url: "https://auth.openai.com" }),
+    run: async () => "complete",
+    close: async () => {},
+    onUsageChanged: (listener) => {
+      notify = listener;
+      return () => {
+        notify = () => {};
+      };
+    },
+    readUsage: async () => {
+      reads++;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      if (fail) throw new Error("usage offline");
+      return {
+        defaultBucketId: "codex",
+        buckets: [{ id: "codex", label: "Codex", windows: [{ remainingPercent: 75 }] }],
+      };
+    },
+  };
+  const { request, events, wait, builtin } = await setup(t, undefined, adapter);
+  const a = (await request<DesktopBootstrap>("session:new", { kind: "external", agentId: "codex" }))
+    .activeSessionId!;
+  const b = (await request<DesktopBootstrap>("session:new", { kind: "external", agentId: "codex" }))
+    .activeSessionId!;
+  const [first, second] = await Promise.all([
+    request<AgentUsage>("agents:usage", a),
+    request<AgentUsage>("agents:usage", b),
+  ]);
+  assert.equal(first.status, "available");
+  assert.deepEqual(first, second);
+  assert.equal(reads, 1);
+  await request("agents:usage", a);
+  assert.equal(reads, 1);
+  fail = true;
+  const stale = await request<AgentUsage>("agents:usage", a, true);
+  assert.equal(stale.status, "stale");
+  assert.equal(stale.buckets[0].windows[0].remainingPercent, 75);
+  assert.equal(stale.error, "usage offline");
+  assert.equal(
+    events.some((event) => event.event === "task:state" && event.payload.state === "error"),
+    false,
+  );
+  assert.equal((await request<AgentUsage>("agents:usage", builtin.id)).status, "unavailable");
+  fail = false;
+  notify("account");
+  const cleared = events.at(-1)!.payload;
+  assert.deepEqual(cleared.buckets, []);
+  assert.equal(cleared.status, "loading");
+  await wait(() => reads === 3 && events.at(-1)?.payload.status === "available");
+  notify("disconnected");
+  assert.equal(events.at(-1)?.payload.status, "unavailable");
+  assert.deepEqual(events.at(-1)?.payload.buckets, []);
+});
+
+test("an account change discards an old in-flight usage snapshot and refreshes native updates", async (t) => {
+  let notify: (reason: UsageChange) => void = () => {};
+  let release!: () => void;
+  let reads = 0;
+  const adapter: ExternalAgentAdapter = {
+    id: "codex",
+    name: "Codex",
+    inspect: async () => ({
+      id: "codex",
+      name: "Codex",
+      installed: true,
+      authenticated: true,
+      models: [],
+    }),
+    login: async () => ({ url: "https://auth.openai.com" }),
+    run: async () => "complete",
+    close: async () => {},
+    onUsageChanged: (listener) => {
+      notify = listener;
+      return () => {};
+    },
+    readUsage: async () => {
+      const count = ++reads;
+      if (count === 1)
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      return {
+        defaultBucketId: "codex",
+        buckets: [
+          {
+            id: "codex",
+            label: count === 1 ? "Old account" : "New account",
+            windows: [{ remainingPercent: count === 1 ? 20 : 80 }],
+          },
+        ],
+      };
+    },
+  };
+  const { request, events, wait } = await setup(t, undefined, adapter);
+  const id = (
+    await request<DesktopBootstrap>("session:new", { kind: "external", agentId: "codex" })
+  ).activeSessionId!;
+  const oldRead = request<AgentUsage>("agents:usage", id);
+  await wait(() => reads === 1);
+  notify("account");
+  release();
+  assert.deepEqual((await oldRead).buckets, []);
+  await wait(() => reads === 2 && events.at(-1)?.payload.status === "available");
+  assert.equal((await request<AgentUsage>("agents:usage", id)).buckets[0].label, "New account");
+  notify("limits");
+  await wait(() => reads === 3);
+  assert.equal(
+    events.some((event) => JSON.stringify(event.payload).includes("Old account")),
+    false,
+  );
 });

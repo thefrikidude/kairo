@@ -1,3 +1,4 @@
+import type { AgentUsage } from "../../../domain/agent-usage.js";
 import { validateAgentAnswers, type AgentAnswers } from "../../../domain/agent-user-input.js";
 import { realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
@@ -80,6 +81,99 @@ export async function createDesktopRuntime(
   }
   let activeSessionId: string | undefined;
   let closed = false;
+
+  const usageCache = new Map<string, AgentUsage>();
+  const usageReads = new Map<string, Promise<AgentUsage>>();
+  const usageGenerations = new Map<string, number>();
+  const usageTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let usageRevision = 0;
+  function publishUsage(value: Omit<AgentUsage, "revision">): AgentUsage {
+    const usage = { ...value, revision: ++usageRevision };
+    usageCache.set(usage.agentId, usage);
+    emit("agents:usage", usage);
+    return usage;
+  }
+  function readAgentUsage(agentId: string, force = false): Promise<AgentUsage> {
+    const pending = usageReads.get(agentId);
+    if (pending) return pending;
+    const previous = usageCache.get(agentId);
+    if (
+      !force &&
+      previous?.status === "available" &&
+      Date.now() - (previous.updatedAt ?? 0) < 60_000
+    )
+      return Promise.resolve(previous);
+    const adapter = registry.get(agentId);
+    if (!adapter.readUsage)
+      return Promise.resolve(publishUsage({ agentId, status: "unavailable", buckets: [] }));
+    const generation = usageGenerations.get(agentId) ?? 0;
+    publishUsage({
+      ...previous,
+      agentId,
+      buckets: previous?.buckets ?? [],
+      status: "loading",
+      error: undefined,
+    });
+    const read = (async () => {
+      try {
+        const snapshot = await adapter.readUsage!();
+        if (closed || generation !== (usageGenerations.get(agentId) ?? 0))
+          return usageCache.get(agentId)!;
+        return publishUsage({
+          ...snapshot,
+          agentId,
+          status: snapshot.buckets.some((bucket) => bucket.windows.length)
+            ? "available"
+            : "unavailable",
+          updatedAt: Date.now(),
+        });
+      } catch (error) {
+        if (closed || generation !== (usageGenerations.get(agentId) ?? 0))
+          return usageCache.get(agentId)!;
+        return publishUsage({
+          ...previous,
+          agentId,
+          buckets: previous?.buckets ?? [],
+          status: previous?.updatedAt && previous.buckets.length ? "stale" : "unavailable",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+    usageReads.set(agentId, read);
+    void read.finally(() => {
+      if (usageReads.get(agentId) === read) usageReads.delete(agentId);
+    });
+    return read;
+  }
+  const stopUsage = registry.onUsageChanged((agentId, reason) => {
+    if (closed || !usageCache.has(agentId)) return;
+    if (reason !== "limits") {
+      usageGenerations.set(agentId, (usageGenerations.get(agentId) ?? 0) + 1);
+      usageReads.delete(agentId);
+      publishUsage({
+        agentId,
+        status: reason === "account" ? "loading" : "unavailable",
+        buckets: [],
+        error: reason === "disconnected" ? "Agent service disconnected." : undefined,
+      });
+    }
+    clearTimeout(usageTimers.get(agentId));
+    if (reason === "disconnected") {
+      usageTimers.delete(agentId);
+      return;
+    }
+    usageTimers.set(
+      agentId,
+      setTimeout(() => {
+        usageTimers.delete(agentId);
+        // A limits event may arrive while an older read is still in flight.
+        void (async () => {
+          await usageReads.get(agentId);
+          if (!closed) await readAgentUsage(agentId, true);
+        })();
+      }, 150),
+    );
+  });
 
   function requireSession(store: SqliteSessionStore, sessionId: string): Session {
     if (typeof sessionId !== "string") throw new Error("Invalid session id.");
@@ -321,6 +415,17 @@ export async function createDesktopRuntime(
         activeSessionId = session.id;
         await new RepositoryAwareness(store).ensureFresh(session.id, workspace);
         return bootstrap(store, session.id);
+      }
+      case "agents:usage": {
+        const session = requireSession(store, String(first));
+        if (session.runtime.kind === "builtin")
+          return {
+            agentId: session.runtime.selection?.provider ?? "kairo",
+            revision: 0,
+            status: "unavailable",
+            buckets: [],
+          } satisfies AgentUsage;
+        return readAgentUsage(session.runtime.agentId, second === true);
       }
       case "agents:refresh":
         agentInfo = await registry.inspect();
@@ -798,6 +903,9 @@ export async function createDesktopRuntime(
   async function close(): Promise<void> {
     if (closed) return;
     closed = true;
+    stopUsage();
+    for (const timer of usageTimers.values()) clearTimeout(timer);
+    usageTimers.clear();
     for (const pending of pendingApprovals.values()) pending.resolve(false);
     pendingApprovals.clear();
     for (const pending of pendingUserInputs.values()) pending.resolve();

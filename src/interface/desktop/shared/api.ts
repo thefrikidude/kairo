@@ -1,3 +1,4 @@
+import type { AgentUsage } from "../../../domain/agent-usage.js";
 import type { AgentAnswers, AgentQuestion } from "../../../domain/agent-user-input.js";
 import type { ExternalAgentInfo, SessionRuntime } from "../../../domain/agent-runtime.js";
 import type {
@@ -58,6 +59,8 @@ export interface DesktopApi {
   openSession(sessionId: string): Promise<DesktopBootstrap>;
   newSession(runtime: SessionRuntime, workspace: string): Promise<DesktopBootstrap>;
   setRuntime(sessionId: string, runtime: SessionRuntime): Promise<DesktopBootstrap>;
+  readUsage(sessionId: string, force?: boolean): Promise<AgentUsage>;
+  onUsage(listener: (usage: AgentUsage) => void): () => void;
   refreshAgents(): Promise<ExternalAgentInfo[]>;
   loginAgent(agentId: string): Promise<void>;
   archiveSession(sessionId: string): Promise<DesktopBootstrap>;
