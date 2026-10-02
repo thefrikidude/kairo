@@ -884,6 +884,11 @@ button svg {
   font-size: 12px;
   padding: 4px;
 }
+.composer-controls select:focus,
+.composer-controls select:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 .composer-controls .composer-model-select {
   width: min(240px, 36cqw);
   min-width: 100px;
