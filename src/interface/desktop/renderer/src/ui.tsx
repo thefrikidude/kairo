@@ -218,9 +218,10 @@ export function DesktopApp(): React.JSX.Element {
       return {};
     }
   });
-  const codexMode = state?.activeSessionId
-    ? (codexModes[state.activeSessionId] ?? "default")
-    : "default";
+  const codexMode =
+    activeSession?.runtime.kind === "external"
+      ? (activeSession.runtime.codexMode ?? codexModes[activeSession.id] ?? "default")
+      : "default";
   const [commandIndex, setCommandIndex] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -735,6 +736,18 @@ export function DesktopApp(): React.JSX.Element {
     if (!state?.activeSessionId) return;
     try {
       await window.kairo.codexCommand(state.activeSessionId, nextMode);
+      setState((current) =>
+        current
+          ? {
+              ...current,
+              sessions: current.sessions.map((session) =>
+                session.id === state.activeSessionId && session.runtime.kind === "external"
+                  ? { ...session, runtime: { ...session.runtime, codexMode: nextMode } }
+                  : session,
+              ),
+            }
+          : current,
+      );
       setCodexModes((current) => {
         const next = { ...current, [state.activeSessionId!]: nextMode };
         try {
@@ -776,6 +789,20 @@ export function DesktopApp(): React.JSX.Element {
           current && current.activeSessionId === state.activeSessionId
             ? {
                 ...current,
+                sessions:
+                  definition.command === "plan" || definition.command === "default"
+                    ? current.sessions.map((session) =>
+                        session.id === state.activeSessionId && session.runtime.kind === "external"
+                          ? {
+                              ...session,
+                              runtime: {
+                                ...session.runtime,
+                                codexMode: definition.command as "default" | "plan",
+                              },
+                            }
+                          : session,
+                      )
+                    : current.sessions,
                 messages: [
                   ...current.messages,
                   { role: "model", content: result, createdAt: Date.now() },
@@ -822,7 +849,12 @@ export function DesktopApp(): React.JSX.Element {
     );
     setError("");
     try {
-      await window.kairo.send(state.activeSessionId, text, mode);
+      await window.kairo.send(
+        state.activeSessionId,
+        text,
+        mode,
+        isCodexSession ? codexMode : undefined,
+      );
     } catch (cause) {
       setState((current) => {
         if (!current || current.activeSessionId !== state.activeSessionId) return current;

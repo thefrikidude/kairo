@@ -62,7 +62,12 @@ export interface DesktopApi {
   deleteArchivedSessions(): Promise<DesktopBootstrap>;
   archiveProject(workspace: string): Promise<DesktopBootstrap>;
   deleteProject(workspace: string): Promise<DesktopBootstrap>;
-  send(sessionId: string, prompt: string, mode: "build" | "plan"): Promise<void>;
+  send(
+    sessionId: string,
+    prompt: string,
+    mode: "build" | "plan",
+    codexMode?: "default" | "plan",
+  ): Promise<void>;
   codexCommand(
     sessionId: string,
     command: "plan" | "default" | "model" | "compact",

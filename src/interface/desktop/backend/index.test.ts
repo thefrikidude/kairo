@@ -106,26 +106,64 @@ test("desktop keeps API-key sessions and routes concurrent external chats indepe
 });
 
 test("desktop routes Codex slash commands through its adapter and rejects unsupported commands", async (t) => {
-  const { request, store } = await setup(t);
+  const { request, store, events, wait } = await setup(t);
   const created = await request<DesktopBootstrap>("session:new", {
     kind: "external",
     agentId: "codex",
     model: "fixture-model",
   });
   const sessionId = created.activeSessionId!;
-  assert.match(await request("codex:command", sessionId, "plan"), /Plan mode/);
-  assert.ok(store.get(sessionId)?.externalSessionId);
-  assert.equal(store.messages(sessionId).at(-1)?.content, "Codex switched to Plan mode.");
+  assert.match(await request("codex:command", sessionId, "plan"), /first turn in Plan mode/);
+  assert.equal(store.get(sessionId)?.externalSessionId, undefined);
+  assert.equal(store.get(sessionId)?.runtime.kind, "external");
+  assert.equal((store.get(sessionId)?.runtime as { codexMode?: string }).codexMode, "plan");
   assert.equal(
     await request("codex:command", sessionId, "model", "fixture-model"),
-    "Codex model set to fixture-model.",
+    "Codex model set to fixture-model. It will be used when the first turn starts.",
   );
+  assert.equal(store.get(sessionId)?.externalSessionId, undefined);
   assert.equal((store.get(sessionId)?.runtime as { model?: string }).model, "fixture-model");
+  await assert.rejects(request("codex:command", sessionId, "compact"), /Send a Codex message/);
   await assert.rejects(
     request("codex:command", sessionId, "not-real"),
     /Unsupported Codex command/,
   );
   await assert.rejects(request("codex:command", "missing-session", "plan"), /Session not found/);
+  await request("task:send", sessionId, "first real turn", "build");
+  await wait(() =>
+    events.some(
+      (event) => event.payload.sessionId === sessionId && event.payload.state === "complete",
+    ),
+  );
+  const threadId = store.get(sessionId)?.externalSessionId;
+  assert.ok(threadId);
+  assert.equal(
+    store.messages(sessionId).at(-1)?.content,
+    `${threadId}:fixture-model:first real turn:plan`,
+  );
+});
+
+test("desktop retries an orphaned Codex thread once and persists the replacement", async (t) => {
+  const { request, store, events, wait } = await setup(t);
+  const created = await request<DesktopBootstrap>("session:new", {
+    kind: "external",
+    agentId: "codex",
+    model: "fixture-model",
+  });
+  const sessionId = created.activeSessionId!;
+  store.setExternalSessionId(sessionId, "missing-rollout");
+  await request("task:send", sessionId, "recover this turn", "build");
+  await wait(() =>
+    events.some(
+      (event) => event.payload.sessionId === sessionId && event.payload.state === "complete",
+    ),
+  );
+  const replacementId = store.get(sessionId)?.externalSessionId;
+  assert.equal(replacementId, "thread-1");
+  assert.match(
+    store.messages(sessionId).at(-1)?.content ?? "",
+    /retrying once in a fresh thread[\s\S]*thread-1:fixture-model:recover this turn/,
+  );
 });
 
 test("background approvals survive chat switching and cancellation resolves only that session", async (t) => {

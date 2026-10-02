@@ -132,7 +132,17 @@ export async function createDesktopRuntime(
         !agent.models.some((model) => model.id === runtime.model))
     )
       throw new Error("Choose an available agent model.");
-    return { kind: "external", agentId: agent.id, model: runtime.model };
+    if (
+      runtime.codexMode !== undefined &&
+      (agent.id !== "codex" || (runtime.codexMode !== "default" && runtime.codexMode !== "plan"))
+    )
+      throw new Error("Invalid Codex collaboration mode.");
+    return {
+      kind: "external",
+      agentId: agent.id,
+      model: runtime.model,
+      ...(agent.id === "codex" && runtime.codexMode ? { codexMode: runtime.codexMode } : {}),
+    };
   }
 
   async function toolsFor(store: SqliteSessionStore, sessionId: string): Promise<WorkspaceTools> {
@@ -298,7 +308,7 @@ export async function createDesktopRuntime(
         const session = requireSession(store, String(first));
         if (runningSessions.has(session.id))
           throw new Error("Stop this session before changing its runtime or model.");
-        const runtime = await validateRuntime(second);
+        let runtime = await validateRuntime(second);
         if (runningSessions.has(session.id))
           throw new Error("Stop this session before changing its runtime or model.");
         const identity = (value: SessionRuntime) =>
@@ -308,6 +318,14 @@ export async function createDesktopRuntime(
           identity(runtime) !== identity(session.runtime)
         )
           throw new Error("Create a new chat to use a different agent.");
+        if (
+          runtime.kind === "external" &&
+          runtime.agentId === "codex" &&
+          session.runtime.kind === "external" &&
+          session.runtime.agentId === "codex" &&
+          runtime.codexMode === undefined
+        )
+          runtime = { ...runtime, codexMode: session.runtime.codexMode };
         store.setSessionRuntime(session.id, runtime);
         return bootstrap(store);
       }
@@ -383,6 +401,7 @@ export async function createDesktopRuntime(
         const session = requireSession(store, String(first));
         const prompt = second;
         const mode = third;
+        const requestedCodexMode = request.args[3];
         if (runningSessions.has(session.id))
           throw new Error("A task is already running in this session.");
         if (typeof prompt !== "string" || !prompt.trim()) throw new Error("Enter a task first.");
@@ -406,6 +425,17 @@ export async function createDesktopRuntime(
             if (session.runtime.kind === "external") {
               const adapter = registry.get(session.runtime.agentId);
               const externalMode = session.runtime.agentId === "codex" ? "build" : mode;
+              const codexMode =
+                session.runtime.agentId === "codex"
+                  ? (session.runtime.codexMode ??
+                    (requestedCodexMode === "plan" || requestedCodexMode === "default"
+                      ? requestedCodexMode
+                      : undefined))
+                  : undefined;
+              if (session.runtime.agentId === "codex" && session.runtime.codexMode !== codexMode) {
+                session.runtime = { ...session.runtime, codexMode };
+                store.setSessionRuntime(session.id, session.runtime);
+              }
               const task = store.startTask(
                 session.id,
                 prompt,
@@ -424,6 +454,7 @@ export async function createDesktopRuntime(
                   threadId: session.externalSessionId,
                   model: session.runtime.model,
                   prompt,
+                  codexMode,
                   // Codex owns its collaboration mode. Never route it through Kairo's
                   // built-in planning/read-only workflow.
                   mode: externalMode,
@@ -553,19 +584,26 @@ export async function createDesktopRuntime(
           throw new Error(`Unsupported Codex command: /${String(command)}.`);
         if (command === "model" && (typeof argument !== "string" || !argument.trim()))
           throw new Error("Choose a model with /model <model>.");
+        if (command === "compact" && !session.externalSessionId)
+          throw new Error("Send a Codex message before using /compact.");
         const adapter = registry.get(session.runtime.agentId);
         if (!adapter.executeCommand)
           throw new Error("This Codex adapter does not support commands.");
         const result = await adapter.executeCommand({
           threadId: session.externalSessionId,
           workspace: session.workspace,
-          onThread: (id) => store.setExternalSessionId(session.id, id),
           command,
           argument: typeof argument === "string" ? argument : undefined,
           model: session.runtime.model,
         });
         if (command === "model" && typeof argument === "string") {
           session.runtime = { ...session.runtime, model: argument.trim() };
+          store.setSessionRuntime(session.id, session.runtime);
+        } else if (command === "plan" || command === "default") {
+          session.runtime = {
+            ...session.runtime,
+            codexMode: command === "plan" ? "plan" : "default",
+          };
           store.setSessionRuntime(session.id, session.runtime);
         }
         store.addMessage(session.id, { role: "model", content: result, createdAt: Date.now() });

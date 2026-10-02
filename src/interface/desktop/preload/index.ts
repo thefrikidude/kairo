@@ -16,7 +16,8 @@ const api: DesktopApi = {
   deleteArchivedSessions: () => ipcRenderer.invoke("sessions:delete-archived"),
   archiveProject: (workspace) => ipcRenderer.invoke("project:archive", workspace),
   deleteProject: (workspace) => ipcRenderer.invoke("project:delete", workspace),
-  send: (sessionId, prompt, mode) => ipcRenderer.invoke("task:send", sessionId, prompt, mode),
+  send: (sessionId, prompt, mode, codexMode) =>
+    ipcRenderer.invoke("task:send", sessionId, prompt, mode, codexMode),
   codexCommand: (sessionId, command, argument) =>
     ipcRenderer.invoke("codex:command", sessionId, command, argument),
   cancel: (sessionId) => ipcRenderer.invoke("task:cancel", sessionId),
