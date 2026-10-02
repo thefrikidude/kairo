@@ -2,6 +2,10 @@
 
 Kairo is a desktop workspace for coding agents working on local repositories. Run multiple user-managed native chat sessions, inspect their activity, and review workspace files and diffs. There is no embedded terminal UI.
 
+## Demo
+
+[Watch the silent 75-second Kairo demo](assets/kairo-demo.mp4) (720p MP4).
+
 ## Two ways to work
 
 - **Kairo agent:** bring an API key for Gemini, Groq, Mistral, or OpenRouter directly into Model settings. The existing Kairo runtime provides repository context, approval controls, verification, and optional Jev routing.
