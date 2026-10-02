@@ -1,3 +1,4 @@
+import { parseAgentQuestions, validateAgentAnswers } from "../../domain/agent-user-input.js";
 import type {
   ExternalAgentAdapter,
   ExternalAgentInfo,
@@ -15,6 +16,7 @@ type RunningTurn = {
   finish(status: "complete" | "cancelled"): void;
   fail(error: Error): void;
   seenText: Set<string>;
+  questions: Map<string, AbortController>;
   lastTextItem?: string;
   cancelTimer?: ReturnType<typeof setTimeout>;
 };
@@ -228,7 +230,13 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
     });
     // A transport can fail while turn/start is still awaiting its response.
     void completed.catch(() => {});
-    const turn: RunningTurn = { input, finish: resolve, fail: reject, seenText: new Set() };
+    const turn: RunningTurn = {
+      input,
+      finish: resolve,
+      fail: reject,
+      seenText: new Set(),
+      questions: new Map(),
+    };
     this.running.set(threadId, turn);
     if (recoveredMissingRollout)
       input.onText(
@@ -261,6 +269,7 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
       if (input.signal.aborted) cancel();
       return await completed;
     } finally {
+      for (const controller of turn.questions.values()) controller.abort();
       clearTimeout(turn.cancelTimer);
       input.signal.removeEventListener("abort", cancel);
       this.running.delete(threadId);
@@ -273,11 +282,28 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
     const turn = this.running.get(threadId);
     if (message.id !== undefined && message.method) {
       void this.answer(rpc, message, turn).catch((error: unknown) => {
+        try {
+          rpc.send({
+            id: message.id,
+            error: {
+              code: -32602,
+              message: error instanceof Error ? error.message : String(error),
+            },
+          });
+        } catch {
+          // The transport may already be closed during cancellation or shutdown.
+        }
         turn?.fail(error instanceof Error ? error : new Error(String(error)));
+        if (turn?.turnId)
+          void rpc.request("turn/interrupt", { threadId, turnId: turn.turnId }).catch(() => {});
       });
       return;
     }
     if (!turn) return;
+    if (message.method === "serverRequest/resolved") {
+      turn.questions.get(String(params.requestId))?.abort();
+      return;
+    }
     if (message.method === "turn/started") {
       turn.turnId = String((params.turn as { id: string }).id);
     } else if (message.method === "item/agentMessage/delta") {
@@ -343,7 +369,34 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
     message: RpcMessage,
     turn?: RunningTurn,
   ): Promise<void> {
-    if (
+    if (message.method === "item/tool/requestUserInput" && turn?.input.requestUserInput) {
+      if (turn.input.signal.aborted || message.params?.turnId !== turn.turnId) {
+        rpc.send({
+          id: message.id,
+          error: { code: -32600, message: "Codex question is no longer active." },
+        });
+        return;
+      }
+      const questions = parseAgentQuestions(message.params?.questions);
+      const id = String(message.id);
+      const controller = new AbortController();
+      turn.questions.set(id, controller);
+      const signal = AbortSignal.any([turn.input.signal, controller.signal]);
+      try {
+        const answers = await turn.input.requestUserInput(questions, signal);
+        if (
+          !signal.aborted &&
+          answers &&
+          this.running.get(String(message.params?.threadId)) === turn
+        )
+          rpc.send({
+            id: message.id,
+            result: { answers: validateAgentAnswers(questions, answers) },
+          });
+      } finally {
+        turn.questions.delete(id);
+      }
+    } else if (
       message.method === "item/commandExecution/requestApproval" ||
       message.method === "item/fileChange/requestApproval"
     ) {

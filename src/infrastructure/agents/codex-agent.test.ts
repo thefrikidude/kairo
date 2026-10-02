@@ -247,3 +247,55 @@ test("Codex process failure rejects active turns and the next request starts a f
   await assert.rejects(agent.run(input("crash")), /service stopped/);
   assert.equal(await agent.run(input("recovered")), "complete");
 });
+
+test("Codex native questions return selected and typed answers through the same server request", async (t) => {
+  const agent = adapter();
+  t.after(() => agent.close());
+  let text = "";
+  await agent.run(
+    input("questions", {
+      onText: (chunk) => {
+        text += chunk;
+      },
+      requestUserInput: async (questions, signal) => {
+        assert.equal(signal.aborted, false);
+        assert.equal(questions.length, 2);
+        assert.equal(questions[0].options?.[0].label, "Minimal");
+        assert.equal(questions[1].isSecret, true);
+        return { layout: { answers: ["Minimal"] }, note: { answers: ["Extra details"] } };
+      },
+    }),
+  );
+  assert.deepEqual(JSON.parse(text), {
+    layout: { answers: ["Minimal"] },
+    note: { answers: ["Extra details"] },
+  });
+});
+
+test("Codex clears pending native questions when the server resolves them or the user cancels", async (t) => {
+  const agent = adapter();
+  t.after(() => agent.close());
+  for (const prompt of ["resolved-question", "questions"]) {
+    const controller = new AbortController();
+    let questionAborted = false;
+    const result = await agent.run(
+      input(prompt, {
+        signal: controller.signal,
+        requestUserInput: (_questions, signal) =>
+          new Promise((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                questionAborted = true;
+                resolve(undefined);
+              },
+              { once: true },
+            );
+            if (prompt === "questions") controller.abort();
+          }),
+      }),
+    );
+    assert.equal(result, prompt === "questions" ? "cancelled" : "complete");
+    assert.equal(questionAborted, true);
+  }
+});

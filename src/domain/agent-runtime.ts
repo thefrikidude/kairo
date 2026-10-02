@@ -1,3 +1,4 @@
+import type { AgentAnswers, AgentQuestion } from "./agent-user-input.js";
 import type { ModelSelection } from "./models.js";
 
 /** Runtime identity is fixed once a conversation starts; its model may change between turns. */
@@ -32,6 +33,10 @@ export type ExternalRun = {
   onThread(id: string): void;
   onText(text: string): void;
   onTool(id: string, name: string, complete: boolean, outcome?: string): void;
+  requestUserInput?(
+    questions: AgentQuestion[],
+    signal: AbortSignal,
+  ): Promise<AgentAnswers | undefined>;
   approve(name: string, description: string): Promise<boolean>;
 };
 

@@ -2,6 +2,7 @@
 import { createInterface } from "node:readline";
 const input = createInterface({ input: process.stdin });
 const turns = new Map<string, { prompt: string; id: string }>();
+const questions = new Map<string, string>();
 const approvals = new Map<string, string>();
 const modes = new Map<string, string>();
 let nextThread = 0;
@@ -21,6 +22,12 @@ function finish(threadId: string, text: string, status = "completed") {
 input.on("line", (line) => {
   const message = JSON.parse(line);
   if (!message.method) {
+    const questionThread = questions.get(String(message.id));
+    if (questionThread) {
+      questions.delete(String(message.id));
+      finish(questionThread, JSON.stringify(message.result?.answers ?? message.error));
+      return;
+    }
     const threadId = approvals.get(String(message.id));
     if (threadId) {
       approvals.delete(String(message.id));
@@ -87,7 +94,48 @@ input.on("line", (line) => {
     turns.set(params.threadId, turn);
     reply({ turn: { id: turn.id } });
     notify("turn/started", { threadId: params.threadId, turn: { id: turn.id } });
-    if (prompt === "approval" || prompt === "unsupported") {
+    if (prompt === "questions" || prompt === "resolved-question") {
+      const requestId = `question-${params.threadId}`;
+      questions.set(requestId, params.threadId);
+      output({
+        id: requestId,
+        method: "item/tool/requestUserInput",
+        params: {
+          threadId: params.threadId,
+          turnId: turn.id,
+          itemId: requestId,
+          isBlocking: true,
+          autoResolutionMs: null,
+          questions: [
+            {
+              id: "layout",
+              header: "Layout",
+              question: "Which layout?",
+              isOther: true,
+              isSecret: false,
+              options: [
+                { label: "Minimal", description: "A focused page." },
+                { label: "Detailed", description: "More information." },
+              ],
+            },
+            {
+              id: "note",
+              header: "Note",
+              question: "Any extra details?",
+              isOther: false,
+              isSecret: true,
+              options: null,
+            },
+          ],
+        },
+      });
+      if (prompt === "resolved-question")
+        setTimeout(() => {
+          questions.delete(requestId);
+          notify("serverRequest/resolved", { threadId: params.threadId, requestId });
+          finish(params.threadId, "question cleared by Codex");
+        }, 30);
+    } else if (prompt === "approval" || prompt === "unsupported") {
       const requestId = `approve-${params.threadId}`;
       approvals.set(requestId, params.threadId);
       output({
@@ -123,6 +171,7 @@ input.on("line", (line) => {
     }
   } else if (method === "turn/interrupt") {
     reply({});
+    questions.delete(`question-${params.threadId}`);
     finish(params.threadId, "", "interrupted");
   } else output({ id, error: { code: -32601, message: `Unknown method: ${method}` } });
 });
