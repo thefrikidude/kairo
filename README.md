@@ -53,6 +53,8 @@ The built-in Kairo agent retains workspace-confined file tools, symlink protecti
 
 The Codex bridge handles command and file-change approvals and native structured questions. Select an option or type your own answer in the chat to continue the Codex turn; pending questions survive switching chats and clear when the turn stops. Secret answer fields are masked. Kairo forwards answers directly to Codex without appending a separate transcript message for them. Unsupported requests, including additional permission grants, fail explicitly rather than being automatically approved. External-agent turn completion is not independent proof of verification: changed work is marked as requiring verification.
 
+The app footer shows account usage for the active chat’s agent. Codex reports remaining quota percentages and reset times through its native App Server; click the indicator to see all reported quota buckets or refresh them. Usage updates automatically and is shared across chats. Providers that do not expose limits show “Usage unavailable.”
+
 SQLite preserves chat history, runtime/model choices, Codex collaboration mode, and official external conversation IDs. Codex conversations resume after restarting Kairo when the saved rollout is available. Live processes are managed for the app's lifetime and are stopped on app exit; quitting does not leave a detached Kairo service running. Interrupted turns remain interrupted until the user sends another message.
 
 ## Development

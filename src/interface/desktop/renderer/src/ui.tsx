@@ -1,3 +1,4 @@
+import { UsageFooter } from "./usage-footer.js";
 import { UserInputCard } from "./user-input-card.js";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import parseDiff from "parse-diff";
@@ -2052,6 +2053,25 @@ export function DesktopApp(): React.JSX.Element {
           </section>
         )}
       </aside>
+      {activeSession && (
+        <UsageFooter
+          sessionId={activeSession.id}
+          agentId={
+            activeSession.runtime.kind === "external" ? activeSession.runtime.agentId : undefined
+          }
+          name={
+            activeSession.runtime.kind === "external"
+              ? (externalAgent?.name ?? activeSession.runtime.agentId)
+              : (state?.providers.find((provider) => provider.id === activeModelSelection?.provider)
+                  ?.name ?? "Kairo")
+          }
+          model={
+            activeSession.runtime.kind === "external"
+              ? activeSession.runtime.model
+              : activeModelSelection?.model
+          }
+        />
+      )}
 
       {newSessionOpen && (
         <div
