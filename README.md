@@ -1,4 +1,5 @@
-# Kairo
+<img width="1916" height="942" alt="Screenshot 2026-10-02 at 2 30 56 PM" src="https://github.com/user-attachments/assets/ece583de-8282-499a-bd8d-4f5d1c658463" />
+
 
 Kairo is a desktop workspace for coding agents working on local repositories. Run multiple user-managed native chat sessions, inspect their activity, and review workspace files and diffs. There is no embedded terminal UI.
 
