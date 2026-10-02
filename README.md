@@ -26,6 +26,12 @@ pnpm desktop:dev
 4. Select a model and send a message. External models come from the agent's live catalog; **Agent default model** follows the CLI configuration. An unavailable configured default produces an error; select a model from the catalog instead.
 5. Create additional chats and switch between them while tasks run. Session status appears in the sidebar. Open a waiting chat to answer its approval request.
 
+### Codex commands
+
+Codex chats support `/plan`, `/default`, `/model <model>`, and `/compact` through Codex's native app-server commands. `/plan`, `/default`, and `/model` can be used before the first message; Kairo saves those preferences and applies them when Codex starts the first real turn. `/compact` requires an existing Codex conversation history. Unsupported slash commands are rejected by Kairo and are not sent as prompts.
+
+Kairo saves a Codex conversation ID after Codex accepts the first turn. If an older saved ID no longer has a Codex rollout, Kairo retries the next prompt once in a fresh Codex conversation and displays a notice. The messages remain in Kairo's transcript, but Codex cannot use the missing conversation's context.
+
 A chat keeps its agent identity once its conversation starts. Models can change between turns; create a new chat to use another agent. Each new chat inherits the current chat's runtime choice.
 
 Chats opened in the same project currently share its files. Review shows the workspace's changes, not per-agent ownership. Use separate folders/worktrees for isolated work; automatic worktree management is not implemented. File saves are blocked while a session is working in that workspace.
@@ -41,11 +47,11 @@ Installers, signing, and release distribution are not configured yet.
 
 ## Runtime safeguards and persistence
 
-The built-in Kairo agent retains workspace-confined file tools, symlink protection, command approvals, bounded model/tool loops, and verification/repair behavior. External agents use their own runtime safeguards. The Codex adapter selects read-only access in Plan mode and workspace-write access in Build mode, with human approval requests routed into Kairo. It never launches Codex with permission or sandbox bypass flags.
+The built-in Kairo agent retains workspace-confined file tools, symlink protection, command approvals, bounded model/tool loops, and verification/repair behavior. External agents use their own runtime safeguards. Codex uses its native collaboration mode (including Plan mode) and workspace-write sandbox, with human approval requests routed into Kairo. Kairo does not translate Codex Plan mode into its own planning workflow or launch Codex with permission or sandbox bypass flags.
 
 The initial Codex bridge handles command and file-change approvals. Other server requests, including structured questions and additional permission grants, fail explicitly rather than being automatically approved. External-agent turn completion is not independent proof of verification: changed work is marked as requiring verification.
 
-SQLite preserves chat history, runtime/model choices, and official external conversation IDs. Codex conversations resume after restarting Kairo. Live processes are managed for the app's lifetime and are stopped on app exit; quitting does not leave a detached Kairo service running. Interrupted turns remain interrupted until the user sends another message.
+SQLite preserves chat history, runtime/model choices, Codex collaboration mode, and official external conversation IDs. Codex conversations resume after restarting Kairo when the saved rollout is available. Live processes are managed for the app's lifetime and are stopped on app exit; quitting does not leave a detached Kairo service running. Interrupted turns remain interrupted until the user sends another message.
 
 ## Development
 
