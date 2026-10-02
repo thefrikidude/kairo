@@ -53,9 +53,33 @@ input.on("line", (line) => {
     reply({ account: { type: "chatgpt" }, requiresOpenaiAuth: true });
   else if (method === "model/list")
     reply({ data: [{ model: "fixture-model", displayName: "Fixture model" }], nextCursor: null });
-  else if (method === "account/login/start")
+  else if (method === "account/rateLimits/read") {
+    const common = {
+      limitId: "codex",
+      limitName: "Codex",
+      primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 2000000000 },
+      secondary: { usedPercent: 50, windowDurationMins: 10080, resetsAt: 2000000000 },
+    };
+    reply({
+      rateLimits: common,
+      rateLimitsByLimitId: {
+        codex: common,
+        "fixture-model": {
+          limitId: "fixture-model",
+          limitName: "Fixture quota",
+          normalModelSlug: "fixture-model",
+          primary: { usedPercent: 10, windowDurationMins: 60, resetsAt: null },
+          secondary: null,
+        },
+      },
+    });
+  } else if (method === "account/login/start") {
     reply({ authUrl: "https://auth.openai.com/authorize?fixture=true" });
-  else if (method === "thread/settings/update") {
+    notify("account/updated", { authMode: "chatgpt" });
+    notify("account/rateLimits/updated", {
+      rateLimits: { limitId: "codex", primary: { usedPercent: 30 } },
+    });
+  } else if (method === "thread/settings/update") {
     const mode = params.collaborationMode?.mode;
     if (typeof mode === "string") modes.set(params.threadId, mode);
     reply({});

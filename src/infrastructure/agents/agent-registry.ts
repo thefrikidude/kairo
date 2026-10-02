@@ -1,3 +1,4 @@
+import type { UsageChange } from "../../domain/agent-usage.js";
 import type { ExternalAgentAdapter, ExternalAgentInfo } from "../../domain/agent-runtime.js";
 import { CodexAgentAdapter } from "./codex-agent.js";
 
@@ -14,6 +15,12 @@ export class AgentRegistry {
   }
   async inspect(): Promise<ExternalAgentInfo[]> {
     return Promise.all([...this.adapters.values()].map((adapter) => adapter.inspect()));
+  }
+  onUsageChanged(listener: (agentId: string, reason: UsageChange) => void): () => void {
+    const stop = [...this.adapters.values()].map((adapter) =>
+      adapter.onUsageChanged?.((reason) => listener(adapter.id, reason)),
+    );
+    return () => stop.forEach((unsubscribe) => unsubscribe?.());
   }
   async close(): Promise<void> {
     await Promise.all([...this.adapters.values()].map((adapter) => adapter.close()));

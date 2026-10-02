@@ -299,3 +299,19 @@ test("Codex clears pending native questions when the server resolves them or the
     assert.equal(questionAborted, true);
   }
 });
+
+test("Codex reads account usage and emits usage/account events without an active turn", async (t) => {
+  const agent = adapter();
+  t.after(() => agent.close());
+  const changes: string[] = [];
+  const stop = agent.onUsageChanged((reason) => changes.push(reason));
+  const usage = await agent.readUsage();
+  assert.equal(usage.defaultBucketId, "codex");
+  assert.equal(usage.buckets[0].windows[0].remainingPercent, 75);
+  assert.equal(usage.buckets[1].model, "fixture-model");
+  await agent.login();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(changes.includes("account"));
+  assert.ok(changes.includes("limits"));
+  stop();
+});

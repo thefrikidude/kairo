@@ -1,3 +1,4 @@
+import { parseCodexUsage, type UsageSnapshot, type UsageChange } from "../../domain/agent-usage.js";
 import { parseAgentQuestions, validateAgentAnswers } from "../../domain/agent-user-input.js";
 import type {
   ExternalAgentAdapter,
@@ -31,6 +32,25 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
   private ready?: Promise<JsonRpcProcess>;
   private running = new Map<string, RunningTurn>();
   private closed = false;
+  private usageRevision = 0;
+  private usageListeners = new Set<(reason: UsageChange) => void>();
+
+  onUsageChanged(listener: (reason: UsageChange) => void): () => void {
+    this.usageListeners.add(listener);
+    return () => this.usageListeners.delete(listener);
+  }
+  private usageChanged(reason: UsageChange): void {
+    if (reason !== "limits") this.usageRevision++;
+    for (const listener of this.usageListeners) listener(reason);
+  }
+  async readUsage(): Promise<UsageSnapshot> {
+    const rpc = await this.connect();
+    const revision = this.usageRevision;
+    const result = await rpc.request("account/rateLimits/read", {});
+    if (revision !== this.usageRevision)
+      throw new Error("Codex account changed while reading usage.");
+    return parseCodexUsage(result);
+  }
 
   constructor(private readonly command?: { executable: string; args: string[] }) {}
 
@@ -55,6 +75,7 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
         if (this.rpc === rpc) {
           this.rpc = undefined;
           this.ready = undefined;
+          this.usageChanged("disconnected");
         }
       });
       try {
@@ -278,6 +299,18 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
 
   private receive(rpc: JsonRpcProcess, message: RpcMessage): void {
     const params = message.params ?? {};
+    if (message.id === undefined && message.method === "account/rateLimits/updated") {
+      this.usageChanged("limits");
+      return;
+    }
+    if (
+      message.id === undefined &&
+      (message.method === "account/updated" ||
+        (message.method === "account/login/completed" && params.success === true))
+    ) {
+      this.usageChanged("account");
+      return;
+    }
     const threadId = String(params.threadId ?? "");
     const turn = this.running.get(threadId);
     if (message.id !== undefined && message.method) {

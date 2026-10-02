@@ -1,3 +1,4 @@
+import type { UsageSnapshot, UsageChange } from "./agent-usage.js";
 import type { AgentAnswers, AgentQuestion } from "./agent-user-input.js";
 import type { ModelSelection } from "./models.js";
 
@@ -56,5 +57,7 @@ export interface ExternalAgentAdapter {
   login(): Promise<{ url: string }>;
   run(input: ExternalRun): Promise<"complete" | "cancelled">;
   executeCommand?(input: ExternalCommand): Promise<string>;
+  readUsage?(): Promise<UsageSnapshot>;
+  onUsageChanged?(listener: (reason: UsageChange) => void): () => void;
   close(): Promise<void>;
 }
