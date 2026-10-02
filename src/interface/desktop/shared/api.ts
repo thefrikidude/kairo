@@ -1,3 +1,4 @@
+import type { AgentAnswers, AgentQuestion } from "../../../domain/agent-user-input.js";
 import type { ExternalAgentInfo, SessionRuntime } from "../../../domain/agent-runtime.js";
 import type {
   Message,
@@ -29,6 +30,7 @@ export type DesktopBootstrap = {
   agents: ExternalAgentInfo[];
   liveSessions: Record<string, LiveSession>;
   approvals: DesktopApproval[];
+  userInputs: DesktopUserInput[];
   sessions: Session[];
   archivedSessions: Session[];
   activeSessionId?: string;
@@ -38,6 +40,8 @@ export type DesktopBootstrap = {
   messages: Message[];
   task?: Task;
 };
+
+export type DesktopUserInput = { id: string; sessionId: string; questions: AgentQuestion[] };
 
 export type DesktopApproval = {
   id: string;
@@ -82,6 +86,9 @@ export interface DesktopApi {
   openInCursor(sessionId: string, path: string): Promise<void>;
   saveModel(selection: ModelSelection, apiKey?: string): Promise<DesktopBootstrap>;
   resolveApproval(id: string, decision: "approve" | "task_file" | "deny"): Promise<void>;
+  answerUserInput(id: string, answers: AgentAnswers): Promise<void>;
+  onUserInput(listener: (request: DesktopUserInput) => void): () => void;
+  onUserInputResolved(listener: (event: { id: string; sessionId: string }) => void): () => void;
   onChunk(listener: (event: { sessionId: string; chunk: string }) => void): () => void;
   onTaskState(
     listener: (event: { sessionId: string; state: string; task?: Task; error?: string }) => void,

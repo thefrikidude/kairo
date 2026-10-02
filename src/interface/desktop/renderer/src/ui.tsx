@@ -1,3 +1,4 @@
+import { UserInputCard } from "./user-input-card.js";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import parseDiff from "parse-diff";
 import type { DesktopBootstrap, LiveSession } from "../../shared/api.js";
@@ -168,9 +169,12 @@ export function DesktopApp(): React.JSX.Element {
   const busy = Boolean(live && ["running", "waiting", "cancelling"].includes(live.state));
   const stream = busy ? (live?.stream ?? "") : "";
   const toolActivity = live?.events ?? [];
+  const userInput = state?.userInputs.find((item) => item.sessionId === state.activeSessionId);
   const activity =
     live?.state === "waiting"
-      ? "Waiting for approval"
+      ? userInput
+        ? "Waiting for your answer"
+        : "Waiting for approval"
       : live?.state === "cancelling"
         ? "Stopping…"
         : "Working";
@@ -522,6 +526,9 @@ export function DesktopApp(): React.JSX.Element {
         return {
           ...current,
           liveSessions: { ...current.liveSessions, [event.sessionId]: next },
+          userInputs: terminal
+            ? current.userInputs.filter((item) => item.sessionId !== event.sessionId)
+            : current.userInputs,
           approvals: terminal
             ? current.approvals.filter((item) => item.sessionId !== event.sessionId)
             : current.approvals,
@@ -544,6 +551,26 @@ export function DesktopApp(): React.JSX.Element {
         };
       });
     });
+    const stopUserInput = window.kairo.onUserInput((request) => {
+      setState((current) => {
+        if (!current) return current;
+        const live = current.liveSessions[request.sessionId];
+        return {
+          ...current,
+          userInputs: [...current.userInputs.filter((item) => item.id !== request.id), request],
+          liveSessions: live
+            ? { ...current.liveSessions, [request.sessionId]: { ...live, state: "waiting" } }
+            : current.liveSessions,
+        };
+      });
+    });
+    const stopUserInputResolved = window.kairo.onUserInputResolved(({ id }) => {
+      setState((current) =>
+        current
+          ? { ...current, userInputs: current.userInputs.filter((item) => item.id !== id) }
+          : current,
+      );
+    });
     const stopRuntimeError = window.kairo.onRuntimeError(({ error: message }) => {
       setError(message);
       setState((current) =>
@@ -551,6 +578,7 @@ export function DesktopApp(): React.JSX.Element {
           ? {
               ...current,
               approvals: [],
+              userInputs: [],
               liveSessions: Object.fromEntries(
                 Object.entries(current.liveSessions).map(([id, session]) => [
                   id,
@@ -564,6 +592,8 @@ export function DesktopApp(): React.JSX.Element {
       );
     });
     return () => {
+      stopUserInput();
+      stopUserInputResolved();
       stopRuntimeError();
       stopChunk();
       stopTaskEvent();
@@ -645,7 +675,7 @@ export function DesktopApp(): React.JSX.Element {
       top: transcriptRef.current.scrollHeight,
       behavior: "instant",
     });
-  }, [state?.messages, stream]);
+  }, [state?.messages, stream, userInput?.id]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1623,7 +1653,7 @@ export function DesktopApp(): React.JSX.Element {
                 <div className="working">
                   {busy && <span className="pulse" />}
                   {busy
-                    ? activity === "Waiting for approval" || activity === "Stopping…"
+                    ? live?.state === "waiting" || live?.state === "cancelling"
                       ? `${activity} · Working for ${elapsedSeconds}s`
                       : `Working for ${elapsedSeconds}s`
                     : `Worked for ${elapsedSeconds}s`}
@@ -1634,6 +1664,24 @@ export function DesktopApp(): React.JSX.Element {
                   {error}
                   <button onClick={() => setError("")}>Dismiss</button>
                 </div>
+              )}
+              {userInput && (
+                <UserInputCard
+                  key={userInput.id}
+                  request={userInput}
+                  onAnswered={() => {
+                    setState((current) =>
+                      current
+                        ? {
+                            ...current,
+                            userInputs: current.userInputs.filter(
+                              (item) => item.id !== userInput.id,
+                            ),
+                          }
+                        : current,
+                    );
+                  }}
+                />
               )}
               {approval && (
                 <div className="approval-card">

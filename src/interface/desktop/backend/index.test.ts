@@ -285,3 +285,61 @@ test("archive deletion removes only the chosen history and bulk deletion keeps a
     [],
   );
 });
+
+test("native Codex questions survive switching, validate answers, and stay scoped to their session", async (t) => {
+  const { request, events, builtin, wait, store } = await setup(t);
+  const a = (await request<DesktopBootstrap>("session:new", { kind: "external", agentId: "codex" }))
+    .activeSessionId!;
+  const b = (await request<DesktopBootstrap>("session:new", { kind: "external", agentId: "codex" }))
+    .activeSessionId!;
+  await request("task:send", a, "questions", "build");
+  await request("task:send", b, "questions", "build");
+  await wait(() => events.filter((event) => event.event === "user-input:request").length === 2);
+  const background = await request<DesktopBootstrap>("session:open", builtin.id);
+  assert.equal(background.liveSessions[a].state, "waiting");
+  assert.equal(background.liveSessions[b].state, "waiting");
+  assert.equal(background.userInputs.length, 2);
+  const qa = background.userInputs.find((question) => question.sessionId === a)!;
+  await assert.rejects(request("user-input:resolve", qa.id, {}), /Answer each/);
+  assert.equal((await request<DesktopBootstrap>("bootstrap")).userInputs.length, 2);
+  await request("user-input:resolve", qa.id, {
+    layout: { answers: ["Custom design"] },
+    note: { answers: ["private answer"] },
+  });
+  await wait(() =>
+    events.some((event) => event.payload.sessionId === a && event.payload.state === "complete"),
+  );
+  const remaining = await request<DesktopBootstrap>("bootstrap");
+  assert.equal(remaining.userInputs.length, 1);
+  assert.equal(remaining.userInputs[0].sessionId, b);
+  assert.equal(remaining.liveSessions[b].state, "waiting");
+  // Kairo forwards answers without appending a separate transcript message (including secrets).
+  assert.deepEqual(
+    store.messages(a).map((message) => message.role),
+    ["user", "model"],
+  );
+  await assert.rejects(request("user-input:resolve", qa.id, {}), /no longer active/);
+  await request("task:cancel", b);
+  await wait(() =>
+    events.some((event) => event.payload.sessionId === b && event.payload.state === "cancelled"),
+  );
+  assert.equal((await request<DesktopBootstrap>("bootstrap")).userInputs.length, 0);
+  assert.ok(
+    events.some((event) => event.event === "user-input:resolved" && event.payload.sessionId === b),
+  );
+});
+
+test("Codex server resolution and shutdown release unanswered questions", async (t) => {
+  const { request, events, wait, runtime } = await setup(t);
+  const id = (
+    await request<DesktopBootstrap>("session:new", { kind: "external", agentId: "codex" })
+  ).activeSessionId!;
+  await request("task:send", id, "resolved-question", "build");
+  await wait(() =>
+    events.some((event) => event.payload.sessionId === id && event.payload.state === "complete"),
+  );
+  assert.equal((await request<DesktopBootstrap>("bootstrap")).userInputs.length, 0);
+  await request("task:send", id, "questions", "build");
+  await wait(() => events.filter((event) => event.event === "user-input:request").length === 2);
+  await runtime.close();
+});

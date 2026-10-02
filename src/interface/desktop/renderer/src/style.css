@@ -1860,3 +1860,93 @@ button svg {
   font-size: 12px;
   margin: 0 0 8px;
 }
+
+.user-input-card {
+  margin: 20px 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.user-input-heading,
+.user-input-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.user-input-heading > span,
+.user-input-footer > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.user-input-card fieldset {
+  border: 0;
+  padding: 0;
+  margin: 20px 0;
+  min-width: 0;
+}
+.user-input-card legend {
+  font-weight: 500;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
+.user-input-card legend > span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.question-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  margin: 6px 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.question-option:has(input:checked) {
+  border-color: var(--focus);
+  background: var(--hover);
+}
+.question-option input {
+  margin: 3px 0 0;
+  accent-color: var(--focus);
+  flex-shrink: 0;
+}
+.question-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.question-option strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.question-option small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.question-text {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 12px;
+}
+.question-text input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+.question-error {
+  color: var(--negative);
+  font-size: 13px;
+}

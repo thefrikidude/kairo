@@ -26,6 +26,7 @@ const methods = new Set([
   "workspace:cursor-path",
   "model:save",
   "approval:resolve",
+  "user-input:resolve",
   "shutdown",
 ]);
 

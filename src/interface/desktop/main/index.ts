@@ -171,6 +171,7 @@ function registerIpc(): void {
   });
   handle("model:save", "model:save");
   handle("approval:resolve", "approval:resolve");
+  handle("user-input:resolve", "user-input:resolve");
 }
 
 function createWindow(): void {

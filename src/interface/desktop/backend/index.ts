@@ -1,3 +1,4 @@
+import { validateAgentAnswers, type AgentAnswers } from "../../../domain/agent-user-input.js";
 import { realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import type { ApprovalDecision, ApprovalPolicy, JevFeatures } from "../../../domain/ports.js";
@@ -27,7 +28,12 @@ import {
   providerRegistry,
 } from "../../../infrastructure/providers/provider-registry.js";
 import { JevDecisionProvider } from "../../../infrastructure/providers/jev-safety-advisor.js";
-import type { DesktopApproval, DesktopBootstrap, LiveSession } from "../shared/api.js";
+import type {
+  DesktopApproval,
+  DesktopBootstrap,
+  DesktopUserInput,
+  LiveSession,
+} from "../shared/api.js";
 
 export type DesktopRequest = { id: number; method: string; args: unknown[] };
 export type DesktopEventEmitter = (event: string, payload: unknown) => void;
@@ -56,6 +62,22 @@ export async function createDesktopRuntime(
     string,
     { sessionId: string; approval: DesktopApproval; resolve(decision: ApprovalDecision): void }
   >();
+  const pendingUserInputs = new Map<
+    string,
+    {
+      request: DesktopUserInput;
+      resolve(answers?: AgentAnswers): void;
+    }
+  >();
+  function resumeAfterInput(sessionId: string): void {
+    if (
+      liveSessions[sessionId]?.state === "waiting" &&
+      !externalControllers.get(sessionId)?.signal.aborted &&
+      ![...pendingApprovals.values()].some((item) => item.sessionId === sessionId) &&
+      ![...pendingUserInputs.values()].some((item) => item.request.sessionId === sessionId)
+    )
+      emit("task:state", { sessionId, state: "running", resumed: true });
+  }
   let activeSessionId: string | undefined;
   let closed = false;
 
@@ -90,7 +112,7 @@ export async function createDesktopRuntime(
           if (["complete", "cancelled", "error"].includes(value.state))
             live.finishedAt = Date.now();
         }
-        if (event === "approval:request") live.state = "waiting";
+        if (event === "approval:request" || event === "user-input:request") live.state = "waiting";
         if (event === "task:event") {
           const item = payload as import("../../../domain/models.js").TaskEvent;
           if (item.kind === "tool_started" || item.kind === "tool_finished") {
@@ -180,6 +202,7 @@ export async function createDesktopRuntime(
       agents: agentInfo,
       liveSessions: structuredClone(liveSessions),
       approvals: [...pendingApprovals.values()].map((item) => item.approval),
+      userInputs: [...pendingUserInputs.values()].map((item) => item.request),
       sessions: store.list(),
       archivedSessions: store.listArchived(),
       activeSessionId: session?.id,
@@ -476,6 +499,27 @@ export async function createDesktopRuntime(
                     store.recordTaskEvent(event);
                     emit("task:event", { ...event, sessionId: session.id });
                   },
+                  requestUserInput: (questions, signal) => {
+                    if (signal.aborted || closed) return Promise.resolve(undefined);
+                    const request: DesktopUserInput = {
+                      id: crypto.randomUUID(),
+                      sessionId: session.id,
+                      questions,
+                    };
+                    return new Promise<AgentAnswers | undefined>((resolveAnswers) => {
+                      const settle = (answers?: AgentAnswers) => {
+                        if (!pendingUserInputs.delete(request.id)) return;
+                        signal.removeEventListener("abort", abort);
+                        emit("user-input:resolved", { id: request.id, sessionId: session.id });
+                        resolveAnswers(answers);
+                        if (!signal.aborted) resumeAfterInput(session.id);
+                      };
+                      const abort = () => settle();
+                      pendingUserInputs.set(request.id, { request, resolve: settle });
+                      signal.addEventListener("abort", abort, { once: true });
+                      emit("user-input:request", request);
+                    });
+                  },
                   approve: async (name, description) => {
                     if (controller.signal.aborted || closed) return false;
                     const decision = await new RuntimeApproval(session.id).approve(
@@ -545,6 +589,9 @@ export async function createDesktopRuntime(
                 : "error";
             errorMessage = error instanceof Error ? error.message : String(error);
           } finally {
+            for (const pending of pendingUserInputs.values()) {
+              if (pending.request.sessionId === session.id) pending.resolve();
+            }
             for (const [id, pending] of pendingApprovals) {
               if (pending.sessionId === session.id) {
                 pendingApprovals.delete(id);
@@ -716,6 +763,12 @@ export async function createDesktopRuntime(
         }
         return bootstrap(store);
       }
+      case "user-input:resolve": {
+        const pending = pendingUserInputs.get(String(first));
+        if (!pending) throw new Error("This Codex question is no longer active.");
+        pending.resolve(validateAgentAnswers(pending.request.questions, second));
+        return undefined;
+      }
       case "approval:resolve": {
         const id = String(first);
         const decision = second;
@@ -731,11 +784,7 @@ export async function createDesktopRuntime(
               ? "task_file"
               : true,
         );
-        if (
-          liveSessions[pending.sessionId]?.state === "waiting" &&
-          ![...pendingApprovals.values()].some((item) => item.sessionId === pending.sessionId)
-        )
-          emit("task:state", { sessionId: pending.sessionId, state: "running", resumed: true });
+        resumeAfterInput(pending.sessionId);
         return undefined;
       }
       case "shutdown":
@@ -751,6 +800,7 @@ export async function createDesktopRuntime(
     closed = true;
     for (const pending of pendingApprovals.values()) pending.resolve(false);
     pendingApprovals.clear();
+    for (const pending of pendingUserInputs.values()) pending.resolve();
     for (const sessionId of runningSessions) cancellationRequested.add(sessionId);
     for (const controller of externalControllers.values()) controller.abort();
     for (const [sessionId, agent] of agentsBySession) agent.cancel(sessionId);
