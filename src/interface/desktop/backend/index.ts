@@ -1,3 +1,4 @@
+import { buildAgentHandoff } from "../../../application/agent-handoff.js";
 import type { AgentUsage } from "../../../domain/agent-usage.js";
 import { validateAgentAnswers, type AgentAnswers } from "../../../domain/agent-user-input.js";
 import { realpath } from "node:fs/promises";
@@ -55,6 +56,9 @@ export async function createDesktopRuntime(
   const liveSessions: Record<string, LiveSession> = {};
   const externalControllers = new Map<string, AbortController>();
   const activeRuns = new Set<Promise<void>>();
+  const sessionRuns = new Map<string, Promise<void>>();
+  const switchingSessions = new Set<string>();
+  const handoffContinuation = Symbol("handoffContinuation");
   const toolsBySession = new Map<string, WorkspaceTools>();
   const agentsBySession = new Map<string, CodingAgent>();
   const runningSessions = new Set<string>();
@@ -70,6 +74,22 @@ export async function createDesktopRuntime(
       resolve(answers?: AgentAnswers): void;
     }
   >();
+  function cancelSession(sessionId: string): void {
+    if (!runningSessions.has(sessionId)) return;
+    cancellationRequested.add(sessionId);
+    externalControllers.get(sessionId)?.abort();
+    agentsBySession.get(sessionId)?.cancel(sessionId);
+    for (const [id, pending] of pendingApprovals) {
+      if (pending.sessionId === sessionId) {
+        pendingApprovals.delete(id);
+        pending.resolve(false);
+      }
+    }
+    for (const pending of pendingUserInputs.values()) {
+      if (pending.request.sessionId === sessionId) pending.resolve();
+    }
+    emit("task:state", { sessionId, state: "cancelling" });
+  }
   function resumeAfterInput(sessionId: string): void {
     if (
       liveSessions[sessionId]?.state === "waiting" &&
@@ -220,7 +240,10 @@ export async function createDesktopRuntime(
     if (!closed) emitEvent(event, payload);
   }
 
-  async function validateRuntime(value: unknown): Promise<SessionRuntime> {
+  async function validateRuntime(
+    value: unknown,
+    requireAuthentication = false,
+  ): Promise<SessionRuntime> {
     if (!value || typeof value !== "object") throw new Error("Choose a session runtime.");
     const runtime = value as SessionRuntime;
     if (runtime.kind === "builtin") {
@@ -240,6 +263,8 @@ export async function createDesktopRuntime(
     if (runtime.kind !== "external" || typeof runtime.agentId !== "string")
       throw new Error("Invalid session runtime.");
     const agent = await registry.get(runtime.agentId).inspect();
+    if (requireAuthentication && !agent.authenticated)
+      throw new Error(`Sign in to ${agent.name} before switching agents.`);
     if (!agent.installed || agent.error)
       throw new Error(agent.error ?? `${agent.name} CLI is not installed.`);
     if (
@@ -434,34 +459,79 @@ export async function createDesktopRuntime(
         return registry.get(String(first)).login();
       case "session:runtime": {
         const session = requireSession(store, String(first));
-        if (runningSessions.has(session.id))
-          throw new Error("Stop this session before changing its runtime or model.");
-        let runtime = await validateRuntime(second);
-        if (runningSessions.has(session.id))
-          throw new Error("Stop this session before changing its runtime or model.");
-        const identity = (value: SessionRuntime) =>
-          value.kind === "builtin" ? "builtin" : value.agentId;
-        if (
-          (store.messages(session.id).length || session.externalSessionId) &&
-          identity(runtime) !== identity(session.runtime)
-        )
-          throw new Error("Create a new chat to use a different agent.");
-        if (
-          runtime.kind === "external" &&
-          runtime.agentId === "codex" &&
-          session.runtime.kind === "external" &&
-          session.runtime.agentId === "codex" &&
-          runtime.codexMode === undefined
-        )
-          runtime = { ...runtime, codexMode: session.runtime.codexMode };
-        store.setSessionRuntime(session.id, runtime);
-        return bootstrap(store);
+        if (switchingSessions.has(session.id))
+          throw new Error("An agent switch is already in progress.");
+        switchingSessions.add(session.id);
+        try {
+          // Validate the destination before interrupting any useful work.
+          let runtime = await validateRuntime(second, true);
+          const identity = (value: SessionRuntime) =>
+            value.kind === "builtin" ? "builtin" : value.agentId;
+          const changed = identity(runtime) !== identity(session.runtime);
+          const continueTask = changed && runningSessions.has(session.id);
+          if (continueTask && runtime.kind === "builtin") {
+            const config = runtime.selection ?? (await loadConfig());
+            if (!(await credentials.get(config.provider)))
+              throw new Error(
+                "Add a Kairo provider API key before switching an active task to Kairo.",
+              );
+          }
+          if (runningSessions.has(session.id)) {
+            if (!changed) throw new Error("Stop this session before changing its model.");
+            cancelSession(session.id);
+            await sessionRuns.get(session.id);
+          }
+          if (closed) throw new Error("Kairo runtime is closed.");
+          if (
+            runtime.kind === "external" &&
+            runtime.agentId === "codex" &&
+            session.runtime.kind === "external" &&
+            session.runtime.agentId === "codex" &&
+            runtime.codexMode === undefined
+          )
+            runtime = { ...runtime, codexMode: session.runtime.codexMode };
+          if (changed && (store.messageCount(session.id) || session.externalSessionId)) {
+            const label = (value: SessionRuntime) =>
+              value.kind === "builtin" ? "Kairo" : registry.get(value.agentId).name;
+            store.switchSessionRuntime(
+              session.id,
+              runtime,
+              label(session.runtime),
+              label(runtime),
+              buildAgentHandoff(store, session.id, session.workspace),
+            );
+          } else store.setSessionRuntime(session.id, runtime);
+          if (continueTask) {
+            const task = store.latestTask(session.id);
+            if (task)
+              await dispatch({
+                id: request.id,
+                method: "task:send",
+                args: [
+                  session.id,
+                  `Resume the interrupted task: ${task.prompt}`,
+                  task.mode === "planning" ||
+                  (session.runtime.kind === "external" && session.runtime.codexMode === "plan")
+                    ? "plan"
+                    : "build",
+                  task.mode === "planning" ||
+                  (session.runtime.kind === "external" && session.runtime.codexMode === "plan")
+                    ? "plan"
+                    : undefined,
+                  handoffContinuation,
+                ],
+              });
+          }
+          return bootstrap(store, session.id);
+        } finally {
+          switchingSessions.delete(session.id);
+        }
       }
       case "session:archive":
       case "session:delete": {
         const sessionId = String(first);
         requireSession(store, sessionId);
-        if (runningSessions.has(sessionId))
+        if (runningSessions.has(sessionId) || switchingSessions.has(sessionId))
           throw new Error("Stop the running task before changing this chat.");
         if (request.method === "session:archive") store.archive(sessionId);
         else store.delete(sessionId);
@@ -471,7 +541,11 @@ export async function createDesktopRuntime(
       }
       case "sessions:delete-archived": {
         const archivedSessions = store.listArchived();
-        if (archivedSessions.some((session) => runningSessions.has(session.id)))
+        if (
+          archivedSessions.some(
+            (session) => runningSessions.has(session.id) || switchingSessions.has(session.id),
+          )
+        )
           throw new Error("Stop every running task before deleting archived chats.");
         const removedIds = store.deleteArchived();
         for (const sessionId of removedIds) {
@@ -491,7 +565,11 @@ export async function createDesktopRuntime(
         if (typeof first !== "string" || !first) throw new Error("Choose a project to archive.");
         const projectSessions = store.list().filter((session) => session.workspace === first);
         if (!projectSessions.length) throw new Error("Project has no active chats to archive.");
-        if (projectSessions.some((session) => runningSessions.has(session.id)))
+        if (
+          projectSessions.some(
+            (session) => runningSessions.has(session.id) || switchingSessions.has(session.id),
+          )
+        )
           throw new Error("Stop every running chat in this project before archiving it.");
         const archivedIds = store.archiveWorkspace(first);
         for (const sessionId of archivedIds) delete liveSessions[sessionId];
@@ -505,7 +583,11 @@ export async function createDesktopRuntime(
           (session) => session.workspace === first,
         );
         if (!projectSessions.length) throw new Error("Project not found.");
-        if (projectSessions.some((session) => runningSessions.has(session.id)))
+        if (
+          projectSessions.some(
+            (session) => runningSessions.has(session.id) || switchingSessions.has(session.id),
+          )
+        )
           throw new Error("Stop every running chat in this project before deleting it.");
         const removedIds = store.deleteWorkspace(first);
         for (const sessionId of removedIds) {
@@ -530,6 +612,8 @@ export async function createDesktopRuntime(
         const prompt = second;
         const mode = third;
         const requestedCodexMode = request.args[3];
+        if (switchingSessions.has(session.id) && request.args[4] !== handoffContinuation)
+          throw new Error("Wait for the agent switch to finish.");
         if (runningSessions.has(session.id))
           throw new Error("A task is already running in this session.");
         if (typeof prompt !== "string" || !prompt.trim()) throw new Error("Enter a task first.");
@@ -564,6 +648,14 @@ export async function createDesktopRuntime(
                 session.runtime = { ...session.runtime, codexMode };
                 store.setSessionRuntime(session.id, session.runtime);
               }
+              const savedHandoff = store.latestAgentHandoff(session.id);
+              const context =
+                !session.externalSessionId && savedHandoff?.startsWith("Kairo task handoff")
+                  ? savedHandoff
+                  : store.latestTask(session.id) ||
+                      store.messages(session.id).some((message) => message.role === "user")
+                    ? buildAgentHandoff(store, session.id, session.workspace)
+                    : undefined;
               const task = store.startTask(
                 session.id,
                 prompt,
@@ -582,6 +674,7 @@ export async function createDesktopRuntime(
                   threadId: session.externalSessionId,
                   model: session.runtime.model,
                   prompt,
+                  context,
                   codexMode,
                   // Codex owns its collaboration mode. Never route it through Kairo's
                   // built-in planning/read-only workflow.
@@ -657,6 +750,7 @@ export async function createDesktopRuntime(
                 if (text)
                   store.addMessage(session.id, {
                     role: "model",
+                    agentName: adapter.name,
                     content: text,
                     createdAt: Date.now(),
                   });
@@ -716,14 +810,18 @@ export async function createDesktopRuntime(
           }
         })();
         activeRuns.add(runPromise);
-        void runPromise.finally(() => activeRuns.delete(runPromise));
+        sessionRuns.set(session.id, runPromise);
+        void runPromise.finally(() => {
+          activeRuns.delete(runPromise);
+          sessionRuns.delete(session.id);
+        });
         return undefined;
       }
       case "codex:command": {
         const session = requireSession(store, String(first));
         const command = second;
         const argument = third;
-        if (runningSessions.has(session.id))
+        if (runningSessions.has(session.id) || switchingSessions.has(session.id))
           throw new Error("Wait for the Codex turn to finish before running a command.");
         if (session.runtime.kind !== "external" || session.runtime.agentId !== "codex")
           throw new Error("Codex commands are available in Codex sessions only.");
@@ -763,26 +861,7 @@ export async function createDesktopRuntime(
       }
       case "task:cancel": {
         const session = requireSession(store, String(first));
-        if (!runningSessions.has(session.id)) return undefined;
-        externalControllers.get(session.id)?.abort();
-        for (const [id, pending] of pendingApprovals) {
-          if (pending.sessionId === session.id) {
-            pendingApprovals.delete(id);
-            pending.resolve(false);
-          }
-        }
-        const agent = agentsBySession.get(session.id);
-        const task = agent?.status(session.id);
-        if (agent && task && ["planning", "acting", "verifying"].includes(task.status)) {
-          agent.cancel(session.id);
-          for (const [id, pending] of pendingApprovals) {
-            if (pending.sessionId === session.id) {
-              pendingApprovals.delete(id);
-              pending.resolve(false);
-            }
-          }
-        } else cancellationRequested.add(session.id);
-        emit("task:state", { sessionId: session.id, state: "cancelling" });
+        cancelSession(session.id);
         return undefined;
       }
       case "workspace:list": {
@@ -838,7 +917,10 @@ export async function createDesktopRuntime(
       }
       case "model:save": {
         const targetSessionId = activeSessionId;
-        if (targetSessionId && runningSessions.has(targetSessionId))
+        if (
+          targetSessionId &&
+          (runningSessions.has(targetSessionId) || switchingSessions.has(targetSessionId))
+        )
           throw new Error("Stop this session before changing its model.");
         const selection = first as ModelSelection;
         const apiKey = typeof second === "string" ? second.trim() : "";
@@ -851,7 +933,10 @@ export async function createDesktopRuntime(
         } else if (!(await credentials.get(provider.id))) {
           throw new Error(`Add an API key for ${provider.name}.`);
         }
-        if (targetSessionId && runningSessions.has(targetSessionId))
+        if (
+          targetSessionId &&
+          (runningSessions.has(targetSessionId) || switchingSessions.has(targetSessionId))
+        )
           throw new Error("Stop this session before changing its model.");
         await setModelSelection({ provider: provider.id, model: selection.model.trim() });
         await setAutoModelRoutingEnabled(false);

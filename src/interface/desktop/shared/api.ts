@@ -58,6 +58,7 @@ export interface DesktopApi {
   pickWorkspace(): Promise<string | undefined>;
   openSession(sessionId: string): Promise<DesktopBootstrap>;
   newSession(runtime: SessionRuntime, workspace: string): Promise<DesktopBootstrap>;
+  /** Switching agents stops an active turn, saves a handoff, then continues it in a fresh native session. */
   setRuntime(sessionId: string, runtime: SessionRuntime): Promise<DesktopBootstrap>;
   readUsage(sessionId: string, force?: boolean): Promise<AgentUsage>;
   onUsage(listener: (usage: AgentUsage) => void): () => void;

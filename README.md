@@ -7,9 +7,9 @@ Kairo is a desktop workspace for coding agents working on local repositories. Ru
 ## Two ways to work
 
 - **Kairo agent:** bring an API key for Gemini, Groq, Mistral, or OpenRouter directly into Model settings. The existing Kairo runtime provides repository context, approval controls, verification, and optional Jev routing.
-- **External agents:** use an installed agent's official runtime and authentication. The first native-chat adapter supports **Codex CLI**, through its official [app-server protocol](https://developers.openai.com/codex/app-server). Its CLI runs as a background service and streams responses, tool activity, and supported approvals into Kairo.
+- **External agents:** use an installed agent's official runtime and authentication. **Codex CLI** uses its official [app-server protocol](https://developers.openai.com/codex/app-server). **OpenCode** uses `opencode acp`. These background processes stream responses, tool activity, and supported approvals into Kairo.
 
-External-agent support is adapter-based. Claude Code and other agents are not integrated yet; arbitrary terminal commands are not treated as native-chat agents. Automatic delegation and coordination are planned after user-managed sessions are stable.
+External-agent support is adapter-based; arbitrary terminal commands are not treated as native-chat agents. Automatic delegation and coordination are planned after user-managed sessions are stable.
 
 ## Run from source
 
@@ -23,18 +23,26 @@ pnpm desktop:dev
 ```
 
 1. Use **Open project** to select a local workspace.
-2. Choose **Kairo · API key** or **Codex** in the Agent selector before sending the first message. Use **Refresh agents** after installing the CLI.
+2. Choose **Kairo**, **Codex**, or **OpenCode** in the Agent selector. Use **Refresh agents** after installing the CLI.
 3. For Kairo, enter a provider key in Model settings. For Codex, Kairo reuses the official CLI login; if needed, **Sign in to Codex** opens its official browser authentication flow. Kairo does not import or store Codex account tokens.
-4. Select a model and send a message. External models come from the agent's live catalog; **Agent default model** follows the CLI configuration. An unavailable configured default produces an error; select a model from the catalog instead.
+4. Select a model and send a message. Codex models come from its live catalog; OpenCode currently uses its configured default model. **Agent default model** follows the CLI configuration. An unavailable configured default produces an error; select a model from the catalog instead.
 5. Create additional chats and switch between them while tasks run. Session status appears in the sidebar. Open a waiting chat to answer its approval request.
 
 ### Codex commands
 
 Codex chats support `/plan`, `/default`, `/model <model>`, and `/compact` through Codex's native app-server commands. `/plan`, `/default`, and `/model` can be used before the first message; Kairo saves those preferences and applies them when Codex starts the first real turn. `/compact` requires an existing Codex conversation history. Unsupported slash commands are rejected by Kairo and are not sent as prompts.
 
-Kairo saves a Codex conversation ID after Codex accepts the first turn. If an older saved ID no longer has a Codex rollout, Kairo retries the next prompt once in a fresh Codex conversation and displays a notice. The messages remain in Kairo's transcript, but Codex cannot use the missing conversation's context.
+Kairo saves a Codex conversation ID after Codex accepts the first turn. If an older saved ID no longer has a Codex rollout, Kairo retries the next prompt once in a fresh Codex conversation and displays a notice. Kairo supplies bounded context from its saved transcript when the native history is unavailable.
 
-A chat keeps its agent identity once its conversation starts. Models can change between turns; create a new chat to use another agent. Each new chat inherits the current chat's runtime choice.
+### Switch agents in the same chat
+
+Use the composer’s **Task agent** selector at any point. Switching during a run validates the destination, stops the current agent, waits for termination, and automatically resumes the interrupted task with the selected agent. Switching an idle chat takes effect on the next message. Models can change between turns without switching agents.
+
+Kairo keeps the same chat, workspace, and history. It saves an expandable handoff containing the original request, recent conversation excerpts, task state, changed-file paths, and recorded verification evidence. The destination starts a fresh native session, including when switching back to an earlier agent. This is a bounded evidence handoff, not a complete copy of native context; the new agent must inspect current files and resolve missing details. Historical replies retain their author names. Checkpoints and handoff notices survive app restarts.
+
+OpenCode requires its CLI and a configured provider (`opencode auth login`). Refresh agents after setup. Kairo checks CLI authentication status without copying credentials. OpenCode authentication currently needs terminal setup; its default model comes from CLI configuration. OpenCode is preselected for new chats when it is installed and authenticated. Claude integration is deferred and is not shown in the agent selector.
+
+ACP processes are owned per run and stopped after completion. If an agent advertises session loading, Kairo reloads its recorded session on the next turn; otherwise it creates a fresh session with a Kairo handoff. ACP client filesystem and terminal methods are not advertised; tools run in the agent runtime. Permission requests select an `allow_once` or `reject_once` option; Kairo does not select persistent grants. Native agent settings still govern operations that do not request client approval. Unrecognized client requests fail explicitly. Slash-command expansion for these agents is deferred.
 
 Chats opened in the same project currently share its files. Review shows the workspace's changes, not per-agent ownership. Use separate folders/worktrees for isolated work; automatic worktree management is not implemented. File saves are blocked while a session is working in that workspace.
 

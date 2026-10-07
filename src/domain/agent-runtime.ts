@@ -2,7 +2,7 @@ import type { UsageSnapshot, UsageChange } from "./agent-usage.js";
 import type { AgentAnswers, AgentQuestion } from "./agent-user-input.js";
 import type { ModelSelection } from "./models.js";
 
-/** Runtime identity is fixed once a conversation starts; its model may change between turns. */
+/** Kairo conversation identity survives changes to its execution backend. */
 export type SessionRuntime =
   | { kind: "builtin"; selection?: ModelSelection }
   | {
@@ -28,6 +28,8 @@ export type ExternalRun = {
   threadId?: string;
   model?: string;
   prompt: string;
+  /** Bounded Kairo context supplied when a native session starts fresh. */
+  context?: string;
   mode: "build" | "plan";
   codexMode?: "default" | "plan";
   signal: AbortSignal;

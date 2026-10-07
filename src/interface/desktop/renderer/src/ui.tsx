@@ -650,8 +650,12 @@ export function DesktopApp(): React.JSX.Element {
   const chooseRuntime = async (runtime: SessionRuntime) => {
     if (!activeSession) return;
     setAgentSetupBusy(true);
+    const sessionId = activeSession.id;
+    const revision = navigationRevision.current;
     try {
-      applyState(await window.kairo.setRuntime(activeSession.id, runtime));
+      const next = await window.kairo.setRuntime(sessionId, runtime);
+      if (revision === navigationRevision.current && activeSessionRef.current === sessionId)
+        applyState(next);
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -811,7 +815,7 @@ export function DesktopApp(): React.JSX.Element {
   };
 
   const sendTask = async () => {
-    if (!state?.activeSessionId || !prompt.trim() || busy) return;
+    if (!state?.activeSessionId || !prompt.trim() || busy || agentSetupBusy) return;
     const text = prompt.trim();
     if (isCodexSession && text.startsWith("/")) {
       const [typedName, ...argumentParts] = text.split(/\s+/);
@@ -1333,7 +1337,11 @@ export function DesktopApp(): React.JSX.Element {
         <button
           className="new-chat"
           onClick={() => {
-            setNewSessionChoice("");
+            const openCode = state?.agents.find(
+              (agent) =>
+                agent.id === "opencode" && agent.installed && agent.authenticated && !agent.error,
+            );
+            setNewSessionChoice(openCode ? JSON.stringify(["agent", "opencode"]) : "");
             setNewSessionWorkspace("");
             setNewSessionOpen(true);
           }}
@@ -1821,6 +1829,39 @@ export function DesktopApp(): React.JSX.Element {
                 />
                 <div className="composer-footer">
                   <div className="composer-controls">
+                    <select
+                      aria-label="Task agent"
+                      title={
+                        busy
+                          ? "Switching stops the current agent and prepares a context handoff"
+                          : "Choose the agent for this conversation"
+                      }
+                      disabled={agentSetupBusy}
+                      value={
+                        activeSession.runtime.kind === "builtin"
+                          ? "builtin"
+                          : activeSession.runtime.agentId
+                      }
+                      onChange={(event) =>
+                        void chooseRuntime(
+                          event.target.value === "builtin"
+                            ? { kind: "builtin", selection: state.config }
+                            : { kind: "external", agentId: event.target.value },
+                        )
+                      }
+                    >
+                      <option value="builtin">Kairo</option>
+                      {state.agents.map((agent) => (
+                        <option
+                          key={agent.id}
+                          value={agent.id}
+                          disabled={!agent.installed || Boolean(agent.error)}
+                        >
+                          {agent.name}
+                          {!agent.installed || agent.error ? " · setup required" : ""}
+                        </option>
+                      ))}
+                    </select>
                     {isCodexSession ? (
                       <select
                         aria-label="Codex collaboration mode"
@@ -2470,13 +2511,18 @@ function ChatMessage({
           ? "Continuing task"
           : undefined;
   const user = message.role === "user" && !internalUserLabel;
-  const author = internalUserLabel ?? (user ? "You" : agentName);
+  const author = internalUserLabel ?? (user ? "You" : (message.agentName ?? agentName));
   return (
     <div className={`message ${user ? "user" : "assistant"}`}>
       <div className="avatar">{user ? "Y" : "K"}</div>
       <div className="message-body">
         <div className="message-author">{author}</div>
-        {user ? (
+        {message.toolName === "agent_handoff" ? (
+          <details className="agent-handoff">
+            <summary>{message.content.split("\n")[0]}</summary>
+            <Markdown content={message.content.split("\n\n").slice(1).join("\n\n")} />
+          </details>
+        ) : user ? (
           <div className="message-text">{message.content}</div>
         ) : (
           <Markdown content={message.content} />

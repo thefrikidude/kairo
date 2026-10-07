@@ -1,3 +1,4 @@
+import { AcpAgentAdapter } from "./acp-agent.js";
 import type { UsageChange } from "../../domain/agent-usage.js";
 import type { ExternalAgentAdapter, ExternalAgentInfo } from "../../domain/agent-runtime.js";
 import { CodexAgentAdapter } from "./codex-agent.js";
@@ -5,7 +6,12 @@ import { CodexAgentAdapter } from "./codex-agent.js";
 /** Additional agents register protocol adapters here, without changes to chat/session routing. */
 export class AgentRegistry {
   private readonly adapters: Map<string, ExternalAgentAdapter>;
-  constructor(adapters: ExternalAgentAdapter[] = [new CodexAgentAdapter()]) {
+  constructor(
+    adapters: ExternalAgentAdapter[] = [
+      new AcpAgentAdapter("opencode", "OpenCode"),
+      new CodexAgentAdapter(),
+    ],
+  ) {
     this.adapters = new Map(adapters.map((adapter) => [adapter.id, adapter]));
   }
   get(id: string): ExternalAgentAdapter {

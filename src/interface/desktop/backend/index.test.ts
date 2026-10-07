@@ -1,4 +1,4 @@
-import type { ExternalAgentAdapter } from "../../../domain/agent-runtime.js";
+import type { ExternalAgentAdapter, ExternalRun } from "../../../domain/agent-runtime.js";
 import type { AgentUsage, UsageChange } from "../../../domain/agent-usage.js";
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -15,7 +15,7 @@ import type { DesktopBootstrap, DesktopApproval } from "../shared/api.js";
 async function setup(
   t: TestContext,
   credentialProvider?: string,
-  externalAdapter?: ExternalAgentAdapter,
+  externalAdapter?: ExternalAgentAdapter | ExternalAgentAdapter[],
 ) {
   const root = await mkdtemp(join(tmpdir(), "kairo-desktop-bridge-"));
   const store = await SqliteSessionStore.open(join(root, "sessions.sqlite"));
@@ -28,17 +28,24 @@ async function setup(
     (event, payload) => events.push({ event, payload: payload as Record<string, unknown> }),
     {
       store,
-      agents: new AgentRegistry([
-        externalAdapter ??
-          new CodexAgentAdapter({
-            executable: process.execPath,
-            args: [
-              fileURLToPath(
-                new URL("../../../infrastructure/agents/fixtures/codex-server.js", import.meta.url),
-              ),
+      agents: new AgentRegistry(
+        Array.isArray(externalAdapter)
+          ? externalAdapter
+          : [
+              externalAdapter ??
+                new CodexAgentAdapter({
+                  executable: process.execPath,
+                  args: [
+                    fileURLToPath(
+                      new URL(
+                        "../../../infrastructure/agents/fixtures/codex-server.js",
+                        import.meta.url,
+                      ),
+                    ),
+                  ],
+                }),
             ],
-          }),
-      ]),
+      ),
       credentials: {
         get: async (provider) =>
           provider === credentialProvider ? "private-fixture-key" : undefined,
@@ -103,13 +110,18 @@ test("desktop keeps API-key sessions and routes concurrent external chats indepe
   assert.equal(store.messages(a).length, 1);
   await assert.rejects(request("task:send", a, "duplicate", "build"), /already running/);
   await assert.rejects(request("session:delete", a), /Stop the running/);
-  await assert.rejects(request("session:runtime", a, { kind: "builtin" }), /Stop this session/);
+  await assert.rejects(
+    request("session:runtime", a, { kind: "external", agentId: "codex", model: "fixture-model" }),
+    /Stop this session/,
+  );
   await request("task:cancel", a);
   await wait(() =>
     events.some((event) => event.payload.sessionId === a && event.payload.state === "cancelled"),
   );
   assert.equal(store.latestTask(a)?.status, "cancelled");
-  await assert.rejects(request("session:runtime", b, { kind: "builtin" }), /new chat/);
+  await request("session:runtime", b, { kind: "builtin" });
+  assert.equal(store.get(b)?.runtime.kind, "builtin");
+  assert.equal(store.get(b)?.externalSessionId, undefined);
 });
 
 test("desktop routes Codex slash commands through its adapter and rejects unsupported commands", async (t) => {
@@ -475,4 +487,178 @@ test("an account change discards an old in-flight usage snapshot and refreshes n
     events.some((event) => JSON.stringify(event.payload).includes("Old account")),
     false,
   );
+});
+
+function switchingAdapter(
+  id: string,
+  run: ExternalAgentAdapter["run"],
+  authenticated = true,
+): ExternalAgentAdapter {
+  return {
+    id,
+    name: id,
+    inspect: async () => ({ id, name: id, installed: true, authenticated, models: [] }),
+    login: async () => ({ url: "https://example.com" }),
+    run,
+    close: async () => {},
+  };
+}
+
+test("switching an active task waits for cancellation and hands partial output to the new agent", async (t) => {
+  let stopped = false;
+  let destination: ExternalRun | undefined;
+  const first = switchingAdapter("first", async (input) => {
+    input.onThread("old-native-thread");
+    input.onText("Implemented the first part.");
+    await new Promise<void>((resolve) =>
+      input.signal.addEventListener(
+        "abort",
+        () =>
+          setTimeout(() => {
+            stopped = true;
+            resolve();
+          }, 30),
+        { once: true },
+      ),
+    );
+    return "cancelled";
+  });
+  const second = switchingAdapter("second", async (input) => {
+    assert.equal(stopped, true);
+    destination = input;
+    input.onThread("new-native-thread");
+    input.onText("Continued the remaining work.");
+    return "complete";
+  });
+  const { request, store, wait, events } = await setup(t, undefined, [first, second]);
+  const created = await request<DesktopBootstrap>("session:new", {
+    kind: "external",
+    agentId: "first",
+  });
+  const id = created.activeSessionId!;
+  await request("task:send", id, "Implement feature; preserve public API", "plan");
+  await wait(() => store.get(id)?.externalSessionId === "old-native-thread");
+  await request("session:runtime", id, { kind: "external", agentId: "second" });
+  await wait(() =>
+    events.some((event) => event.payload.sessionId === id && event.payload.state === "complete"),
+  );
+  assert.equal(destination?.threadId, undefined);
+  assert.equal(destination?.mode, "plan");
+  assert.match(destination?.context ?? "", /preserve public API/);
+  assert.match(destination?.context ?? "", /Implemented the first part/);
+  assert.equal(store.get(id)?.externalSessionId, "new-native-thread");
+  assert.equal(
+    store.messages(id).find((message) => message.content === "Implemented the first part.")
+      ?.agentName,
+    "first",
+  );
+  assert.equal(store.messages(id).at(-1)?.agentName, "second");
+  assert.equal(
+    store.messages(id).filter((message) => message.toolName === "agent_handoff").length,
+    1,
+  );
+});
+
+test("an unauthenticated destination does not interrupt the current agent", async (t) => {
+  let source: ExternalRun | undefined;
+  const first = switchingAdapter("first", async (input) => {
+    source = input;
+    input.onThread("current");
+    await new Promise<void>((resolve) =>
+      input.signal.addEventListener("abort", () => resolve(), { once: true }),
+    );
+    return "cancelled";
+  });
+  const second = switchingAdapter(
+    "second",
+    async () => {
+      throw new Error("Must not start");
+    },
+    false,
+  );
+  const { request, wait, store } = await setup(t, undefined, [first, second]);
+  const created = await request<DesktopBootstrap>("session:new", {
+    kind: "external",
+    agentId: "first",
+  });
+  const id = created.activeSessionId!;
+  await request("task:send", id, "Do the task", "build");
+  await wait(() => Boolean(source));
+  await assert.rejects(
+    request("session:runtime", id, { kind: "external", agentId: "second" }),
+    /Sign in/,
+  );
+  assert.equal(source?.signal.aborted, false);
+  assert.equal((store.get(id)?.runtime as { agentId: string }).agentId, "first");
+});
+
+test("idle switching and switching back reset native history but preserve Kairo context", async (t) => {
+  const inputs: ExternalRun[] = [];
+  const run = async (input: ExternalRun): Promise<"complete"> => {
+    inputs.push(input);
+    input.onThread(`${inputs.length}-native`);
+    input.onText("Done");
+    return "complete";
+  };
+  const { request, store, wait, events } = await setup(t, undefined, [
+    switchingAdapter("first", run),
+    switchingAdapter("second", run),
+  ]);
+  const created = await request<DesktopBootstrap>("session:new", {
+    kind: "external",
+    agentId: "first",
+  });
+  const id = created.activeSessionId!;
+  await request("task:send", id, "Keep compatibility", "build");
+  await wait(() =>
+    events.some((event) => event.payload.sessionId === id && event.payload.state === "complete"),
+  );
+  await request("session:runtime", id, { kind: "external", agentId: "second" });
+  assert.equal(inputs.length, 1);
+  assert.equal(store.get(id)?.externalSessionId, undefined);
+  await request("session:runtime", id, { kind: "external", agentId: "first" });
+  await request("task:send", id, "Continue", "build");
+  await wait(() => store.messages(id).at(-1)?.content === "Done");
+  assert.equal(inputs[1]?.threadId, undefined);
+  assert.match(inputs[1]?.context ?? "", /Keep compatibility/);
+  const reopened = await SqliteSessionStore.open(
+    join(created.sessions.find((session) => session.id === id)!.workspace, "sessions.sqlite"),
+  );
+  try {
+    assert.equal(reopened.get(id)?.externalSessionId, "2-native");
+    assert.match(reopened.latestCheckpoint(id)?.summary ?? "", /Keep compatibility/);
+  } finally {
+    reopened.close();
+  }
+});
+
+test("switching blocks new sends and another switch while cancellation is pending", async (t) => {
+  let release!: () => void;
+  let source: ExternalRun | undefined;
+  const first = switchingAdapter("first", async (input) => {
+    source = input;
+    input.onThread("old");
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return "cancelled";
+  });
+  const second = switchingAdapter("second", async () => "complete");
+  const { request, wait } = await setup(t, undefined, [first, second]);
+  const created = await request<DesktopBootstrap>("session:new", {
+    kind: "external",
+    agentId: "first",
+  });
+  const id = created.activeSessionId!;
+  await request("task:send", id, "Work", "build");
+  await wait(() => Boolean(source));
+  const switching = request("session:runtime", id, { kind: "external", agentId: "second" });
+  await wait(() => source!.signal.aborted);
+  await assert.rejects(request("task:send", id, "Another task", "build"), /switch to finish/);
+  await assert.rejects(
+    request("session:runtime", id, { kind: "external", agentId: "first" }),
+    /already in progress/,
+  );
+  release();
+  await switching;
 });

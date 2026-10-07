@@ -41,6 +41,8 @@ export interface TaskEvent {
 }
 
 export interface Message {
+  /** Durable author attribution across agent switches. */
+  agentName?: string;
   role: Role;
   content: string;
   createdAt: number;

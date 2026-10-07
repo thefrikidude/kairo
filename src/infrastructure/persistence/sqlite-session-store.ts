@@ -63,6 +63,11 @@ export class SqliteSessionStore {
       db.exec("ALTER TABLE sessions ADD COLUMN runtime_json TEXT");
     if (!sessionColumns.some((column) => column.name === "external_session_id"))
       db.exec("ALTER TABLE sessions ADD COLUMN external_session_id TEXT");
+    const messageColumns = db.prepare("SELECT name FROM pragma_table_info('messages')").all() as {
+      name: string;
+    }[];
+    if (!messageColumns.some((column) => column.name === "agent_name"))
+      db.exec("ALTER TABLE messages ADD COLUMN agent_name TEXT");
     db.exec(`CREATE TABLE IF NOT EXISTS repair_attempts (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, command TEXT NOT NULL, evidence_json TEXT NOT NULL, selected_files_json TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(task_id) REFERENCES tasks(id));
       CREATE INDEX IF NOT EXISTS repair_attempts_task_created ON repair_attempts(task_id, created_at DESC);`);
     const columns = db.prepare("SELECT name FROM pragma_table_info('tasks')").all() as {
@@ -290,6 +295,32 @@ export class SqliteSessionStore {
       .run(JSON.stringify(runtime), Date.now(), id);
     if (result.changes !== 1) throw new Error("Session not found.");
   }
+  /** Commit the runtime, checkpoint, native-session reset and visible handoff together. */
+  switchSessionRuntime(
+    id: string,
+    runtime: SessionRuntime,
+    from: string,
+    to: string,
+    context: string,
+  ): void {
+    this.db.transaction(() => {
+      this.setSessionRuntime(id, runtime);
+      this.db.prepare("UPDATE sessions SET external_session_id=NULL WHERE id=?").run(id);
+      this.db
+        .prepare(
+          "UPDATE messages SET agent_name=? WHERE session_id=? AND role='model' AND agent_name IS NULL",
+        )
+        .run(from, id);
+      this.saveCheckpoint(id, this.latestTask(id)?.id, context, this.lastMessageId(id));
+      this.addMessage(id, {
+        role: "model",
+        agentName: "Kairo",
+        toolName: "agent_handoff",
+        content: `Switched from ${from} to ${to}. Continuing this conversation with a fresh agent session and the handoff below.\n\n${context}`,
+        createdAt: Date.now(),
+      });
+    })();
+  }
   setExternalSessionId(id: string, externalId: string): void {
     const result = this.db
       .prepare("UPDATE sessions SET external_session_id=? WHERE id=?")
@@ -434,15 +465,26 @@ export class SqliteSessionStore {
     this.db.prepare("DELETE FROM tasks WHERE session_id=?").run(id);
     this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
   }
+  latestAgentHandoff(sessionId: string): string | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT content FROM messages WHERE session_id=? AND tool_name='agent_handoff' ORDER BY id DESC LIMIT 1",
+      )
+      .get(sessionId) as { content: string } | undefined;
+    if (!row) return undefined;
+    const start = row.content.indexOf("\n\n");
+    return start < 0 ? undefined : row.content.slice(start + 2);
+  }
   /** Loads all messages required to reconstruct a full conversation. */
   messages(sessionId: string): Message[] {
     return (
       this.db
         .prepare(
-          "SELECT role, content, tool_call_id, tool_name, created_at FROM messages WHERE session_id=? ORDER BY id",
+          "SELECT role, content, tool_call_id, tool_name, created_at, agent_name FROM messages WHERE session_id=? ORDER BY id",
         )
         .all(sessionId) as Record<string, unknown>[]
     ).map((r) => ({
+      agentName: r.agent_name == null ? undefined : String(r.agent_name),
       role: r.role as Message["role"],
       content: String(r.content),
       toolCallId: r.tool_call_id ? String(r.tool_call_id) : undefined,
@@ -455,10 +497,11 @@ export class SqliteSessionStore {
     return (
       this.db
         .prepare(
-          "SELECT role, content, tool_call_id, tool_name, created_at FROM (SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
+          "SELECT role, content, tool_call_id, tool_name, created_at, agent_name FROM (SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
         )
         .all(sessionId, limit) as Record<string, unknown>[]
     ).map((r) => ({
+      agentName: r.agent_name == null ? undefined : String(r.agent_name),
       role: r.role as Message["role"],
       content: String(r.content),
       toolCallId: r.tool_call_id ? String(r.tool_call_id) : undefined,
@@ -470,7 +513,7 @@ export class SqliteSessionStore {
   addMessage(sessionId: string, message: Message): void {
     this.db
       .prepare(
-        "INSERT INTO messages(session_id, role, content, tool_call_id, tool_name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages(session_id, role, content, tool_call_id, tool_name, created_at, agent_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         sessionId,
@@ -479,6 +522,7 @@ export class SqliteSessionStore {
         message.toolCallId ?? null,
         message.toolName ?? null,
         message.createdAt,
+        message.agentName ?? null,
       );
     this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(Date.now(), sessionId);
   }
@@ -630,7 +674,7 @@ export class SqliteSessionStore {
   latestCheckpoint(sessionId: string): ContextCheckpoint | undefined {
     const row = this.db
       .prepare(
-        "SELECT * FROM context_checkpoints WHERE session_id=? ORDER BY created_at DESC LIMIT 1",
+        "SELECT * FROM context_checkpoints WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
       )
       .get(sessionId) as Record<string, unknown> | undefined;
     return (

@@ -23,7 +23,12 @@ export class ContextManager {
   async prepare(sessionId: string, task: Task): Promise<Message[]> {
     if (this.store.messageCount(sessionId) >= AUTO_COMPACT_AFTER) this.compact(sessionId, task);
     const checkpoint = this.store.latestCheckpoint(sessionId);
-    const recent = this.cleanStart(this.store.recentMessages(sessionId, MODEL_MESSAGE_LIMIT));
+    const handoff = this.store.latestAgentHandoff?.(sessionId);
+    const recent = this.cleanStart(
+      this.store
+        .recentMessages(sessionId, MODEL_MESSAGE_LIMIT)
+        .filter((message) => message.toolName !== "agent_handoff"),
+    );
     const profile = this.store.repositorySnapshot(sessionId);
     const repositoryContext = profile && {
       role: "user" as const,
@@ -39,6 +44,9 @@ export class ContextManager {
     const context = [
       ...(repositoryContext ? [repositoryContext] : []),
       ...(repairContext ? [repairContext] : []),
+      ...(handoff && checkpoint?.summary !== handoff
+        ? [{ role: "user" as const, content: handoff, createdAt: Date.now() }]
+        : []),
       ...(checkpoint
         ? [
             {

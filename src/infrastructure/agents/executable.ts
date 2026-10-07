@@ -8,6 +8,7 @@ export async function findAgentExecutable(name: string): Promise<string | undefi
   const directories = [
     ...(process.env.PATH || "").split(delimiter),
     join(homedir(), ".local/bin"),
+    join(homedir(), ".opencode/bin"),
     join(homedir(), ".npm-global/bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",

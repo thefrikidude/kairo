@@ -17,7 +17,7 @@ export class JsonRpcProcess {
     {
       resolve(value: unknown): void;
       reject(error: Error): void;
-      timer: ReturnType<typeof setTimeout>;
+      timer?: ReturnType<typeof setTimeout>;
     }
   >();
   private listeners = new Set<(message: RpcMessage) => void>();
@@ -28,6 +28,7 @@ export class JsonRpcProcess {
   constructor(
     private readonly executable: string,
     private readonly args: string[],
+    private readonly jsonRpc = false,
   ) {}
 
   start(): void {
@@ -87,15 +88,18 @@ export class JsonRpcProcess {
     return () => this.exits.delete(listener);
   }
 
-  request<T>(method: string, params: unknown = {}): Promise<T> {
+  request<T>(method: string, params: unknown = {}, timeoutMs = 30_000): Promise<T> {
     this.start();
     if (this.stopped) return Promise.reject(new Error("Agent background service is unavailable."));
     const id = ++this.nextId;
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Agent request timed out: ${method}`));
-      }, 30_000);
+      const timer =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              this.pending.delete(id);
+              reject(new Error(`Agent request timed out: ${method}`));
+            }, timeoutMs)
+          : undefined;
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
       try {
         this.send({ id, method, params });
@@ -110,7 +114,9 @@ export class JsonRpcProcess {
   send(message: unknown): void {
     if (this.stopped || !this.child?.stdin.writable)
       throw new Error("Agent background service is unavailable.");
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    this.child.stdin.write(
+      `${JSON.stringify(this.jsonRpc ? { jsonrpc: "2.0", ...(message as object) } : message)}\n`,
+    );
   }
 
   private fail(error: Error): void {

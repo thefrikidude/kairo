@@ -46,6 +46,8 @@ export interface TaskStore {
   recordTaskEvent(event: TaskEvent): void;
   /** Returns events in durable insertion order, including earlier resumed runs. */
   taskEvents(taskId: string): TaskEvent[];
+  /** Durable handoff evidence remains available after ordinary context compaction. */
+  latestAgentHandoff?(sessionId: string): string | undefined;
   messages(sessionId: string): Message[];
   recentMessages(sessionId: string, limit: number): Message[];
   addMessage(sessionId: string, message: Message): void;

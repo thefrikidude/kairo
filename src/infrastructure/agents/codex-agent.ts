@@ -261,7 +261,10 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
     this.running.set(threadId, turn);
     if (recoveredMissingRollout)
       input.onText(
-        "Kairo could not resume the saved Codex history and is retrying once in a fresh thread. Earlier Kairo messages remain visible but are not part of Codex context.\n\n",
+        "Kairo could not resume the saved Codex history and is retrying once in a fresh thread. " +
+          (input.context
+            ? "Kairo is supplying a context handoff from the saved conversation.\n\n"
+            : "Earlier Kairo messages remain visible but are not part of Codex context.\n\n"),
       );
     const cancel = () => {
       if (!turn.turnId) return;
@@ -275,7 +278,16 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
     try {
       const result = await rpc.request<TurnResponse>("turn/start", {
         threadId,
-        input: [{ type: "text", text: input.prompt, text_elements: [] }],
+        input: [
+          {
+            type: "text",
+            text:
+              (!input.threadId || recoveredMissingRollout) && input.context
+                ? `${input.context}\n\nLatest user request:\n${input.prompt}`
+                : input.prompt,
+            text_elements: [],
+          },
+        ],
         model: input.model ?? null,
         approvalPolicy: "on-request",
         approvalsReviewer: "user",
@@ -289,6 +301,10 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
       input.onThread(threadId);
       if (input.signal.aborted) cancel();
       return await completed;
+    } catch (error) {
+      // A failed request is not proof that the agent stopped editing.
+      await rpc.close();
+      throw error;
     } finally {
       for (const controller of turn.questions.values()) controller.abort();
       clearTimeout(turn.cancelTimer);
