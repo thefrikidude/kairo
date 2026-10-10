@@ -225,6 +225,21 @@ export class SqliteTerminalSessionStore {
     if (result.changes !== 1) throw new Error("Session not found.");
     if (this.activeSessionId() === id) this.setActiveSession(undefined);
   }
+  activeWorkspaceId(): string | undefined {
+    const row = this.db
+      .prepare("SELECT value FROM desktop_state WHERE key='active_workspace'")
+      .get() as { value: string } | undefined;
+    return row?.value;
+  }
+  setActiveWorkspace(id: string): void {
+    const workspace = this.workspace(id);
+    if (!workspace || workspace.removedAt) throw new Error("Choose an available workspace.");
+    this.db
+      .prepare(
+        "INSERT INTO desktop_state(key,value) VALUES ('active_workspace', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      )
+      .run(id);
+  }
   activeSessionId(): string | undefined {
     const row = this.db
       .prepare("SELECT value FROM desktop_state WHERE key='active_session'")
@@ -238,6 +253,7 @@ export class SqliteTerminalSessionStore {
     }
     const session = this.get(id);
     if (!session || session.archivedAt) throw new Error("Choose an active session.");
+    this.setActiveWorkspace(session.workspaceId);
     this.db
       .prepare(
         "INSERT INTO desktop_state(key,value) VALUES ('active_session', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

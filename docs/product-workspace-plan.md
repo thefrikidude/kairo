@@ -1,5 +1,7 @@
 # Lightweight agent workspace: audit and delivery plan
 
+This direction was superseded by the user’s terminal-only agent pivot on 10 October 2026. See [terminal-agent-desktop-plan.md](terminal-agent-desktop-plan.md) for the active implementation checkpoint. The workspace, files and review foundations remain applicable.
+
 Audit date: 2026-10-10. Baseline: `476a58a`; clean working tree.
 
 ## Existing foundation

@@ -34,6 +34,7 @@ test("terminal migration deletes legacy chat data once and preserves workspace o
     assert.equal(store.get(session.id)!.title, "Fix the bug");
     assert.equal(store.get(session.id)!.nativeSession!.id, "native-123");
     assert.equal(store.activeSessionId(), session.id);
+    assert.equal(store.activeWorkspaceId(), workspace.id);
     assert.equal(store.workspace(workspace.id)!.managed, true);
     assert.equal(store.workspace(workspace.id)!.baseCommit, "a".repeat(40));
     const inspect = new Database(path, { readonly: true });
