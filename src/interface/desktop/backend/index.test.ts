@@ -982,3 +982,47 @@ test("sibling folders share a checkout execution guard but independent worktrees
   await request("workspace:write", secondId, "file.txt", "changed\n", snapshot.revision);
   assert.equal(await request("workspace:read", secondId, "file.txt"), "changed\n");
 });
+
+test("startup refreshes workspace metadata with bounded concurrency and preserves missing-folder history", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-startup-")));
+  const store = await SqliteSessionStore.open(join(root, "sessions.sqlite"));
+  const sessions = Array.from({ length: 9 }, (_, index) =>
+    store.create(join(root, `folder-${index}`)),
+  );
+  store.addMessage(sessions[0].id, {
+    role: "user",
+    content: "Keep missing-folder history",
+    createdAt: 1,
+  });
+  const worktrees = new GitWorkspaces();
+  let running = 0;
+  let maximum = 0;
+  const refreshed: string[] = [];
+  worktrees.describe = async (directory) => {
+    running += 1;
+    maximum = Math.max(maximum, running);
+    try {
+      await new Promise((done) => setTimeout(done, 10));
+      refreshed.push(directory);
+      if (directory.endsWith("folder-0")) throw new Error("Folder is missing");
+      return { directory, repositoryPath: directory, kind: "folder", managed: false };
+    } finally {
+      running -= 1;
+    }
+  };
+  const runtime = await createDesktopRuntime(() => {}, {
+    store,
+    worktrees,
+    agents: new AgentRegistry([]),
+    credentials: { get: async () => undefined, save: async () => {} },
+  });
+  t.after(async () => {
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  await runtime.ready;
+  assert.equal(maximum, 4);
+  assert.equal(refreshed.length, 9);
+  assert.equal(store.list().length, 9);
+  assert.equal(store.messages(sessions[0].id)[0].content, "Keep missing-folder history");
+});

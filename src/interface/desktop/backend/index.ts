@@ -1276,13 +1276,21 @@ export async function createDesktopRuntime(
 
   return {
     ready: storePromise.then(async (store) => {
-      for (const workspace of store.workspaces()) {
-        try {
-          store.reconcileWorkspace(workspace.id, await worktrees.describe(workspace.directory));
-        } catch {
-          /* A missing folder must not destroy persisted chat history. */
-        }
-      }
+      const pending = store.workspaces();
+      // Refresh metadata without serializing every independent Git checkout at startup.
+      // Four workers bound native process fan-out; SQLite reconciliation remains synchronous.
+      await Promise.all(
+        Array.from({ length: Math.min(4, pending.length) }, async () => {
+          let workspace;
+          while ((workspace = pending.shift())) {
+            try {
+              store.reconcileWorkspace(workspace.id, await worktrees.describe(workspace.directory));
+            } catch {
+              /* A missing folder must not destroy persisted chat history. */
+            }
+          }
+        }),
+      );
       activeSessionId = store.list()[0]?.id;
     }),
     dispatch: dispatchRequest,
