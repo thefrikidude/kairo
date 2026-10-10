@@ -285,7 +285,8 @@ export const terminalAgentCatalog: readonly TerminalAgentDefinition[] = [
     name: "Rovo Dev",
     commands: ["acli"],
     args: ["rovodev", "run"],
-    homepage: "https://support.atlassian.com/rovo/docs/install-and-run-rovo-dev-cli/",
+    homepage:
+      "https://support.atlassian.com/rovo/docs/install-and-run-rovo-dev-cli-on-your-device/",
   },
   {
     id: "hermes",

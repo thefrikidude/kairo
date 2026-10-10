@@ -73,7 +73,11 @@ export class NativeSessionReader {
           : codexTime("updated_at")
         : "time_updated";
       const cwd = codex ? "cwd" : "directory";
-      const root = codex ? "source='cli'" : "parent_id IS NULL";
+      const root = codex
+        ? columns.has("thread_source")
+          ? "(source='cli' OR (source='vscode' AND thread_source='user'))"
+          : "source='cli'"
+        : "parent_id IS NULL";
       const archived = columns.has(codex ? "archived" : "time_archived")
         ? codex
           ? "AND archived=0"

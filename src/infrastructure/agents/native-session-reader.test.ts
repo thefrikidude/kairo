@@ -27,7 +27,9 @@ test("Codex capture reads native IDs/recency only and excludes other roots, chil
     archived = 0,
   ) =>
     db
-      .prepare("INSERT INTO threads VALUES(?,?,?,NULL,?,?,?,?,'private conversation')")
+      .prepare(
+        "INSERT INTO threads(id,cwd,source,rollout_path,created_at_ms,updated_at_ms,recency_at_ms,archived,first_user_message) VALUES(?,?,?,NULL,?,?,?,?,'private conversation')",
+      )
       .run(id, cwd, source, created, updated, updated, archived);
   insert("old", repo, "cli", since - 5000, since - 5000);
   insert("already-live", repo, "cli", since - 100, since - 100);
@@ -55,12 +57,22 @@ test("Codex capture reads native IDs/recency only and excludes other roots, chil
       freshNativeCandidates(picker, new Map(picker.map((row) => [row.id, row.updatedAt])), true)
         .length === 0,
     );
+    // Current Codex TUI shares the desktop daemon: its user roots are recorded as vscode.
+    db.exec("ALTER TABLE threads ADD COLUMN thread_source TEXT");
+    insert("shared-daemon", repo, "vscode", since + 30, since + 30);
+    db.prepare("UPDATE threads SET thread_source='user' WHERE id='shared-daemon'").run();
+    insert("not-a-user-root", repo, "vscode", since + 30, since + 30);
+    db.prepare("UPDATE threads SET thread_source='subagent' WHERE id='not-a-user-root'").run();
+    const shared = await reader.list(lookup);
+    assert.ok(shared.some((record) => record.id === "shared-daemon"));
+    assert.ok(!shared.some((record) => record.id === "not-a-user-root"));
+    baseline.set("shared-daemon", since + 30);
     insert("also-new", repo, "cli", since + 20, since + 20);
     assert.equal(freshNativeCandidates(await reader.list(lookup), baseline).length, 2); // Caller must refuse ambiguity.
     assert.equal(
       db.prepare("SELECT COUNT(*) AS count FROM threads").get() &&
         (db.prepare("SELECT COUNT(*) AS count FROM threads").get() as { count: number }).count,
-      7,
+      9,
     );
   } finally {
     db.close();
