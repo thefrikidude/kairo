@@ -26,7 +26,13 @@ export class WorkspaceFiles {
       return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
     };
     if (!inside(candidate)) throw new Error("Path is outside the workspace.");
-    const actual = await realpath(candidate);
+    const actual = await realpath(candidate).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT")
+        throw new Error(
+          "This file or folder is unavailable. Refresh the tree or wait for the agent to create it.",
+        );
+      throw error;
+    });
     if (!inside(actual)) throw new Error("Symlink escapes the workspace.");
     return actual;
   }
