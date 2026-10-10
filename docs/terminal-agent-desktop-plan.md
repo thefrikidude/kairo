@@ -59,3 +59,9 @@ The center now contains the terminal without an agent toolbar or conversation/st
 Shell prompts show the full current directory and follow `cd`. New isolated worktrees use a readable task directory and end in the original project folder name, rather than a UUID leaf. Existing worktrees are preserved in place. Native PTY tests verify prompt changes after navigation; Git tests verify readable directory names while preserving independent worktrees.
 
 The actual Electron fixture workflow and exact-resume restart pass, including the right sidebar, file editing, review, normal shell commands and closing terminals through Settings. Screenshots were inspected at `/var/folders/3x/rz0dj8y12pz759_q5skzxw380000gn/T/kairo-terminal-evidence-1791651652019`. Owned fixture terminal processes were confirmed stopped.
+
+## Terminal tabs
+
+The center header now contains tabs for live terminals in the selected project, with **+ Terminal** and **+ Agent** controls. Plain shells and agent sessions share the same full-height terminal surface. Switching tabs retains each xterm view and PTY; Files and Review stay in the right sidebar. Additional shells no longer open in a separate bottom panel. Cmd/Ctrl+backquote opens a new terminal tab.
+
+Validation: typecheck and desktop build pass. The Electron smoke creates a shell from **+ Terminal**, switches back to its agent tab, creates an isolated agent from **+ Agent**, edits/reviews files and verifies native resume after restart. Screenshots were inspected at `/var/folders/3x/rz0dj8y12pz759_q5skzxw380000gn/T/kairo-terminal-evidence-1791651975092`; all owned fixture processes stopped.

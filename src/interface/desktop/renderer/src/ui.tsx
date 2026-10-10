@@ -12,7 +12,6 @@ import { Icon, KairoLogo, ModalFrame } from "./chrome.js";
 import { navigateTabs } from "./tab-navigation.js";
 import { TerminalCatalog } from "./terminal-catalog.js";
 const AgentTerminals = lazy(() => import("./agent-terminals.js"));
-const TerminalPanel = lazy(() => import("./terminal-panel.js"));
 const FileBrowser = lazy(() => import("./file-browser.js"));
 const ReviewPanel = lazy(() => import("./review-panel.js"));
 const EMPTY_BUFFERS: Record<string, EditorBuffer> = {};
@@ -39,7 +38,8 @@ export function DesktopApp(): React.JSX.Element {
   );
   const [contextOpen, setContextOpen] = useState(false);
   const [contextTab, setContextTab] = useState<"files" | "changes">("changes");
-  const [utilityOpen, setUtilityOpen] = useState(false);
+  const [shellId, setShellId] = useState<string>();
+  const [creatingShell, setCreatingShell] = useState(false);
   const [settings, setSettings] = useState<"general" | "agents" | "archived" | "workspaces">();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [pinned, setPinned] = useState<string[]>(() => {
@@ -74,11 +74,44 @@ export function DesktopApp(): React.JSX.Element {
   const stateRef = useRef(state);
   stateRef.current = state;
   const current = state?.sessions.find((session) => session.id === state.activeSessionId);
+  const selectedShell = state?.terminals.find((t) => t.id === shellId && !t.sessionId);
   const workspace = state?.workspaces.find(
-    (item) => item.id === (current?.workspaceId ?? state.activeWorkspaceId),
+    (item) =>
+      item.id === (selectedShell?.workspaceId ?? current?.workspaceId ?? state.activeWorkspaceId),
   );
-  const accessId = current?.id ?? workspace?.id;
-  const currentTerminal = state?.terminals.find((terminal) => terminal.sessionId === current?.id);
+  const accessId = selectedShell ? workspace?.id : (current?.id ?? workspace?.id);
+  const currentTerminal = current
+    ? state?.terminals.find((terminal) => terminal.sessionId === current.id)
+    : undefined;
+  const activeTerminalId = selectedShell?.id ?? currentTerminal?.id;
+  const projectTabs =
+    state?.terminals.filter(
+      (t) =>
+        state.workspaces.find((w) => w.id === t.workspaceId)?.repositoryPath ===
+        workspace?.repositoryPath,
+    ) ?? [];
+  useEffect(() => {
+    setShellId(undefined);
+  }, [state?.activeSessionId, state?.activeWorkspaceId]);
+  const newShell = async () => {
+    if (!workspace || creatingShell) return;
+    setCreatingShell(true);
+    setError("");
+    try {
+      const terminal = await window.kairo.createTerminal(workspace.id);
+      setState((all) =>
+        all
+          ? { ...all, terminals: [...all.terminals.filter((t) => t.id !== terminal.id), terminal] }
+          : all,
+      );
+      setShellId(terminal.id);
+      setSettings(undefined);
+    } catch (error) {
+      setError(message(error));
+    } finally {
+      setCreatingShell(false);
+    }
+  };
   const dirty = Object.values(buffers).some((all) =>
     Object.values(all).some((buffer) => buffer.draft !== buffer.saved),
   );
@@ -124,7 +157,9 @@ export function DesktopApp(): React.JSX.Element {
         all
           ? {
               ...all,
-              terminals: [...all.terminals.filter((item) => item.id !== terminal.id), terminal],
+              terminals: all.terminals.some((item) => item.id === terminal.id)
+                ? all.terminals.map((item) => (item.id === terminal.id ? terminal : item))
+                : [...all.terminals, terminal],
             }
           : all,
       ),
@@ -273,7 +308,7 @@ export function DesktopApp(): React.JSX.Element {
       if (document.querySelector("dialog[open]")) return;
       if ((event.metaKey || event.ctrlKey) && event.code === "Backquote") {
         event.preventDefault();
-        setUtilityOpen((value) => !value);
+        void newShell();
       } else if (
         (event.metaKey || event.ctrlKey) &&
         event.shiftKey &&
@@ -297,7 +332,7 @@ export function DesktopApp(): React.JSX.Element {
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [beginSession, settings, contextOpen]);
+  }, [beginSession, settings, contextOpen, workspace?.id, creatingShell]);
   const create = async () => {
     const selection: WorkspaceSelection =
       mode === "worktree"
@@ -489,6 +524,7 @@ export function DesktopApp(): React.JSX.Element {
                           disabled={pending}
                           onClick={() => {
                             setSettings(undefined);
+                            setShellId(undefined);
                             void action(() => window.kairo.openSession(session.id));
                           }}
                         >
@@ -577,20 +613,59 @@ export function DesktopApp(): React.JSX.Element {
           >
             <Icon name="sidebar" />
           </button>
-          <div className="workspace-title">
-            <strong>
-              {settings
-                ? "Settings"
-                : (current?.title ??
-                  (workspace ? name(workspace.repositoryPath) : "Choose a project"))}
-            </strong>
-            <span title={workspace?.directory}>
-              {workspace
-                ? `${workspace.branch ? `${workspace.branch} · ` : ""}${workspace.directory}`
-                : "Open a local project to launch an agent"}
-            </span>
-          </div>
-          {settings && <button onClick={() => setSettings(undefined)}>Back to workspace</button>}
+          {settings ? (
+            <>
+              <strong>Settings</strong>
+              <button onClick={() => setSettings(undefined)}>Back to workspace</button>
+            </>
+          ) : (
+            <>
+              <div
+                className="terminal-tabs"
+                role="tablist"
+                aria-label="Terminal tabs"
+                onKeyDown={navigateTabs}
+              >
+                {projectTabs.map((terminal) => (
+                  <button
+                    key={terminal.id}
+                    role="tab"
+                    aria-selected={terminal.id === activeTerminalId}
+                    tabIndex={terminal.id === activeTerminalId ? 0 : -1}
+                    aria-controls={`terminal-view-${terminal.id}`}
+                    title={terminal.directory}
+                    onClick={() => {
+                      if (terminal.sessionId) {
+                        setShellId(undefined);
+                        void action(() => window.kairo.openSession(terminal.sessionId!));
+                      } else setShellId(terminal.id);
+                    }}
+                  >
+                    {terminal.sessionId
+                      ? (state?.sessions.find((s) => s.id === terminal.sessionId)?.title ??
+                        terminal.title)
+                      : `Terminal ${projectTabs.filter((t) => !t.sessionId).findIndex((t) => t.id === terminal.id) + 1}`}
+                  </button>
+                ))}
+              </div>
+              <div className="terminal-tab-actions">
+                <button
+                  aria-label="New terminal tab"
+                  disabled={!workspace || !!workspace.removedAt || creatingShell}
+                  onClick={() => void newShell()}
+                >
+                  + Terminal
+                </button>
+                <button
+                  aria-label="New agent tab"
+                  disabled={pending}
+                  onClick={() => beginSession()}
+                >
+                  + Agent
+                </button>
+              </div>
+            </>
+          )}
         </header>
         {error && (
           <div className="desktop-error" role="alert">
@@ -741,11 +816,11 @@ export function DesktopApp(): React.JSX.Element {
           <Suspense fallback={<p className="empty-small">Loading terminal…</p>}>
             <AgentTerminals
               terminals={state?.terminals ?? []}
-              activeSessionId={settings ? undefined : current?.id}
+              activeTerminalId={settings ? undefined : activeTerminalId}
               onError={onError}
             />
           </Suspense>
-          {(!current || !currentTerminal) && (
+          {!activeTerminalId && (
             <div className="welcome">
               <KairoLogo className="welcome-logo" />
               <h1>
@@ -780,27 +855,9 @@ export function DesktopApp(): React.JSX.Element {
             </div>
           )}
         </div>
-        {workspace && (
-          <Suspense fallback={null}>
-            <TerminalPanel
-              workspaceId={workspace.id}
-              visible={utilityOpen && !settings && !workspace.removedAt}
-              onHide={() => setUtilityOpen(false)}
-            />
-          </Suspense>
-        )}
       </main>
       {!settings && (
         <aside className="workspace-tools" aria-label="Workspace tools">
-          <button
-            className={`review-toggle ${utilityOpen ? "selected" : ""}`}
-            disabled={!workspace || !!workspace.removedAt}
-            aria-label="Toggle terminal"
-            aria-expanded={utilityOpen}
-            onClick={() => setUtilityOpen((value) => !value)}
-          >
-            ›_ <span>Shell</span>
-          </button>
           <button
             className="review-toggle"
             disabled={!accessId || !!workspace?.removedAt}

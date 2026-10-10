@@ -35,11 +35,11 @@ The sidebar groups sessions by project and shows worktree branches. Rename and p
 
 **Review**, in the right sidebar, lists changed paths and loads only the selected diff, with unified and split views. Changes since the workspace's starting commit include commits the agent made; working-tree scope includes staged, unstaged and untracked files. The visible panel refreshes periodically independently of the CLI's output. File lists and diff rows are virtualized.
 
-**Shell** opens an optional bottom panel for additional workspace shells. These additional terminals survive navigation; each agent session already has its own normal shell. Their tabs support input, ANSI output, resize and explicit close. **Settings → Workspaces** lists open terminals and managed worktrees.
+**+ Terminal**, in the tab bar, opens an additional shell in the current workspace. **+ Agent** opens the agent picker. Shell and agent tabs share the center pane. These additional terminals survive navigation; each agent session already has its own normal shell. Tabs preserve input, ANSI output and live screens when switching. Close terminals from Settings → Workspaces. **Settings → Workspaces** lists open terminals and managed worktrees.
 
 Worktree removal requires archiving associated sessions and closing terminals. Git refuses removal with staged, unstaged, untracked or ignored files, or unmerged commits. Branches remain available. Deleting a Kairo session never deletes its workspace or the CLI's own history. Worktrees separate files; the selected CLI owns its execution safeguards.
 
-Keyboard shortcuts: Cmd/Ctrl+Shift+N opens a new session; Cmd/Ctrl+Shift+E opens Files; Cmd/Ctrl+Shift+D opens Review; Cmd/Ctrl+Shift+B toggles the sidebar; Cmd/Ctrl+` toggles the workspace shell. Escape inside a terminal is delivered to the CLI. Dialogs contain focus while open and return focus on close.
+Keyboard shortcuts: Cmd/Ctrl+Shift+N opens a new session; Cmd/Ctrl+Shift+E opens Files; Cmd/Ctrl+Shift+D opens Review; Cmd/Ctrl+Shift+B toggles the sidebar; Cmd/Ctrl+` opens a new terminal tab. Escape inside a terminal is delivered to the CLI. Dialogs contain focus while open and return focus on close.
 
 ## Data migration
 

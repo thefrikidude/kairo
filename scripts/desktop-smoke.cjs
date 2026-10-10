@@ -161,7 +161,24 @@ async function run() {
   await capture("normal-shell.png");
   await evaluate(`window.kairo.writeTerminal(${JSON.stringify(firstPty.id)}, "fg\\r")`);
   await sleep(100);
-  await click(".new-chat");
+  await click('[aria-label="New terminal tab"]');
+  await waitFor("window.kairo.listTerminals().then(all=>all.some(t=>!t.sessionId))");
+  const shell = (await state()).terminals.find((t) => !t.sessionId);
+  await waitFor(
+    `document.querySelector('[aria-controls="terminal-view-${shell.id}"]')?.getAttribute('aria-selected')==='true'`,
+  );
+  await evaluate(
+    `window.kairo.writeTerminal(${JSON.stringify(shell.id)}, ${JSON.stringify("printf 'TAB_%s\\n' READY\r")})`,
+  );
+  await waitFor(
+    `window.kairo.attachTerminal(${JSON.stringify(shell.id)}).then(t=>t.buffer.includes('TAB_READY'))`,
+  );
+  await capture("terminal-tabs.png");
+  await click(`[aria-controls="terminal-view-${firstPty.id}"]`);
+  await waitFor(
+    `document.querySelector('[aria-controls="terminal-view-${firstPty.id}"]')?.getAttribute('aria-selected')==='true'`,
+  );
+  await click('[aria-label="New agent tab"]');
   await waitFor(
     "document.querySelector('dialog[open]') && !Array.from(document.querySelectorAll('dialog button')).find(b=>b.textContent==='Refresh agents')?.disabled",
   );
@@ -178,7 +195,7 @@ async function run() {
     owner = value.workspaces.find((w) => w.id === second.workspaceId),
     pty = value.terminals.find((t) => t.sessionId === second.id);
   assert.notEqual(first.workspaceId, second.workspaceId);
-  assert.equal(value.terminals.length, 2);
+  assert.equal(value.terminals.length, 3);
   await assert.rejects(
     evaluate(`window.kairo.fileSnapshot(${JSON.stringify(second.id)},'proof-a.txt')`),
     /unavailable/,
@@ -261,6 +278,7 @@ async function run() {
     JSON.stringify({
       startupMs,
       embeddedAgentInput: true,
+      terminalTabs: true,
       sameTerminalShellJobControl: true,
       isolatedWorktree: true,
       parallelNavigation: true,
