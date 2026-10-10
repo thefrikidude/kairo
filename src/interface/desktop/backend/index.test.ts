@@ -760,6 +760,9 @@ test("worktree sessions isolate execution and preserve workspace ownership on ch
   await request("session:archive", b.id);
   await assert.rejects(request("worktrees:remove", b.workspaceId), /untracked or ignored/);
   git(["restore", "hello.txt"], b.workspace);
+  const terminal = await request<{ id: string }>("terminal:create", b.workspaceId);
+  await assert.rejects(request("worktrees:remove", b.workspaceId), /Close all terminals/);
+  await request("terminal:close", terminal.id);
   await request("worktrees:remove", b.workspaceId);
   await assert.rejects(access(b.workspace));
   assert.equal(store.get(b.id)?.workspaceId, b.workspaceId);
@@ -863,5 +866,50 @@ test("native task results and review retain file changes after an agent commits 
   assert.deepEqual(
     review.changes.map((file) => file.path),
     ["hello.txt"],
+  );
+});
+
+test("workspace terminals survive chat changes and stay separate from running agents", async (t) => {
+  const { request, runtime, store, builtin, root, events, wait } = await setup(t);
+  const workspaceId = builtin.workspaceId;
+  const terminal = await request<import("../../../domain/workspace-terminal.js").WorkspaceTerminal>(
+    "terminal:create",
+    workspaceId,
+    true,
+  );
+  assert.equal(terminal.directory, builtin.workspace);
+  const otherFolder = join(root, "terminal-other");
+  await mkdir(otherFolder);
+  const other = await request<DesktopBootstrap>(
+    "session:new",
+    { kind: "external", agentId: "codex" },
+    otherFolder,
+  );
+  const sessionId = other.activeSessionId!;
+  await request("task:send", sessionId, "wait", "build");
+  const second = await request<import("../../../domain/workspace-terminal.js").WorkspaceTerminal>(
+    "terminal:create",
+    store.get(sessionId)!.workspaceId,
+  );
+  await request("session:open", builtin.id);
+  assert.equal((await request<unknown[]>("terminal:list")).length, 2);
+  await request("terminal:close", second.id);
+  const opened = await request<DesktopBootstrap>("session:open", sessionId);
+  assert.equal(opened.liveSessions[sessionId].state, "running");
+  await request("task:cancel", sessionId);
+  await wait(() =>
+    events.some(
+      (event) => event.payload.sessionId === sessionId && event.payload.state === "cancelled",
+    ),
+  );
+  await request("session:archive", builtin.id);
+  await request("session:delete", builtin.id);
+  assert.equal((await request<unknown[]>("terminal:list", workspaceId)).length, 1);
+  await assert.rejects(request("terminal:create", "missing-workspace"), /unavailable/);
+  await runtime.close();
+  const { terminalProcesses } =
+    await import("../../../infrastructure/terminal/terminal-processes.js");
+  assert.ok(
+    !(await terminalProcesses()).some((process) => process.pid === terminal.pid && !process.zombie),
   );
 });

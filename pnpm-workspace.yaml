@@ -3,4 +3,5 @@ allowBuilds:
   "@openrouter/sdk": false
   better-sqlite3: true
   esbuild: true
+  node-pty: true
   protobufjs: true

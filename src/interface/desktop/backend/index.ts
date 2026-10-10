@@ -1,3 +1,4 @@
+import type { WorkspaceTerminals } from "../../../infrastructure/terminal/workspace-terminals.js";
 import { GitWorkspaces } from "../../../infrastructure/repository/git-workspaces.js";
 import type { WorkspaceSelection } from "../../../domain/task-workspace.js";
 import { buildAgentHandoff } from "../../../application/agent-handoff.js";
@@ -50,6 +51,7 @@ export async function createDesktopRuntime(
   emitEvent: DesktopEventEmitter,
   options: {
     store?: SqliteSessionStore;
+    terminals?: WorkspaceTerminals;
     agents?: AgentRegistry;
     worktrees?: GitWorkspaces;
     credentials?: Pick<MacOSKeychainStore, "get" | "save">;
@@ -58,8 +60,22 @@ export async function createDesktopRuntime(
   const storePromise = options.store ? Promise.resolve(options.store) : SqliteSessionStore.open();
   const credentials = options.credentials ?? new MacOSKeychainStore();
   const worktrees = options.worktrees ?? new GitWorkspaces();
+  let terminals = options.terminals;
+  let terminalPromise: Promise<WorkspaceTerminals> | undefined;
+  const terminalService = () => {
+    if (terminals) return Promise.resolve(terminals);
+    return (terminalPromise ??=
+      import("../../../infrastructure/terminal/workspace-terminals.js").then(
+        ({ WorkspaceTerminals }) => {
+          terminals = new WorkspaceTerminals(emit);
+          if (closed) terminals.beginClose();
+          return terminals;
+        },
+      ));
+  };
   const workspaceRuns = new Map<string, string>();
   const workspaceWrites = new Set<string>();
+  const terminalCreates = new Map<string, number>();
   const overlaps = (a: string, b: string) => {
     const contains = (parent: string, child: string) => {
       const rel = relative(parent, child);
@@ -488,6 +504,45 @@ export async function createDesktopRuntime(
         await new RepositoryAwareness(store).ensureFresh(session.id, session.workspace);
         return bootstrap(store, session.id);
       }
+      case "terminal:list":
+        return terminals?.list(typeof first === "string" ? first : undefined) ?? [];
+      case "terminal:create": {
+        const workspace = store.workspace(String(first));
+        if (!workspace || workspace.removedAt) throw new Error("This workspace is unavailable.");
+        const directory = await realpath(workspace.directory);
+        const service = await terminalService();
+        if (closed) throw new Error("Kairo is shutting down.");
+        if (
+          removingWorkspaces.has(workspace.id) ||
+          [...removalDirectories.values()].some((removing) => overlaps(directory, removing))
+        )
+          throw new Error("This workspace is being removed.");
+        terminalCreates.set(directory, (terminalCreates.get(directory) ?? 0) + 1);
+        try {
+          return await service.create(workspace.id, directory, second === true);
+        } finally {
+          const remaining = (terminalCreates.get(directory) ?? 1) - 1;
+          if (remaining) terminalCreates.set(directory, remaining);
+          else terminalCreates.delete(directory);
+        }
+      }
+      case "terminal:attach":
+        return (await terminalService()).attach(String(first));
+      case "terminal:detach":
+        terminals?.detach(String(first));
+        return undefined;
+      case "terminal:ack":
+        terminals?.acknowledge(String(first), second);
+        return undefined;
+      case "terminal:write":
+        (await terminalService()).input(String(first), second);
+        return undefined;
+      case "terminal:resize":
+        (await terminalService()).resize(String(first), second, third);
+        return undefined;
+      case "terminal:close":
+        await (await terminalService()).closeTerminal(String(first));
+        return undefined;
       case "worktrees:list": {
         if (typeof first !== "string") throw new Error("Choose a project.");
         const project = await worktrees.describe(first);
@@ -516,6 +571,14 @@ export async function createDesktopRuntime(
           throw new Error("This workspace is already being removed.");
         if ([...workspaceWrites].some((savingDirectory) => overlaps(directory, savingDirectory)))
           throw new Error("Wait for file saves to finish before removing this worktree.");
+        if (
+          [...terminalCreates.keys()].some((creatingDirectory) =>
+            overlaps(directory, creatingDirectory),
+          )
+        )
+          throw new Error("Wait for terminals to open before removing this workspace.");
+        if (terminals?.hasProcesses(directory, overlaps))
+          throw new Error("Close all terminals in this workspace before removing it.");
         removingWorkspaces.add(workspace.id);
         removalDirectories.set(workspace.id, directory);
         try {
@@ -1179,6 +1242,7 @@ export async function createDesktopRuntime(
   async function close(): Promise<void> {
     if (closed) return;
     closed = true;
+    terminals?.beginClose();
     stopUsage();
     for (const timer of usageTimers.values()) clearTimeout(timer);
     usageTimers.clear();
@@ -1191,6 +1255,7 @@ export async function createDesktopRuntime(
     await registry.close();
     await Promise.allSettled([...activeRuns]);
     await Promise.allSettled([...activeRequests]);
+    await terminals?.close();
     (await storePromise).close();
   }
 

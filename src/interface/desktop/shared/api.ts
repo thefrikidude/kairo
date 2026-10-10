@@ -1,4 +1,10 @@
 import type {
+  WorkspaceTerminal,
+  TerminalSnapshot,
+  TerminalData,
+} from "../../../domain/workspace-terminal.js";
+export type { WorkspaceTerminal, TerminalSnapshot, TerminalData };
+import type {
   GitWorktree,
   TaskWorkspace,
   WorkspaceSelection,
@@ -70,6 +76,17 @@ export type DesktopApproval = {
 };
 
 export interface DesktopApi {
+  listTerminals(workspaceId?: string): Promise<WorkspaceTerminal[]>;
+  createTerminal(workspaceId: string, reuse?: boolean): Promise<WorkspaceTerminal>;
+  attachTerminal(id: string): Promise<TerminalSnapshot>;
+  detachTerminal(id: string): Promise<void>;
+  acknowledgeTerminal(id: string, sequence: number): Promise<void>;
+  writeTerminal(id: string, data: string): Promise<void>;
+  resizeTerminal(id: string, columns: number, rows: number): Promise<void>;
+  closeTerminal(id: string): Promise<void>;
+  onTerminalData(listener: (event: TerminalData) => void): () => void;
+  onTerminalState(listener: (terminal: WorkspaceTerminal) => void): () => void;
+  onTerminalClosed(listener: (event: { id: string; workspaceId: string }) => void): () => void;
   setUnsavedChanges(dirty: boolean): void;
   bootstrap(): Promise<DesktopBootstrap>;
   openWorkspace(): Promise<DesktopBootstrap | undefined>;

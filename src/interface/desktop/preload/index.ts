@@ -11,6 +11,17 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const api: DesktopApi = {
+  listTerminals: (workspaceId) => invoke("terminal:list", workspaceId),
+  createTerminal: (workspaceId, reuse) => invoke("terminal:create", workspaceId, reuse),
+  attachTerminal: (id) => invoke("terminal:attach", id),
+  detachTerminal: (id) => invoke("terminal:detach", id),
+  acknowledgeTerminal: (id, sequence) => invoke("terminal:ack", id, sequence),
+  writeTerminal: (id, data) => invoke("terminal:write", id, data),
+  resizeTerminal: (id, columns, rows) => invoke("terminal:resize", id, columns, rows),
+  closeTerminal: (id) => invoke("terminal:close", id),
+  onTerminalData: (listener) => subscribe("terminal:data", listener),
+  onTerminalState: (listener) => subscribe("terminal:state", listener),
+  onTerminalClosed: (listener) => subscribe("terminal:closed", listener),
   setUnsavedChanges: (dirty) => ipcRenderer.send("workspace:unsaved", dirty),
   bootstrap: () => invoke("desktop:bootstrap"),
   openWorkspace: () => invoke("workspace:open"),

@@ -125,6 +125,15 @@ function registerIpc(): void {
       return request(method, args);
     });
   handle("desktop:bootstrap", "bootstrap");
+  handle("terminal:list", "terminal:list");
+  handle("terminal:create", "terminal:create");
+  handle("terminal:attach", "terminal:attach");
+  handle("terminal:detach", "terminal:detach");
+  handle("terminal:ack", "terminal:ack");
+  handle("terminal:write", "terminal:write");
+  handle("terminal:resize", "terminal:resize");
+  handle("terminal:close", "terminal:close");
+
   ipcMain.handle("workspace:open", async (event) => {
     assertTrusted(event);
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory"] });
