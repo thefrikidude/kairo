@@ -38,7 +38,7 @@ The contextual panel stays hidden until opened; drag its left edge to resize it,
 
 **Terminal** opens a collapsible bottom panel in the current workspace. Tabs retain their shells across chat and project switches; hiding the panel keeps commands running. Use **+** for another tab, **×** to stop a shell and its attached child processes, and the top edge to resize the panel. Terminals are ephemeral and stop when Kairo quits. **Settings → Workspaces** can close terminals even after their chats have been deleted. Manual shell input uses a separate native PTY service; Codex and OpenCode continue using their official protocols.
 
-Session and confirmation dialogs keep keyboard focus inside while open and return focus when closed.
+Session and confirmation dialogs keep keyboard focus inside while open and return focus when closed. Workspace and terminal tabs support Left/Right and Home/End keys.
 
 Keyboard shortcuts: **Cmd/Ctrl+Shift+E** opens Files, **Cmd/Ctrl+Shift+D** opens Changes, and **Cmd/Ctrl+Shift+B** toggles the sidebar. **Cmd/Ctrl+`** toggles Terminal. **Escape** closes the active dialog or contextual panel before cancelling a running task. Escape inside Terminal is passed to the shell.
 
@@ -99,3 +99,11 @@ node scripts/desktop-smoke.mjs
 ```
 
 The application is organized into domain, application, infrastructure, and desktop interface layers. The Electron renderer is isolated from Node.js and agent processes communicate over private stdio, without a network listener. Add native-chat agent adapters to the infrastructure registry by implementing discovery, official authentication, streamed turns, approvals, cancellation, and resume identity.
+
+### Optional workflow and performance checks
+
+After `pnpm build` and `pnpm desktop:build`, run `node scripts/desktop-smoke.mjs` for the Electron fixture/restart check. `KAIRO_SMOKE_LARGE=1` includes the large explorer/diff fixture.
+
+`node scripts/native-workflow-smoke.mjs` uses your installed, authenticated Codex and OpenCode accounts for tiny local tasks in temporary isolated worktrees. It checks concurrent runs, actual file isolation, review patches and SQLite/native-history persistence. Codex uses an explicit `gpt-6-sol` selection; set `KAIRO_NATIVE_CODEX_MODEL` to another available model if needed. Temporary fixtures are removed and owned runtimes are stopped afterward.
+
+`node scripts/desktop-benchmark.mjs` measures three fresh Electron launches with 24 workspaces and ten session switches per launch. Set `KAIRO_BENCH_OUTPUT` to retain reports, or pass another built checkout directory as its argument. Reports include summed resident memory for Electron, the Node backend and child agents; shared memory pages may be counted more than once. These local measurements are not performance guarantees. See the implementation plan for the measured checkpoint and remaining audit.

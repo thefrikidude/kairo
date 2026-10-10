@@ -131,3 +131,31 @@ Review refresh now follows workspace identity when another chat emits a finished
 Validation: typecheck, desktop build and all 174 tests passed. Electron smoke/restart passed; evidence is under `/tmp/kairo-phase5-focus` and `/tmp/kairo-phase5-history`. The final focus fixture observed startup 1,284 ms and switch 63 ms; these remain single-run observations, not a comparative performance claim. The Mac emitted one sandbox-extension warning while all renderer checks passed. No smoke/backend processes remain.
 
 Still required before goal completion: comparable startup/memory/switching benchmarks and any resulting startup hydration fixes; keyboard navigation audit for contextual/terminal tabs; installed-agent end-to-end verification, including switching running sessions, approvals, background workspace review refresh, and restart; and the requirement-by-requirement definition-of-done audit. Phase 5 is in progress, not complete.
+
+### Paused checkpoint — 10 October 2026
+
+The user requested wrapping up and pausing before their usage limit. All latest changes are committed; the goal is deliberately unfinished.
+
+Startup workspace reconciliation now uses four concurrent workers rather than refreshing every directory serially. This still refreshes all workspace records and retains missing-folder history. The new test proves the four-worker bound and durable history. Contextual and terminal tablists now have roving keyboard focus with Left/Right and Home/End; changing a terminal tab with the keyboard no longer moves focus into its shell unexpectedly. The final Electron smoke exercises those keys alongside the existing modal, files, diff, terminal, archive and restart workflow.
+
+Installed-agent evidence: both Codex and OpenCode were authenticated. `scripts/native-workflow-smoke.mjs` ran real native-protocol tasks concurrently in distinct worktrees. Each created its own proof file, executed a Node content check, left the primary and other worktree unchanged, produced a reviewable patch, and retained its native conversation ID and workspace association after reopening SQLite. The native task status remains `verification_required`, because Kairo does not independently certify an agent's own reported check. No approvals were requested by these ordinary in-worktree tasks; approval behavior remains covered by protocol/backend tests rather than this native smoke. Evidence: `/tmp/kairo-native-workflow-final/native-workflow.json`.
+
+The first Codex attempt exposed a local CLI configuration mismatch: configured default `gpt-6.1-sol` was not available for this ChatGPT account's live model catalog. Rerunning with an explicit `gpt-6-sol` selection passed. The user's CLI configuration was left unchanged; README already documents selecting an available model when the default is unsupported.
+
+Repeatable benchmark: `scripts/desktop-benchmark.mjs` creates the same fixture shape for each revision (24 Git workspaces, 100 files, 10 messages/chat, three fresh app launches, ten painted session switches/launch). Fresh application data is used per sample; OS caches are not flushed. Baseline source is commit `73ae609`; the after run includes the four-worker startup change now committed as `da1fb2d` and the tab-navigation change. Raw after-report HEAD metadata still names its parent because the changes were measured before committing. The benchmark's resident-memory sampling includes the Electron process family, Node backend and owned agent children, excludes the observing `ps` process, and counts shared pages repeatedly.
+
+| Quiet local samples           |     Before |      After |
+| ----------------------------- | ---------: | ---------: |
+| Median startup                | 1,704.8 ms | 1,306.0 ms |
+| Median painted session switch |   49.75 ms |   49.80 ms |
+| Median summed process RSS     | 602,000 KB | 613,360 KB |
+
+Reports: `/tmp/kairo-benchmark-baseline-final/report.json` and `/tmp/kairo-benchmark-after-quiet/report.json`. The observed startup median decreased; switching was unchanged. RSS samples overlap substantially (before 549,472–603,856 KB; after 537,776–632,736 KB), so no memory improvement is claimed. Three samples on one Mac, sequential before/after runs and warm-cache effects limit attribution. An earlier after run overlapped the test suite and is excluded from the comparison.
+
+Final gates for this checkpoint: `pnpm check`, `pnpm desktop:build`, all 175 tests, and Electron smoke/restart passed. UI evidence: `/tmp/kairo-phase5-tabs-final`. Expected stale-editor conflict errors are intentionally exercised. Started benchmark, native-agent and smoke processes have exited.
+
+Resume here:
+
+1. Run the installed agents through the actual Electron conversation UI together; verify switching running chats and background review refresh for another chat sharing a workspace. The real native backend smoke and the Electron fixture smoke have passed separately; the combined UI/native run is still unverified.
+2. Finish the requirement-by-requirement completion audit against the attached specification, including approval UX, cancellation/recovery, lazy loading and process cleanup. Fix any material gaps the audit finds.
+3. Re-run only checks affected by further changes and document final evidence. Mark the goal complete only when the full developer workflow is proven. No automatic agent delegation should be added.
