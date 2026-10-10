@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, realpath, rm, writeFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { GitWorkspaces } from "./git-workspaces.js";
 import type { TaskWorkspace } from "../../domain/task-workspace.js";
 
@@ -34,6 +34,8 @@ test("isolated worktrees share repository identity and preserve independent file
   assert.equal(a.repositoryPath, repo);
   assert.equal(b.repositoryPath, repo);
   assert.notEqual(a.directory, b.directory);
+  assert.equal(basename(a.directory), basename(repo));
+  assert.match(a.directory, /kairo-a-[a-f0-9]{8}/);
   assert.equal(a.baseCommit, git(["rev-parse", "HEAD"]));
   assert.equal((await worktrees.describe(a.directory)).repositoryPath, repo);
   await writeFile(join(a.directory, "hello.txt"), "changed in a\n");

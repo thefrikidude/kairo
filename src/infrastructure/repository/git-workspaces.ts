@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import type { GitWorktree, TaskWorkspace } from "../../domain/task-workspace.js";
 import { stateDir } from "../filesystem/platform-paths.js";
@@ -118,7 +118,8 @@ export class GitWorkspaces {
       const key = createHash("sha256").update(project.repositoryPath).digest("hex").slice(0, 20);
       const parent = join(this.managedRoot, key);
       await mkdir(parent, { recursive: true });
-      const directory = join(await realpath(parent), randomUUID());
+      const task = `${branch.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 64)}-${randomUUID().slice(0, 8)}`;
+      const directory = join(await realpath(parent), task, basename(project.repositoryPath));
       await command(project.directory, ["worktree", "add", "-b", branch, directory, baseCommit]);
       return {
         repositoryPath: project.repositoryPath,
