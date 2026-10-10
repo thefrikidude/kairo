@@ -662,3 +662,23 @@ test("switching blocks new sends and another switch while cancellation is pendin
   release();
   await switching;
 });
+
+test("desktop rename and directory preview APIs use the session workspace", async (t) => {
+  const { request, builtin, root } = await setup(t);
+  const { writeFile, mkdir } = await import("node:fs/promises");
+  await mkdir(join(root, "source"));
+  await writeFile(join(root, "source", "hello.txt"), "hello\n".repeat(10_000));
+  const next = await request<DesktopBootstrap>("session:rename", builtin.id, "My task");
+  assert.equal(next.sessions.find((s) => s.id === builtin.id)?.title, "My task");
+  const entries = await request<{ path: string }[]>("workspace:directory", builtin.id, "source");
+  assert.deepEqual(
+    entries.map((e) => e.path),
+    ["source/hello.txt"],
+  );
+  assert.equal(
+    (await request<string>("workspace:read", builtin.id, "source/hello.txt")).length,
+    60_000,
+  );
+  await assert.rejects(request("workspace:directory", builtin.id, ".."), /outside/);
+  await assert.rejects(request("session:rename", builtin.id, ""), /Enter/);
+});

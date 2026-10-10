@@ -19,6 +19,7 @@ import {
   type Session,
 } from "../../../infrastructure/persistence/sqlite-session-store.js";
 import { MacOSKeychainStore } from "../../../infrastructure/security/macos-keychain-store.js";
+import { WorkspaceFiles } from "../../../infrastructure/tools/workspace-files.js";
 import { WorkspaceTools, definitions } from "../../../infrastructure/tools/workspace-tools.js";
 import {
   changedFileReview,
@@ -419,6 +420,11 @@ export async function createDesktopRuntime(
       case "session:open": {
         activeSessionId = requireSession(store, String(first)).id;
         return bootstrap(store, activeSessionId);
+      }
+      case "session:rename": {
+        const session = requireSession(store, String(first));
+        store.rename(session.id, second);
+        return bootstrap(store);
       }
       case "session:new": {
         const workspace =
@@ -871,12 +877,13 @@ export async function createDesktopRuntime(
         if (!result.ok) throw new Error(result.output);
         return result.output === "No files found." ? [] : result.output.split("\n");
       }
+      case "workspace:directory": {
+        const files = await WorkspaceFiles.create(requireSession(store, String(first)).workspace);
+        return files.directory(second ?? ".");
+      }
       case "workspace:read": {
-        const result = await (
-          await toolsFor(store, String(first))
-        ).execute({ id: crypto.randomUUID(), name: "read_file", args: { path: second } });
-        if (!result.ok) throw new Error(result.output);
-        return result.output;
+        const files = await WorkspaceFiles.create(requireSession(store, String(first)).workspace);
+        return files.read(second);
       }
       case "workspace:write": {
         const session = requireSession(store, String(first));

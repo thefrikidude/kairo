@@ -21,6 +21,7 @@ export interface Session {
   id: string;
   workspace: string;
   title: string;
+  lastTaskStatus?: TaskStatus;
   createdAt: number;
   updatedAt: number;
   permissionMode: WorkspaceEditPermission;
@@ -63,6 +64,8 @@ export class SqliteSessionStore {
       db.exec("ALTER TABLE sessions ADD COLUMN runtime_json TEXT");
     if (!sessionColumns.some((column) => column.name === "external_session_id"))
       db.exec("ALTER TABLE sessions ADD COLUMN external_session_id TEXT");
+    if (!sessionColumns.some((column) => column.name === "title"))
+      db.exec("ALTER TABLE sessions ADD COLUMN title TEXT");
     const messageColumns = db.prepare("SELECT name FROM pragma_table_info('messages')").all() as {
       name: string;
     }[];
@@ -288,6 +291,16 @@ export class SqliteSessionStore {
       runtime,
     };
   }
+  /** A custom title survives future turns, archives and restarts. */
+  rename(id: string, value: unknown): void {
+    if (typeof value !== "string" || !value.trim()) throw new Error("Enter a session name.");
+    const title = value.trim().replace(/\s+/g, " ");
+    if (title.length > 120) throw new Error("Session names can contain up to 120 characters.");
+    const result = this.db
+      .prepare("UPDATE sessions SET title=?, updated_at=? WHERE id=?")
+      .run(title, Date.now(), id);
+    if (result.changes !== 1) throw new Error("Session not found.");
+  }
   /** Persists a session runtime/model without discarding its conversation identity. */
   setSessionRuntime(id: string, runtime: SessionRuntime): void {
     const result = this.db
@@ -344,7 +357,7 @@ export class SqliteSessionStore {
   get(id: string): Session | undefined {
     const row = this.db
       .prepare(
-        "SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1) AS title FROM sessions WHERE id = ?",
+        "SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT status FROM tasks WHERE session_id=sessions.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_task_status, COALESCE(title, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1)) AS title FROM sessions WHERE id = ?",
       )
       .get(id) as Record<string, unknown> | undefined;
     return (
@@ -352,6 +365,8 @@ export class SqliteSessionStore {
         id: String(row.id),
         workspace: String(row.workspace),
         title: sessionTitle(row.title),
+        lastTaskStatus:
+          row.last_task_status == null ? undefined : (row.last_task_status as TaskStatus),
         createdAt: Number(row.created_at),
         updatedAt: Number(row.updated_at),
         permissionMode: row.permission_mode === "ask" ? "ask" : "workspace",
@@ -376,13 +391,14 @@ export class SqliteSessionStore {
     return (
       this.db
         .prepare(
-          `SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1) AS title FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
+          `SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT status FROM tasks WHERE session_id=sessions.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_task_status, COALESCE(title, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1)) AS title FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
         )
         .all() as Record<string, unknown>[]
     ).map((r) => ({
       id: String(r.id),
       workspace: String(r.workspace),
       title: sessionTitle(r.title),
+      lastTaskStatus: r.last_task_status == null ? undefined : (r.last_task_status as TaskStatus),
       createdAt: Number(r.created_at),
       updatedAt: Number(r.updated_at),
       permissionMode: r.permission_mode === "ask" ? "ask" : "workspace",

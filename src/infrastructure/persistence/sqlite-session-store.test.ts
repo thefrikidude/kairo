@@ -87,6 +87,9 @@ test("existing session tables migrate to workspace-write mode", async () => {
 
   const store = await SqliteSessionStore.open(path);
   assert.equal(store.get("legacy")?.permissionMode, "workspace");
+  assert.equal(store.get("legacy")?.title, "New session");
+  store.rename("legacy", "Migrated name");
+  assert.equal(store.get("legacy")?.title, "Migrated name");
   assert.equal(store.get("legacy")?.archivedAt, undefined);
   assert.equal(
     store.list().some((session) => session.id === "legacy"),
@@ -389,4 +392,27 @@ test("legacy session schemas migrate to the built-in runtime without losing mess
   migrated.addMessage("legacy-session", { role: "user", content: "still works", createdAt: 2 });
   assert.equal(migrated.messages("legacy-session")[0]?.content, "still works");
   migrated.close();
+});
+
+test("custom session names persist independently of messages, archives and restart", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-rename-"));
+  const path = join(root, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(path);
+  const session = store.create("/workspace");
+  store.addMessage(session.id, { role: "user", content: "Original prompt", createdAt: 1 });
+  assert.equal(store.get(session.id)?.title, "Original prompt");
+  store.rename(session.id, "  Improve\n  review  ");
+  assert.equal(store.list()[0].title, "Improve review");
+  store.addMessage(session.id, { role: "user", content: "Next prompt", createdAt: 2 });
+  assert.throws(() => store.rename(session.id, " "), /Enter/);
+  assert.throws(() => store.rename(session.id, "a".repeat(121)), /120/);
+  assert.throws(() => store.rename("missing", "Name"), /not found/);
+  store.archive(session.id);
+  store.close();
+  const reopened = await SqliteSessionStore.open(path);
+  t.after(() => reopened.close());
+  assert.equal(reopened.listArchived()[0].title, "Improve review");
+  reopened.restore(session.id);
+  assert.equal(reopened.get(session.id)?.title, "Improve review");
+  assert.equal(reopened.messages(session.id).length, 2);
 });

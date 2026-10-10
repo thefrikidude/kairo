@@ -11,6 +11,8 @@ import type {
 } from "../../../domain/models.js";
 import type { Session } from "../../../infrastructure/persistence/sqlite-session-store.js";
 
+export type { WorkspaceEntry } from "../../../infrastructure/tools/workspace-files.js";
+
 export type DesktopProvider = {
   id: ModelSelection["provider"];
   name: string;
@@ -64,6 +66,11 @@ export interface DesktopApi {
   onUsage(listener: (usage: AgentUsage) => void): () => void;
   refreshAgents(): Promise<ExternalAgentInfo[]>;
   loginAgent(agentId: string): Promise<void>;
+  renameSession(sessionId: string, title: string): Promise<DesktopBootstrap>;
+  directory(
+    sessionId: string,
+    path?: string,
+  ): Promise<import("../../../infrastructure/tools/workspace-files.js").WorkspaceEntry[]>;
   archiveSession(sessionId: string): Promise<DesktopBootstrap>;
   restoreSession(sessionId: string): Promise<DesktopBootstrap>;
   deleteSession(sessionId: string): Promise<DesktopBootstrap>;
