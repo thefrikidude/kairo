@@ -497,9 +497,7 @@ export function DesktopApp(): React.JSX.Element {
                           <span
                             className={`session-status status-${terminal?.state === "running" ? "complete" : terminal?.state === "exited" && terminal.exitCode ? "error" : "idle"}`}
                             title={
-                              terminal?.state === "running"
-                                ? "Agent terminal open"
-                                : "Agent terminal stopped"
+                              terminal?.state === "running" ? "Terminal open" : "Terminal stopped"
                             }
                           />
                           <span className="session-labels">
@@ -796,14 +794,33 @@ export function DesktopApp(): React.JSX.Element {
                     : "Stopped"}
               </span>
               <div>
+                {currentTerminal?.state === "running" && (
+                  <button
+                    disabled={pending}
+                    title="Suspend the foreground agent (Ctrl+Z). Run fg at the shell prompt to return."
+                    onClick={() => {
+                      void window.kairo
+                        .writeTerminal(currentTerminal.id, "\x1a")
+                        .then(() =>
+                          document
+                            .getElementById(`terminal-view-${currentTerminal.id}`)
+                            ?.querySelector<HTMLTextAreaElement>("textarea")
+                            ?.focus(),
+                        )
+                        .catch((error) => onError(String(error)));
+                    }}
+                  >
+                    Use shell
+                  </button>
+                )}
                 {currentTerminal ? (
                   <button
                     disabled={pending}
                     onClick={() =>
                       setConfirm({
-                        title: "Stop agent terminal?",
+                        title: "Close terminal?",
                         description:
-                          "Stop this CLI and its attached processes. Your workspace files are kept.",
+                          "Close this shell, its agent and attached processes. Your workspace files are kept.",
                         action: () => window.kairo.stopSession(current.id).then(apply),
                       })
                     }
@@ -857,6 +874,12 @@ export function DesktopApp(): React.JSX.Element {
                 )}
               </div>
             </div>
+          )}
+          {currentTerminal?.state === "running" && (
+            <p className="agent-session-notice">
+              Normal shell terminal · Exit the agent to use the shell, or choose Use shell and run
+              fg to return.
+            </p>
           )}
           {current && state?.sessionNotices[current.id] && (
             <p className="agent-session-notice" role="status">

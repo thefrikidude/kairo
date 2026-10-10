@@ -36,6 +36,17 @@ type Record = {
 const scrollbackLimit = 128_000;
 const flowLimit = 128_000;
 
+/** Quote literal argv for an interactive Unix shell, never interpret agent arguments as code. */
+function startupCommand(launch: TerminalLaunch): string {
+  const words = [launch.executable, ...launch.args];
+  if (words.some((word) => /[\x00-\x1f\x7f]/.test(word)))
+    throw new Error("Agent commands cannot contain terminal control characters.");
+  const command = words.map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(" ");
+  // Stay below the terminal's canonical input-line limit, measured in bytes.
+  if (Buffer.byteLength(command) > 4_000) throw new Error("Agent startup command is too long.");
+  return command;
+}
+
 /** Lazy native PTYs with bounded replay and renderer acknowledgements, independent of agent adapters. */
 export class WorkspaceTerminals {
   private records = new Map<string, Record>();
@@ -79,7 +90,7 @@ export class WorkspaceTerminals {
       if (this.creating.get(workspaceId) === pending) this.creating.delete(workspaceId);
     }
   }
-  /** Starts an interactive agent directly with argv, independently of any chat protocol. */
+  /** A session owns a normal shell; its agent runs as a foreground shell job. */
   async createAgent(
     workspaceId: string,
     directory: string,
@@ -121,9 +132,12 @@ export class WorkspaceTerminals {
       (process.platform === "win32"
         ? process.env.COMSPEC || "cmd.exe"
         : process.env.SHELL || "/bin/zsh");
+    if (launch && process.platform === "win32")
+      throw new Error("Agent shell sessions currently require macOS or Linux.");
+    const command = launch ? startupCommand(launch) : undefined;
     const pty = native.spawn(
-      launch?.executable ?? shell,
-      launch?.args ?? this.options.args ?? (process.platform === "win32" ? [] : ["-l"]),
+      shell,
+      this.options.args ?? (process.platform === "win32" ? [] : ["-l", "-i"]),
       {
         name: "xterm-256color",
         cwd: directory,
@@ -178,6 +192,9 @@ export class WorkspaceTerminals {
         this.emit("terminal:state", { ...record.info });
       }),
     );
+    // Queue ordinary terminal input, just as a user types a command. The shell
+    // retains job control, its environment and cwd after the foreground CLI exits.
+    if (command) pty.write(`${command}\r`);
     this.emit("terminal:state", { ...record.info });
     return { ...record.info };
   }

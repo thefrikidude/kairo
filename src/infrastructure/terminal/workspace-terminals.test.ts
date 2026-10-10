@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { access, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkspaceTerminals } from "./workspace-terminals.js";
@@ -149,9 +149,13 @@ test("terminal output is bounded and resumes after renderer acknowledgement", as
   assert.ok(snapshot.buffer.includes("FLOW_DONE\r\n"));
 });
 
-test("agent PTYs launch argv directly and retain distinct durable session identities", async (t) => {
+test("agent sessions retain shell job control, literal argv and distinct durable identities", async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-agent-terminal-")));
-  const service = new WorkspaceTerminals(() => {});
+  const service = new WorkspaceTerminals(() => {}, {
+    shell: "/bin/zsh",
+    args: ["-f"],
+    env: { PS1: "KAIRO_READY> " },
+  });
   t.after(async () => {
     await service.close();
     await rm(root, { recursive: true, force: true });
@@ -175,13 +179,44 @@ test("agent PTYs launch argv directly and retain distinct durable session identi
   assert.equal(first.id, duplicate.id);
   assert.equal(first.sessionId, "session-a");
   await waitUntil(() => service.attach(first.id).buffer.includes('"fixture":"ready"'));
-  const output = JSON.parse(service.attach(first.id).buffer.trim());
+  const output = JSON.parse(
+    service
+      .attach(first.id)
+      .buffer.split(/\r?\n/)
+      .find((line) => line.startsWith('{"cwd":'))!,
+  );
   assert.equal(output.cwd, root);
   assert.deepEqual(output.args, [literal]);
+  await assert.rejects(access(join(root, "SHOULD_NOT_EXIST")));
+  // Use shell suspends the foreground CLI without destroying its conversation.
+  service.input(first.id, "\x1a");
+  await waitUntil(() => service.attach(first.id).buffer.includes("suspended"));
+  service.input(first.id, "printf 'SHELL_%s\\n' READY; pwd\r");
+  await waitUntil(() => service.attach(first.id).buffer.includes("SHELL_READY\r\n"));
+  service.input(first.id, "fg\r");
+  await new Promise((done) => setTimeout(done, 100));
+  service.input(first.id, "\x03");
+  service.input(first.id, "printf 'AFTER_%s\\n' EXIT\r");
+  await waitUntil(() => service.attach(first.id).buffer.includes("AFTER_EXIT\r\n"));
+  assert.equal(service.list()[0].state, "running");
   const second = await service.createAgent("workspace-a", root, {
     ...launch,
+    args: ["-e", "console.log('AGENT_FINISHED')"],
     sessionId: "session-b",
   });
+  await waitUntil(() => service.attach(second.id).buffer.includes("AGENT_FINISHED\r\n"));
+  await new Promise((done) => setTimeout(done, 100));
+  service.input(second.id, "printf 'NORMAL_%s\\n' SHELL\r");
+  await waitUntil(() => service.attach(second.id).buffer.includes("NORMAL_SHELL\r\n"));
+  await assert.rejects(
+    service.createAgent("workspace-a", root, {
+      ...launch,
+      sessionId: "unsafe",
+      args: ["bad\x03argument"],
+    }),
+    /control characters/,
+  );
+  assert.equal(service.list().length, 2);
   assert.notEqual(first.pid, second.pid);
   await service.closeTerminal(first.id);
   assert.equal(service.list()[0].sessionId, "session-b");

@@ -136,6 +136,21 @@ async function run() {
   await waitFor(
     `window.kairo.fileSnapshot(${JSON.stringify(first.id)},'proof-a.txt').then(s=>s.content==='Primary agent\\n').catch(()=>false)`,
   );
+  await button("Use shell");
+  await waitFor(
+    `window.kairo.attachTerminal(${JSON.stringify(firstPty.id)}).then(t=>/Stopped|suspended/i.test(t.buffer))`,
+  );
+  // Job-control output precedes the shell restoring its terminal modes/prompt.
+  await sleep(500);
+  await evaluate(
+    `window.kairo.writeTerminal(${JSON.stringify(firstPty.id)}, ${JSON.stringify("printf 'SHELL_%s\\n' READY\r")})`,
+  );
+  await waitFor(
+    `window.kairo.attachTerminal(${JSON.stringify(firstPty.id)}).then(t=>t.buffer.includes('SHELL_READY'))`,
+  );
+  await capture("normal-shell.png");
+  await evaluate(`window.kairo.writeTerminal(${JSON.stringify(firstPty.id)}, "fg\\r")`);
+  await sleep(100);
   await click(".new-chat");
   await waitFor(
     "document.querySelector('dialog[open]') && !Array.from(document.querySelectorAll('dialog button')).find(b=>b.textContent==='Refresh agents')?.disabled",
@@ -231,6 +246,7 @@ async function run() {
     JSON.stringify({
       startupMs,
       embeddedAgentInput: true,
+      sameTerminalShellJobControl: true,
       isolatedWorktree: true,
       parallelNavigation: true,
       review: true,

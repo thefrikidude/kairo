@@ -95,7 +95,7 @@ test("terminal desktop owns independent workspaces, live navigation, Git review 
     owned.push(primaryPty.pid);
     await until(async () =>
       ((await request("terminal:attach", primaryPty.id)) as TerminalSnapshot).buffer.includes(
-        "AGENT_READY",
+        "AGENT_READY\r\n",
       ),
     );
     await assert.rejects(
@@ -120,7 +120,7 @@ test("terminal desktop owns independent workspaces, live navigation, Git review 
     );
     await until(async () =>
       ((await request("terminal:attach", isolatedPty.id)) as TerminalSnapshot).buffer.includes(
-        "FILE_SAVED",
+        "FILE_SAVED\r\n",
       ),
     );
     assert.equal(await readFile(join(directory, "proof.txt"), "utf8"), "isolated\n");
