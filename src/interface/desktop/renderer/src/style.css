@@ -2358,3 +2358,326 @@ button svg {
 .workspace-catalog-row button {
   flex: none;
 }
+.review-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.review-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.review-scope select {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  min-width: 0;
+}
+.review-scope small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.review-evidence {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  max-height: 200px;
+  overflow: auto;
+  flex: none;
+}
+.review-evidence summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.review-evidence p {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.review-evidence pre {
+  white-space: pre-wrap;
+  font-size: 11px;
+}
+.changed-file-navigation {
+  flex: none;
+  max-height: 25%;
+  overflow: auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.changed-file-button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: 5px;
+}
+.changed-file-button.active,
+.changed-file-button:hover {
+  background: var(--hover);
+}
+.changed-file-button > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-file-status {
+  color: var(--muted);
+  font:
+    11px ui-monospace,
+    monospace;
+  flex: none;
+  min-width: 18px;
+}
+.selected-diff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 8px;
+  flex: none;
+  border-bottom: 1px solid var(--line);
+}
+.selected-diff-toolbar strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selected-diff-toolbar button {
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  flex: none;
+}
+.selected-diff-toolbar button:hover {
+  background: var(--hover);
+}
+.split-diff {
+  min-width: 540px;
+}
+.split-heading,
+.split-diff-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.split-heading {
+  color: var(--muted);
+  padding: 6px 0;
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  font-size: 11px;
+}
+.split-heading span {
+  padding-left: 12px;
+}
+.split-diff-cell {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: auto;
+  font:
+    11px/1.7 ui-monospace,
+    monospace;
+  border-right: 1px solid var(--line);
+}
+.split-diff-cell code {
+  white-space: pre;
+}
+.file-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+.file-editor-actions > span {
+  color: var(--muted);
+  flex: 1;
+}
+.file-editor-actions small {
+  color: var(--warning);
+}
+.file-editor-actions button {
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.code-editor {
+  flex: 1;
+  min-height: 100px;
+  min-width: 0;
+  resize: none;
+  padding: 16px;
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+  white-space: pre;
+  overflow: auto;
+  font:
+    12px/1.7 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  tab-size: 2;
+}
+.unsaved-files {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--warning);
+}
+.unsaved-files button {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 0;
+}
+.inline-confirm {
+  padding: 12px;
+  background: var(--warning-bg);
+  flex: none;
+}
+.inline-confirm button {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  margin-right: 8px;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal {
+  color: #bd9df7;
+}
+.hljs-string,
+.hljs-attr,
+.hljs-addition {
+  color: var(--positive);
+}
+.hljs-number,
+.hljs-type,
+.hljs-built_in {
+  color: var(--warning);
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--muted);
+}
+.hljs-title,
+.hljs-tag,
+.hljs-name {
+  color: #83b8ee;
+}
+:root[data-theme="light"] .hljs-keyword,
+:root[data-theme="light"] .hljs-selector-tag,
+:root[data-theme="light"] .hljs-literal {
+  color: #7136a6;
+}
+:root[data-theme="light"] .hljs-title,
+:root[data-theme="light"] .hljs-tag,
+:root[data-theme="light"] .hljs-name {
+  color: #24689c;
+}
+.tool-file-details {
+  margin-left: auto;
+  color: var(--muted);
+  max-width: 50%;
+}
+.tool-file-details summary {
+  cursor: pointer;
+  font-size: 11px;
+}
+.tool-file-details button {
+  display: block;
+  max-width: 100%;
+  color: var(--text);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  padding: 4px 0;
+  font-size: 11px;
+}
+.virtual-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+}
+.virtual-row-content {
+  min-width: 100%;
+}
+.virtual-row {
+  min-width: 0;
+}
+.virtual-row .file-entry,
+.virtual-row .changed-file-button {
+  height: 100%;
+  padding-block: 0;
+}
+.virtual-rows.changed-file-navigation {
+  flex: none;
+  max-height: 25%;
+  padding: 0 8px;
+}
+.virtual-rows.diff-scroll {
+  padding: 0;
+  overflow: auto;
+}
+.virtual-row .diff-hunk {
+  height: 24px;
+  margin: 0;
+  padding: 0 12px;
+  line-height: 24px;
+  white-space: pre;
+}
+.virtual-row .diff-row,
+.virtual-row .split-diff-row {
+  height: 24px;
+  line-height: 24px;
+}
+.virtual-rows.split-diff {
+  min-width: 0;
+}
+.split-diff-row {
+  min-width: 540px;
+}
+.split-diff-cell {
+  overflow: hidden;
+  line-height: 24px;
+}
+.tool-activity > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.tool-file-shortcut {
+  padding: 0 4px;
+  color: var(--text);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.tool-file-shortcut:hover {
+  text-decoration: underline;
+}
+.file-editor-actions {
+  flex-wrap: wrap;
+}
+.file-editor-actions small {
+  flex-basis: 100%;
+}

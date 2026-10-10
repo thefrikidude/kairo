@@ -1,6 +1,7 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, dialog } = require("electron");
 const assert = require("node:assert/strict");
 const { mkdir, writeFile } = require("node:fs/promises");
+const { execFileSync } = require("node:child_process");
 const { join } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const started = performance.now();
@@ -27,8 +28,22 @@ async function waitFor(code) {
 async function click(selector) {
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
 }
+async function capture(name) {
+  win.show();
+  win.focus();
+  await evaluate("new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))");
+  await sleep(100);
+  const image = await win.webContents.capturePage();
+  await writeFile(join(process.env.KAIRO_SMOKE_OUTPUT, name), image.toPNG());
+}
+async function editBuffer(content) {
+  await evaluate(
+    `(() => { const node = document.querySelector('.code-editor'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(node, ${JSON.stringify(content)}); node.dispatchEvent(new Event('input', { bubbles: true })); })()`,
+  );
+}
 app.on("browser-window-created", (_event, window) => {
   win = window;
+  window.webContents.setBackgroundThrottling(false);
   window.webContents.on("console-message", (event) => {
     if (event.level === "error") failures.push(event.message);
   });
@@ -59,7 +74,7 @@ async function run() {
     const text = await evaluate(
       `window.kairo.readFile(${JSON.stringify(session.id)}, 'src/hello.ts')`,
     );
-    assert.match(text, /Hello from the workspace/);
+    assert.match(text, /External change/);
     assert.equal(await evaluate("document.querySelector('#workspace-panel').hidden"), true);
     await writeFile(
       join(process.env.KAIRO_SMOKE_OUTPUT, "restart.json"),
@@ -113,17 +128,143 @@ async function run() {
   assert.notEqual(isolatedWorkspace.directory, process.env.KAIRO_SMOKE_PROJECT);
   await click(".top-actions button[title^='Browse files']");
   await waitFor("document.querySelector('.file-entry')");
+  if (process.env.KAIRO_SMOKE_LARGE === "1")
+    assert.ok(await evaluate("document.querySelectorAll('.file-entry').length < 100"));
   await evaluate(
     "Array.from(document.querySelectorAll('.file-entry')).find(e => e.textContent.includes('src')).click()",
   );
-  await waitFor("document.querySelector('.file-entry')?.textContent.includes('hello.ts')");
-  await click(".file-entry");
+  await waitFor("document.querySelector('[data-file-path=\"src/hello.ts\"]')");
+  await click('[data-file-path="src/hello.ts"]');
   await waitFor(
     "document.querySelector('.file-preview')?.textContent.includes('Hello from the workspace')",
   );
   await click("button[aria-label='Reload file preview']");
   await waitFor(
     "document.querySelector('.file-preview')?.textContent.includes('Hello from the workspace')",
+  );
+  await click(".file-editor-actions button");
+  await waitFor("document.querySelector('.code-editor')");
+  await editBuffer('export const message = "Edited in Kairo";\n');
+  await waitFor(
+    "document.querySelector('.file-editor-actions').textContent.includes('Unsaved changes')",
+  );
+  await click(`[data-session-id="${process.env.KAIRO_SMOKE_FIRST}"] .session`);
+  await waitFor(
+    `document.querySelector('.session-row.selected').dataset.sessionId === ${JSON.stringify(process.env.KAIRO_SMOKE_FIRST)}`,
+  );
+  await click(`[data-session-id="${isolatedSession.id}"] .session`);
+  await waitFor(
+    `document.querySelector('.session-row.selected').dataset.sessionId === ${JSON.stringify(isolatedSession.id)}`,
+  );
+  await waitFor("document.querySelector('.unsaved-files button')");
+  await click(".unsaved-files button");
+  await waitFor("document.querySelector('.code-editor')?.value.includes('Edited in Kairo')");
+  await click("#changes-tab");
+  await click("#files-tab");
+  await waitFor("document.querySelector('.unsaved-files button')");
+  await click(".unsaved-files button");
+  await waitFor("document.querySelector('.code-editor')?.value.includes('Edited in Kairo')");
+  const nativePrompt = dialog.showMessageBoxSync;
+  dialog.showMessageBoxSync = () => 0;
+  app.quit();
+  await sleep(100);
+  assert.ok((await evaluate("window.kairo.bootstrap()")).sessions.length > 0);
+  dialog.showMessageBoxSync = nativePrompt;
+  await click(".file-editor-actions button.primary");
+  await waitFor(
+    "!document.querySelector('.file-editor-actions').textContent.includes('Unsaved changes')",
+  );
+  const source = await evaluate(
+    `window.kairo.readFile(${JSON.stringify(process.env.KAIRO_SMOKE_FIRST)}, 'src/hello.ts')`,
+  );
+  assert.match(source, /Hello from the workspace/);
+  const git = (args) =>
+    execFileSync("git", args, {
+      cwd: isolatedWorkspace.directory,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  git(["add", "src/hello.ts"]);
+  git([
+    "-c",
+    "user.name=Kairo smoke",
+    "-c",
+    "user.email=fixture@example.test",
+    "commit",
+    "-m",
+    "Reviewed fixture edit",
+  ]);
+  await click("#changes-tab");
+  await click("button[aria-label='Refresh changed files']");
+  await waitFor("document.querySelector('.diff-add')?.textContent.includes('Edited in Kairo')");
+  for (let step = 0; step < 15; step += 1)
+    await evaluate(
+      "document.querySelector('[aria-label=\"Resize workspace panel\"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))",
+    );
+  await evaluate(
+    "Array.from(document.querySelectorAll('.selected-diff-toolbar button')).find(e => e.textContent === 'Split').click()",
+  );
+  await waitFor("document.querySelector('.split-diff')");
+  await sleep(100);
+  await capture("split-review.png");
+  await evaluate(
+    `(() => { const node = document.querySelector('[aria-label="Review scope"]'); node.value = 'working'; node.dispatchEvent(new Event('change', { bubbles: true })); })()`,
+  );
+  await waitFor(
+    "document.querySelector('.review-panel')?.textContent.includes('Working tree is clean')",
+  );
+  await evaluate(
+    `(() => { const node = document.querySelector('[aria-label="Review scope"]'); node.value = 'task'; node.dispatchEvent(new Event('change', { bubbles: true })); })()`,
+  );
+  await waitFor("document.querySelector('.changed-file-button')");
+  await click("#files-tab");
+  await waitFor("document.querySelector('.file-entry')");
+  await click('[data-file-path="src"]');
+  await waitFor("document.querySelector('[data-file-path=\"src/hello.ts\"]')");
+  await click('[data-file-path="src/hello.ts"]');
+  await waitFor("document.querySelector('.file-preview')?.textContent.includes('Edited in Kairo')");
+  await click(".file-editor-actions button");
+  await waitFor("document.querySelector('.code-editor')");
+  await editBuffer("My unsaved draft\n");
+  await evaluate(
+    `(async () => { const snapshot = await window.kairo.fileSnapshot(${JSON.stringify(isolatedSession.id)}, 'src/hello.ts'); await window.kairo.saveFile(${JSON.stringify(isolatedSession.id)}, 'src/hello.ts', ${JSON.stringify('export const message = "External change";\n')}, snapshot.revision); })()`,
+  );
+  await click(".file-editor-actions button.primary");
+  await waitFor("document.querySelector('.file-error')?.textContent.includes('changed outside')");
+  assert.match(await evaluate("document.querySelector('.code-editor').value"), /My unsaved draft/);
+  await click("button[aria-label='Reload file preview']");
+  await waitFor("document.querySelector('.inline-confirm')");
+  await evaluate(
+    "Array.from(document.querySelectorAll('.inline-confirm button')).find(e => e.textContent === 'Discard and reload').click()",
+  );
+  await waitFor("document.querySelector('.file-preview')?.textContent.includes('External change')");
+  await sleep(100);
+  await capture("file-preview.png");
+  if (process.env.KAIRO_SMOKE_LARGE === "1") {
+    await evaluate(
+      `(async () => { const snapshot = await window.kairo.fileSnapshot(${JSON.stringify(isolatedSession.id)}, 'src/large.ts'); await window.kairo.saveFile(${JSON.stringify(isolatedSession.id)}, 'src/large.ts', snapshot.content.replaceAll('export const value', 'export const revised'), snapshot.revision); })()`,
+    );
+    await click("#changes-tab");
+    await click("button[aria-label='Refresh changed files']");
+    await waitFor(
+      "Array.from(document.querySelectorAll('.changed-file-button')).some(e => e.textContent.includes('src/large.ts'))",
+    );
+    await evaluate(
+      "Array.from(document.querySelectorAll('.changed-file-button')).find(e => e.textContent.includes('src/large.ts')).click()",
+    );
+    await waitFor("document.querySelector('.diff-remove')?.textContent.includes('value0')");
+    assert.ok(await evaluate("document.querySelectorAll('.diff-row').length < 100"));
+    await evaluate(
+      "document.querySelector('.virtual-rows.diff-scroll').scrollTop = document.querySelector('.virtual-rows.diff-scroll').scrollHeight",
+    );
+    await waitFor(
+      "Array.from(document.querySelectorAll('.diff-add')).some(e => e.textContent.includes('revised9999'))",
+    );
+    await capture("large-diff.png");
+    await click("#files-tab");
+    await waitFor("document.querySelector('.file-entry')");
+  }
+  const panelWidth = await evaluate(
+    "Number(document.querySelector('[aria-label=\"Resize workspace panel\"]').getAttribute('aria-valuenow'))",
   );
   await evaluate(
     "document.querySelector('[aria-label=\"Resize workspace panel\"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))",
@@ -132,7 +273,7 @@ async function run() {
     await evaluate(
       "Number(document.querySelector('[aria-label=\"Resize workspace panel\"]').getAttribute('aria-valuenow'))",
     ),
-    440,
+    Math.min(720, panelWidth + 20),
   );
   const switchStart = performance.now();
   const targetId = process.env.KAIRO_SMOKE_FIRST;
@@ -147,22 +288,14 @@ async function run() {
   await click("#changes-tab");
   await waitFor("document.querySelector('#changes-tab').getAttribute('aria-selected') === 'true'");
   await sleep(100);
-  await win.webContents
-    .capturePage()
-    .then((img) =>
-      writeFile(join(process.env.KAIRO_SMOKE_OUTPUT, "desktop-wide.png"), img.toPNG()),
-    );
+  await capture("desktop-wide.png");
   win.setSize(900, 700);
   await sleep(150);
   const footer = await evaluate(
     "(() => { const e = document.querySelector('.agent-usage-footer'); if (!e) return null; const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: innerHeight }; })()",
   );
   assert.ok(footer && footer.bottom <= footer.height && footer.top >= 0);
-  await win.webContents
-    .capturePage()
-    .then((img) =>
-      writeFile(join(process.env.KAIRO_SMOKE_OUTPUT, "desktop-narrow.png"), img.toPNG()),
-    );
+  await capture("desktop-narrow.png");
   await click("button[aria-label='Close review']");
   await click(".settings-link");
   await waitFor("document.querySelector('.theme-options')");
@@ -172,11 +305,7 @@ async function run() {
   await click(".settings-back");
   await waitFor("document.querySelector('.app-shell')?.dataset.theme === 'light'");
   await sleep(150);
-  await win.webContents
-    .capturePage()
-    .then((img) =>
-      writeFile(join(process.env.KAIRO_SMOKE_OUTPUT, "desktop-light.png"), img.toPNG()),
-    );
+  await capture("desktop-light.png");
   assert.deepEqual(failures, []);
   const metrics = {
     startupMs: Math.round(startupMs),

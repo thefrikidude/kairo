@@ -1,13 +1,31 @@
 import { UsageFooter } from "./usage-footer.js";
 import { UserInputCard } from "./user-input-card.js";
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import parseDiff from "parse-diff";
+import React, {
+  lazy,
+  Suspense,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type {
+  ReviewScope,
+  WorkspaceReview,
+  WorkspaceChange,
+} from "../../../../infrastructure/tools/workspace-review.js";
+import { retainBuffer, type EditorBuffer } from "./editor-buffer.js";
 import type { DesktopBootstrap, LiveSession } from "../../shared/api.js";
 import type { GitWorktree, WorkspaceSelection } from "../../../../domain/task-workspace.js";
 import type { SessionRuntime } from "../../../../domain/agent-runtime.js";
 import type { ModelSelection, Message, TaskEvent } from "../../../../domain/models.js";
 
+const ReviewPanel = lazy(() => import("./review-panel.js"));
 const FileBrowser = lazy(() => import("./file-browser.js"));
+
+const EMPTY_BUFFERS: Record<string, EditorBuffer> = {};
+const EMPTY_CHANGES: WorkspaceChange[] = [];
 
 type Mode = "build" | "plan";
 type Theme = "light" | "dark";
@@ -16,126 +34,6 @@ const SIDEBAR_DEFAULT_WIDTH = 224;
 const SIDEBAR_MIN_WIDTH = 176;
 const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_COLLAPSE_THRESHOLD = 156;
-type ChangeSummary = {
-  path: string;
-  additions: number;
-  deletions: number;
-  diff: string;
-  unavailable?: string;
-};
-type DiffRow = {
-  kind: "add" | "remove" | "context" | "hunk" | "meta" | "fold";
-  oldLine?: number;
-  newLine?: number;
-  count?: number;
-  text: string;
-};
-
-async function summarizeChanges(sessionId: string): Promise<ChangeSummary[]> {
-  const paths = await window.kairo.changedFiles(sessionId);
-  return Promise.all(
-    paths.map(async (path) => {
-      const { diff, unavailable } = await window.kairo.diff(sessionId, path);
-      const files = parseDiff(diff);
-      let additions = files.reduce((total, file) => total + file.additions, 0);
-      const deletions = files.reduce((total, file) => total + file.deletions, 0);
-      if (!files.length && unavailable && diff.trim())
-        additions = diff.split(/\r?\n/).filter(Boolean).length;
-      return { path, additions, deletions, diff, unavailable };
-    }),
-  );
-}
-
-function parseDiffRows(diff: string): DiffRow[] {
-  const files = parseDiff(diff);
-  if (!files.length)
-    return diff
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((text, index) => ({ kind: "add", newLine: index + 1, text }));
-  return files.flatMap((file) => {
-    const rows: DiffRow[] = [];
-    let previousChunk: (typeof file.chunks)[number] | undefined;
-    for (const chunk of file.chunks) {
-      if (previousChunk) {
-        const gap = Math.max(
-          chunk.oldStart - previousChunk.oldStart - previousChunk.oldLines,
-          chunk.newStart - previousChunk.newStart - previousChunk.newLines,
-        );
-        if (gap > 0) rows.push({ kind: "fold", count: gap, text: "" });
-      }
-      rows.push({ kind: "hunk", text: chunk.content });
-      rows.push(
-        ...chunk.changes.map((change): DiffRow => {
-          if (change.content.startsWith("\\")) return { kind: "meta", text: change.content };
-          if (change.type === "add")
-            return { kind: "add", newLine: change.ln, text: change.content.slice(1) };
-          if (change.type === "del")
-            return { kind: "remove", oldLine: change.ln, text: change.content.slice(1) };
-          return {
-            kind: "context",
-            oldLine: change.ln1,
-            newLine: change.ln2,
-            text: change.content.slice(1),
-          };
-        }),
-      );
-      previousChunk = chunk;
-    }
-    return rows;
-  });
-}
-
-function DiffLine({ row }: { row: DiffRow }): React.JSX.Element {
-  if (row.kind === "hunk") return <div className="diff-hunk">{row.text}</div>;
-  if (row.kind === "fold")
-    return <div className="diff-context-gap">{row.count} unmodified lines</div>;
-  const marker = row.kind === "add" ? "+" : row.kind === "remove" ? "−" : "";
-  return (
-    <div className={`diff-row diff-${row.kind}`}>
-      <span className="diff-line-number">{row.oldLine ?? ""}</span>
-      <span className="diff-line-number">{row.newLine ?? ""}</span>
-      <span className="diff-marker">{marker}</span>
-      <code>{row.text || " "}</code>
-    </div>
-  );
-}
-
-function DiffContents({ diff }: { diff: string }): React.JSX.Element {
-  const rows = parseDiffRows(diff);
-  const content: React.ReactNode[] = [];
-  for (let index = 0; index < rows.length;) {
-    if (rows[index].kind !== "context") {
-      content.push(<DiffLine key={index} row={rows[index]} />);
-      index += 1;
-      continue;
-    }
-    let end = index;
-    while (end < rows.length && rows[end].kind === "context") end += 1;
-    const context = rows.slice(index, end);
-    if (context.length > 8) {
-      content.push(
-        <details className="diff-context-fold" key={index}>
-          <summary>{context.length} unmodified lines</summary>
-          {context.map((row, offset) => (
-            <DiffLine key={index + offset} row={row} />
-          ))}
-        </details>,
-      );
-    } else {
-      content.push(...context.map((row, offset) => <DiffLine key={index + offset} row={row} />));
-    }
-    index = end;
-  }
-  return <div className="diff-rows">{content}</div>;
-}
-
-function fileExtension(path: string): string {
-  const name = path.split(/[\\/]/).at(-1) ?? path;
-  const extension = name.includes(".") ? (name.split(".").at(-1) ?? "") : "";
-  return (extension || name.slice(0, 2)).slice(0, 3).toUpperCase();
-}
-
 const codexCommands = [
   { name: "/plan", command: "plan" as const, description: "Switch Codex to Plan mode" },
   {
@@ -178,7 +76,16 @@ export function DesktopApp(): React.JSX.Element {
   const live = state?.activeSessionId ? state.liveSessions[state.activeSessionId] : undefined;
   const busy = Boolean(live && ["running", "waiting", "cancelling"].includes(live.state));
   const stream = busy ? (live?.stream ?? "") : "";
-  const toolActivity = live?.events ?? [];
+  const toolActivity = useMemo(() => {
+    const events = live?.events ?? state?.taskEvents ?? [];
+    const operations = new Map<string, TaskEvent>();
+    for (const event of events)
+      if (event.operationId && (event.kind === "tool_started" || event.kind === "tool_finished")) {
+        const previous = operations.get(event.operationId);
+        operations.set(event.operationId, { ...event, paths: event.paths ?? previous?.paths });
+      }
+    return [...operations.values()];
+  }, [live?.events, state?.taskEvents]);
   const userInput = state?.userInputs.find((item) => item.sessionId === state.activeSessionId);
   const activity =
     live?.state === "waiting"
@@ -273,8 +180,16 @@ export function DesktopApp(): React.JSX.Element {
     }
   });
   const [sidebarResizeActive, setSidebarResizeActive] = useState(false);
-  const [changes, setChanges] = useState<ChangeSummary[]>([]);
-  const [viewingChanges, setViewingChanges] = useState(false);
+  const [reviewData, setReviewData] = useState<WorkspaceReview>();
+  const [reviewError, setReviewError] = useState("");
+  const [requestedScope, setRequestedScope] = useState<ReviewScope>("task");
+  const [reviewRevision, setReviewRevision] = useState(0);
+  const changes = reviewData?.changes ?? EMPTY_CHANGES;
+  const reviewScope = activeWorkspace?.baseCommit ? requestedScope : "working";
+  const [fileBuffers, setFileBuffers] = useState<Record<string, Record<string, EditorBuffer>>>({});
+  const [fileTargets, setFileTargets] = useState<Record<string, { path: string; nonce: number }>>(
+    {},
+  );
   const [pinnedSessions, setPinnedSessions] = useState<string[]>(() => {
     try {
       const value: unknown = JSON.parse(
@@ -484,6 +399,10 @@ export function DesktopApp(): React.JSX.Element {
   };
 
   const applyState = useCallback((next: DesktopBootstrap) => {
+    if (activeSessionRef.current !== next.activeSessionId) {
+      setReviewData(undefined);
+      setReviewError("");
+    }
     activeSessionRef.current = next.activeSessionId;
     setState(next);
     setError("");
@@ -500,13 +419,7 @@ export function DesktopApp(): React.JSX.Element {
       )
         return;
       applyState(next);
-      if (next.activeSessionId) {
-        const changed = await summarizeChanges(next.activeSessionId);
-        if (activeSessionRef.current !== next.activeSessionId) return;
-        setChanges(changed);
-      } else {
-        setChanges([]);
-      }
+      setReviewRevision((value) => value + 1);
     },
     [applyState],
   );
@@ -514,17 +427,8 @@ export function DesktopApp(): React.JSX.Element {
   const focusSession = useCallback(
     async (next: DesktopBootstrap | undefined) => {
       if (!next) return;
-      if (activeSessionRef.current !== next.activeSessionId) setChanges([]);
       applyState(next);
       followTranscript.current = true;
-      setViewingChanges(false);
-      if (next.activeSessionId) {
-        const changed = await summarizeChanges(next.activeSessionId);
-        if (activeSessionRef.current !== next.activeSessionId) return;
-        setChanges(changed);
-      } else {
-        setChanges([]);
-      }
     },
     [applyState],
   );
@@ -632,7 +536,12 @@ export function DesktopApp(): React.JSX.Element {
         };
       });
     });
+    let reviewTimer: ReturnType<typeof setTimeout> | undefined;
     const stopTaskEvent = window.kairo.onTaskEvent((event) => {
+      if (event.kind === "tool_finished" && event.sessionId === activeSessionRef.current) {
+        clearTimeout(reviewTimer);
+        reviewTimer = setTimeout(() => setReviewRevision((value) => value + 1), 500);
+      }
       if (event.kind !== "tool_started" && event.kind !== "tool_finished") return;
       setState((current) => {
         const previous = current?.liveSessions[event.sessionId];
@@ -741,6 +650,7 @@ export function DesktopApp(): React.JSX.Element {
       stopRuntimeError();
       stopChunk();
       stopTaskEvent();
+      clearTimeout(reviewTimer);
       stopState();
       stopApproval();
     };
@@ -899,24 +809,55 @@ export function DesktopApp(): React.JSX.Element {
     [state?.messages],
   );
 
-  const refreshChanges = async () => {
-    if (!state?.activeSessionId) return;
-    try {
-      const changed = await summarizeChanges(state.activeSessionId);
-      if (activeSessionRef.current === state.activeSessionId) setChanges(changed);
-    } catch (cause) {
-      setError((cause as Error).message);
-    }
-  };
+  const refreshChanges = useCallback(() => setReviewRevision((value) => value + 1), []);
+  const updateBuffer = useCallback(
+    (path: string, buffer: EditorBuffer) => {
+      if (activeSession?.workspaceId)
+        setFileBuffers((all) => retainBuffer(all, activeSession.workspaceId, path, buffer));
+    },
+    [activeSession?.workspaceId],
+  );
+  const openFile = useCallback(
+    (path: string) => {
+      if (!activeSession) return;
+      setFileTargets((targets) => ({
+        ...targets,
+        [activeSession.workspaceId]: { path, nonce: Date.now() },
+      }));
+      setContextTab("files");
+      setReviewOpen(true);
+    },
+    [activeSession?.workspaceId],
+  );
 
-  const openInCursor = async (path: string) => {
-    if (!state?.activeSessionId || !path) return;
-    try {
-      await window.kairo.openInCursor(state.activeSessionId, path);
-    } catch (cause) {
-      setError((cause as Error).message);
+  useEffect(() => {
+    const sessionId = activeSession?.id;
+    if (!sessionId) {
+      setReviewData(undefined);
+      return;
     }
-  };
+    let disposed = false;
+    setReviewData(undefined);
+    setReviewError("");
+    void window.kairo
+      .review(sessionId, reviewScope)
+      .then((value) => {
+        if (!disposed) setReviewData(value);
+      })
+      .catch((cause: Error) => {
+        if (!disposed) setReviewError(cause.message);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [activeSession?.id, reviewScope, reviewRevision]);
+
+  const dirtyBuffers = Object.values(fileBuffers).some((buffers) =>
+    Object.values(buffers).some((buffer) => buffer.draft !== buffer.saved),
+  );
+  useEffect(() => {
+    window.kairo.setUnsavedChanges(dirtyBuffers);
+  }, [dirtyBuffers]);
 
   const commandQuery = isCodexSession ? prompt.trimStart() : "";
   const commandSuggestions = (() => {
@@ -1501,7 +1442,13 @@ export function DesktopApp(): React.JSX.Element {
                     {workspace.managed && (
                       <button
                         className="danger-outline-button"
-                        disabled={!!removingWorkspaceId || activeChats.length > 0}
+                        disabled={
+                          !!removingWorkspaceId ||
+                          activeChats.length > 0 ||
+                          Object.values(fileBuffers[workspace.id] ?? {}).some(
+                            (buffer) => buffer.draft !== buffer.saved,
+                          )
+                        }
                         title={
                           activeChats.length
                             ? "Archive all chats in this workspace first"
@@ -1859,8 +1806,8 @@ export function DesktopApp(): React.JSX.Element {
               <strong>Choose a project</strong>
             )}
             <span title={activeSession?.workspace}>
-              {activeWorkspace?.branch
-                ? `${activeWorkspace.branch} · ${activeSession?.workspace}`
+              {reviewData?.branch || activeWorkspace?.branch
+                ? `${reviewData?.branch ?? activeWorkspace?.branch} · ${activeSession?.workspace}`
                 : (activeSession?.workspace ?? "Open a local folder to get started")}
             </span>
           </div>
@@ -1982,11 +1929,20 @@ export function DesktopApp(): React.JSX.Element {
                 </div>
               )}
               {toolActivity.length > 0 && (
-                <div className="tool-activity" aria-label="Tool activity" aria-live="polite">
+                <details className="tool-activity" aria-label="Tool activity" open={busy}>
+                  <summary>
+                    Task activity · {toolActivity.length}{" "}
+                    {toolActivity.length === 1 ? "operation" : "operations"}
+                  </summary>
                   {toolActivity.map((event) => (
-                    <ToolActivityRow key={event.operationId} event={event} />
+                    <ToolActivityRow
+                      key={event.operationId}
+                      event={event}
+                      onOpenFile={openFile}
+                      stopped={!busy}
+                    />
                   ))}
-                </div>
+                </details>
               )}
               {stream && (
                 <div className="message assistant">
@@ -2388,7 +2344,17 @@ export function DesktopApp(): React.JSX.Element {
             aria-labelledby="files-tab"
           >
             <Suspense fallback={<p className="empty-small">Loading file browser…</p>}>
-              <FileBrowser key={activeSession.id} sessionId={activeSession.id} />
+              <FileBrowser
+                key={activeSession.workspaceId}
+                sessionId={activeSession.id}
+                busy={workspaceBusy}
+                buffers={fileBuffers[activeSession.workspaceId] ?? EMPTY_BUFFERS}
+                target={fileTargets[activeSession.workspaceId]}
+                changes={changes}
+                revision={reviewRevision}
+                onBuffer={updateBuffer}
+                onSaved={refreshChanges}
+              />
             </Suspense>
           </div>
         )}
@@ -2399,80 +2365,21 @@ export function DesktopApp(): React.JSX.Element {
           aria-labelledby="changes-tab"
           hidden={contextTab !== "changes"}
         >
-          {viewingChanges ? (
-            <section className="change-detail">
-              <div className="change-detail-header">
-                <button className="back-to-changes" onClick={() => setViewingChanges(false)}>
-                  ← All changes
-                </button>
-                <strong>
-                  {changes.length} {changes.length === 1 ? "file" : "files"} changed
-                </strong>
-                <span className="change-summary-stats">
-                  <span className="addition-count">
-                    +{changes.reduce((total, item) => total + item.additions, 0)}
-                  </span>
-                  <span className="deletion-count">
-                    −{changes.reduce((total, item) => total + item.deletions, 0)}
-                  </span>
-                </span>
-              </div>
-              <div className="diff-scroll">
-                {changes.map((change) => (
-                  <article className="file-diff-section" key={change.path}>
-                    <header className="file-diff-header">
-                      <span className="filetype-mark">{fileExtension(change.path)}</span>
-                      <strong title={change.path}>{change.path}</strong>
-                      <span className="change-summary-stats">
-                        <span className="addition-count">+{change.additions}</span>
-                        <span className="deletion-count">−{change.deletions}</span>
-                      </span>
-                      <button
-                        className="cursor-button"
-                        onClick={() => void openInCursor(change.path)}
-                      >
-                        Open in Cursor
-                      </button>
-                    </header>
-                    {change.unavailable && <div className="diff-notice">{change.unavailable}</div>}
-                    <div className="diff-rows-wrap">
-                      <DiffContents diff={change.diff} />
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ) : (
-            <section className="changes-overview">
-              <div className="changes-overview-title">
-                <span>Edited files</span>
-                <button
-                  className="view-changes-button"
-                  disabled={!changes.length}
-                  onClick={() => setViewingChanges(true)}
-                >
-                  View changes ↗
-                </button>
-              </div>
-              {changes.length ? (
-                <div className="change-summary-list">
-                  {changes.map((change) => (
-                    <div className="change-summary-row" key={change.path}>
-                      <div className="change-summary-file" title={change.path}>
-                        <span className="filetype-mark">{fileExtension(change.path)}</span>
-                        <span>{change.path}</span>
-                      </div>
-                      <div className="change-summary-stats">
-                        <span className="addition-count">+{change.additions}</span>
-                        <span className="deletion-count">−{change.deletions}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-small">No working tree changes</div>
-              )}
-            </section>
+          {reviewOpen && contextTab === "changes" && activeSession && (
+            <Suspense fallback={<p className="empty-small">Loading review…</p>}>
+              <ReviewPanel
+                key={activeSession.id}
+                sessionId={activeSession.id}
+                overview={reviewData}
+                error={reviewError}
+                scope={reviewScope}
+                canReviewTask={!!activeWorkspace?.baseCommit}
+                revision={reviewRevision}
+                task={state?.task}
+                onScope={setRequestedScope}
+                onOpenFile={openFile}
+              />
+            </Suspense>
           )}
         </div>
       </aside>
@@ -2836,7 +2743,15 @@ function DeleteChatDialog({
   );
 }
 
-function ToolActivityRow({ event }: { event: TaskEvent }): React.JSX.Element {
+function ToolActivityRow({
+  event,
+  onOpenFile,
+  stopped,
+}: {
+  event: TaskEvent;
+  onOpenFile(path: string): void;
+  stopped: boolean;
+}): React.JSX.Element {
   const labels: Record<string, string> = {
     list_files: "Listing files",
     read_file: "Reading file",
@@ -2851,14 +2766,44 @@ function ToolActivityRow({ event }: { event: TaskEvent }): React.JSX.Element {
     webSearch: "Searching web",
     submit_plan: "Saving plan",
   };
-  const label = labels[event.name ?? ""] ?? (event.name ? `Using ${event.name}` : "Tool activity");
+  const label = labels[event.name ?? ""] ?? event.name ?? "Tool activity";
   const state =
-    event.kind === "tool_started" ? "Running" : event.outcome === "succeeded" ? "Done" : "Failed";
+    event.kind === "tool_started"
+      ? stopped
+        ? "Stopped"
+        : "Running"
+      : event.outcome === "succeeded"
+        ? "Done"
+        : "Failed";
+  const filePath = event.paths?.length === 1 ? event.paths[0] : undefined;
   return (
     <div className={`tool-activity-row ${state.toLowerCase()}`}>
       <span className="tool-activity-dot" />
       <span>{label}</span>
       <span className="tool-activity-status">{state}</span>
+      {filePath && (
+        <button
+          className="tool-file-shortcut"
+          title={filePath}
+          onClick={() => onOpenFile(filePath)}
+        >
+          {filePath.split(/[\\/]/).at(-1)}
+        </button>
+      )}
+      {(!!event.paths?.length ||
+        event.durationMs !== undefined ||
+        typeof event.exitCode === "number") && (
+        <details className="tool-file-details">
+          <summary>Details</summary>
+          {event.durationMs !== undefined && <small>{Math.round(event.durationMs)} ms</small>}
+          {typeof event.exitCode === "number" && <small> · Exit {event.exitCode}</small>}
+          {event.paths?.map((path) => (
+            <button key={path} onClick={() => onOpenFile(path)} title={path}>
+              {path}
+            </button>
+          ))}
+        </details>
+      )}
     </div>
   );
 }
@@ -3012,7 +2957,7 @@ function CodeBlock({ code, language }: { code: string; language: string }): Reac
   );
 }
 
-function ChatMessage({
+const ChatMessage = memo(function ChatMessage({
   message,
   agentName,
 }: {
@@ -3047,7 +2992,7 @@ function ChatMessage({
       </div>
     </div>
   );
-}
+});
 
 type IconName =
   | "plus"

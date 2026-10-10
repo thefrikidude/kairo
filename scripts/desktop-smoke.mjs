@@ -16,6 +16,23 @@ await writeFile(
   'export const message = "Hello from the workspace";\n',
 );
 await writeFile(join(project, "README.md"), "# Smoke project\n");
+if (process.env.KAIRO_SMOKE_LARGE === "1") {
+  for (let batch = 0; batch < 16; batch += 1)
+    await Promise.all(
+      Array.from({ length: 100 }, (_, offset) =>
+        writeFile(
+          join(project, `file-${String(batch * 100 + offset).padStart(4, "0")}.txt`),
+          "fixture\n",
+        ),
+      ),
+    );
+  await writeFile(
+    join(project, "src", "large.ts"),
+    Array.from({ length: 10_000 }, (_, index) => `export const value${index} = ${index};`).join(
+      "\n",
+    ) + "\n",
+  );
+}
 const git = (args) =>
   execFileSync("git", args, { cwd: project, stdio: ["ignore", "pipe", "pipe"] });
 git(["init", "-b", "main"]);

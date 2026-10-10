@@ -11,7 +11,7 @@ External-agent support is adapter-based; arbitrary terminal commands are not tre
 
 ## Run from source
 
-Requirements: macOS, Node.js 24.21+, pnpm, and either a provider API key or an installed, supported external agent. Kairo uses the macOS Keychain for its own provider credentials.
+Requirements: macOS, Git, Node.js 24.21+, pnpm, and either a provider API key or an installed, supported external agent. Kairo uses the macOS Keychain for its own provider credentials.
 
 ```bash
 git clone https://github.com/thefrikidude/kairo.git
@@ -30,11 +30,15 @@ pnpm desktop:dev
 
 Use the project selector above the conversation to switch projects. **New agent session** reuses the current folder and agent; project actions also include **New session in project**. Hover a chat and use its pencil button to rename it. Names survive restarts and archiving. Sidebar dots distinguish working (pulsing green), waiting or interrupted (amber), completed (green), failed (red), and idle (gray); hover a dot for its status.
 
-**Files** opens a folder browser and complete read-only text previews. Directories load on demand; dependency folders and Git metadata stay hidden. Binary files and files above 1 MB have an actionable error instead of a truncated preview. **Review** opens the existing working-tree changes view. The contextual panel stays hidden until opened; drag its left edge to resize it, or focus that edge and use the arrow keys.
+**Files** opens a lazy, expandable project tree, filename search and syntax-highlighted text previews. Use **Edit** and **Save** (Cmd/Ctrl+S) for small changes. Unsaved buffers survive switching panels or chats; closing Kairo asks you to save or discard them. Saves check the loaded revision, refuse external edits instead of overwriting them, and preserve ordinary CRLF line endings. Clean-buffer caching is bounded. Binary files and files above 1 MB have an actionable error instead of a truncated preview.
+
+**Review** lists changed files and loads only the selected patch. Switch between unified and split views, use previous/next file navigation, or open a file in the internal viewer. Git workspaces default to changes since their recorded starting commit, including commits the agent made; **Working tree** shows staged, unstaged and untracked changes. The selected chat's recorded task result and verification evidence stay available beside review. Tool activity is collapsible and includes native file links where agents report locations, plus recorded duration/exit details. Review Git commands run asynchronously without optional index refresh locks, so they can coexist with commits.
+
+The contextual panel stays hidden until opened; drag its left edge to resize it, or focus that edge and use the arrow keys. File lists and patches render a bounded window of rows as you scroll. Syntax highlighting uses selected [highlight.js grammars](https://highlightjs.org/); OpenCode file navigation follows [ACP tool locations](https://agentclientprotocol.com/protocol/v1/tool-calls#following-the-agent).
 
 Keyboard shortcuts: **Cmd/Ctrl+Shift+E** opens Files, **Cmd/Ctrl+Shift+D** opens Changes, and **Cmd/Ctrl+Shift+B** toggles the sidebar. **Escape** closes the active dialog or contextual panel before cancelling a running task.
 
-Editable file buffers, improved per-file diffs and an optional PTY terminal are the next increments. See [the audit and implementation plan](docs/product-workspace-plan.md).
+The optional PTY terminal and final UX/performance verification are the next increments. See [the audit and implementation plan](docs/product-workspace-plan.md).
 
 ### Codex commands
 
