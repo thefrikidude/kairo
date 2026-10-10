@@ -2106,3 +2106,211 @@ button svg {
     padding-left: 12px;
   }
 }
+
+/* Context stays optional; its width never consumes the whole conversation. */
+@media (min-width: 901px) {
+  .app-shell.review-open {
+    grid-template-columns: var(--sidebar-width, 224px) minmax(280px, 1fr) minmax(
+        300px,
+        min(var(--context-width, 420px), 48vw)
+      );
+  }
+  .app-shell.review-open.sidebar-closed {
+    grid-template-columns: minmax(280px, 1fr) minmax(300px, min(var(--context-width, 420px), 56vw));
+  }
+}
+.workbench {
+  position: relative;
+}
+.context-resize-handle {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+}
+.context-resize-handle:hover,
+.context-resize-handle:focus-visible {
+  background: var(--focus);
+}
+.workspace-tab-content {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.project-switcher {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 20px 0 0;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  font-weight: 600;
+  cursor: pointer;
+}
+.project-switcher option {
+  background: var(--surface);
+}
+.session {
+  gap: 8px;
+  padding-right: 14px;
+}
+.session-row:hover .session,
+.session-row:focus-within .session {
+  padding-right: 84px;
+}
+.session-row:focus-within .session-action-button {
+  opacity: 1;
+}
+.session-status {
+  width: 6px;
+  height: 6px;
+  min-width: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.45;
+  flex: none;
+}
+.session-status.status-running {
+  background: var(--positive);
+  opacity: 1;
+  animation: pulse-status 1.5s ease-in-out infinite;
+}
+.session-status.status-waiting,
+.session-status.status-review,
+.session-status.status-interrupted {
+  background: var(--warning);
+  opacity: 1;
+}
+.session-status.status-complete {
+  background: var(--positive);
+  opacity: 1;
+}
+.session-status.status-error {
+  background: var(--negative);
+  opacity: 1;
+}
+@keyframes pulse-status {
+  50% {
+    opacity: 0.35;
+  }
+}
+.file-browser {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.file-preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--line);
+}
+.file-preview-toolbar strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.file-preview-toolbar button {
+  color: var(--muted);
+  flex: none;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.file-preview-toolbar button:hover {
+  background: var(--hover);
+}
+.file-search,
+.session-picker-label input {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.file-search {
+  margin: 12px;
+}
+.file-search:focus,
+.session-picker-label input:focus {
+  border-color: var(--focus);
+}
+.file-entry-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px;
+}
+.file-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: 5px;
+}
+.file-entry:hover {
+  background: var(--hover);
+}
+.file-entry > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-entry small,
+.file-browser-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+.file-browser-note {
+  padding: 8px 12px;
+  margin: 0;
+}
+.file-preview-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.file-preview {
+  margin: 0;
+  padding: 16px;
+  font:
+    12px/1.7 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  tab-size: 2;
+}
+.file-error {
+  color: var(--negative);
+  padding: 8px 12px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .workbench {
+    position: absolute;
+  }
+  .context-resize-handle {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-status.status-running {
+    animation: none;
+  }
+}

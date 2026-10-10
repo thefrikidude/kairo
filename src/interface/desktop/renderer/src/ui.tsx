@@ -1,10 +1,12 @@
 import { UsageFooter } from "./usage-footer.js";
 import { UserInputCard } from "./user-input-card.js";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import parseDiff from "parse-diff";
 import type { DesktopBootstrap, LiveSession } from "../../shared/api.js";
 import type { SessionRuntime } from "../../../../domain/agent-runtime.js";
 import type { ModelSelection, Message, TaskEvent } from "../../../../domain/models.js";
+
+const FileBrowser = lazy(() => import("./file-browser.js"));
 
 type Mode = "build" | "plan";
 type Theme = "light" | "dark";
@@ -229,6 +231,19 @@ export function DesktopApp(): React.JSX.Element {
       : "default";
   const [commandIndex, setCommandIndex] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [contextTab, setContextTab] = useState<"files" | "changes">("changes");
+  const [contextWidth, setContextWidth] = useState(() => {
+    try {
+      const saved = Number(window.localStorage.getItem("kairo.contextWidth"));
+      return Number.isFinite(saved) && saved >= 300 ? Math.min(saved, 720) : 420;
+    } catch {
+      return 420;
+    }
+  });
+  const [renameSessionId, setRenameSessionId] = useState<string>();
+  const [renameTitle, setRenameTitle] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
@@ -351,6 +366,46 @@ export function DesktopApp(): React.JSX.Element {
       // Resizing still works for this window if storage is unavailable.
     }
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("kairo.contextWidth", String(contextWidth));
+    } catch {
+      /* Resizing remains available in memory. */
+    }
+  }, [contextWidth]);
+
+  const beginSession = (workspace = activeSession?.workspace ?? "") => {
+    const runtime = activeSession?.runtime;
+    setNewSessionChoice(
+      runtime?.kind === "external"
+        ? JSON.stringify(["agent", runtime.agentId])
+        : JSON.stringify([
+            "model",
+            activeModelSelection?.provider ?? "gemini",
+            activeModelSelection?.model ?? "gemini-2.5-flash",
+          ]),
+    );
+    setNewSessionWorkspace(workspace);
+    setNewSessionOpen(true);
+  };
+
+  const renameSession = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!renameSessionId || renameBusy) return;
+    const revision = navigationRevision.current;
+    setRenameBusy(true);
+    setRenameError("");
+    try {
+      const next = await window.kairo.renameSession(renameSessionId, renameTitle);
+      if (revision === navigationRevision.current) applyState(next);
+      setRenameSessionId(undefined);
+    } catch (cause) {
+      setRenameError((cause as Error).message);
+    } finally {
+      setRenameBusy(false);
+    }
+  };
 
   const resizeSidebar = (requestedWidth: number) => {
     if (requestedWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
@@ -686,14 +741,32 @@ export function DesktopApp(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
+        if (event.key.toLowerCase() === "e" || event.key.toLowerCase() === "d") {
+          event.preventDefault();
+          if (activeSessionRef.current) {
+            setContextTab(event.key.toLowerCase() === "e" ? "files" : "changes");
+            setReviewOpen(true);
+          }
+          return;
+        }
+        if (event.key.toLowerCase() === "b") {
+          event.preventDefault();
+          setSidebarOpen((value) => !value);
+          return;
+        }
+      }
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (archiveDeleteBusy) return;
-      if (deleteSessionId) setDeleteSessionId(undefined);
+      if (renameSessionId) {
+        if (!renameBusy) setRenameSessionId(undefined);
+      } else if (deleteSessionId) setDeleteSessionId(undefined);
       else if (deleteAllArchivedOpen) setDeleteAllArchivedOpen(false);
       else if (deleteProjectWorkspace) setDeleteProjectWorkspace(undefined);
       else if (newSessionOpen) setNewSessionOpen(false);
       else if (projectMenuWorkspace) setProjectMenuWorkspace(undefined);
       else if (settingsOpen) setSettingsOpen(false);
+      else if (reviewOpen) setReviewOpen(false);
       else if (busy && state?.activeSessionId) {
         void window.kairo.cancel(state.activeSessionId).catch((cause) => setError(String(cause)));
       } else setReviewOpen(false);
@@ -702,6 +775,9 @@ export function DesktopApp(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     settingsOpen,
+    renameSessionId,
+    renameBusy,
+    reviewOpen,
     deleteSessionId,
     deleteAllArchivedOpen,
     archiveDeleteBusy,
@@ -739,7 +815,7 @@ export function DesktopApp(): React.JSX.Element {
     if (!state?.activeSessionId) return;
     try {
       const changed = await summarizeChanges(state.activeSessionId);
-      setChanges(changed);
+      if (activeSessionRef.current === state.activeSessionId) setChanges(changed);
     } catch (cause) {
       setError((cause as Error).message);
     }
@@ -1327,25 +1403,19 @@ export function DesktopApp(): React.JSX.Element {
     <div
       className={`app-shell ${reviewOpen ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"} ${sidebarResizeActive ? "sidebar-resizing" : ""}`}
       data-theme={theme}
-      style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
+      style={
+        {
+          "--sidebar-width": `${sidebarWidth}px`,
+          "--context-width": `${contextWidth}px`,
+        } as React.CSSProperties
+      }
     >
       <aside className="sidebar" aria-label="Chats" hidden={!sidebarOpen}>
         <div className="brand">
           <KairoLogo className="brand-mark" />
           <span>Kairo</span>
         </div>
-        <button
-          className="new-chat"
-          onClick={() => {
-            const openCode = state?.agents.find(
-              (agent) =>
-                agent.id === "opencode" && agent.installed && agent.authenticated && !agent.error,
-            );
-            setNewSessionChoice(openCode ? JSON.stringify(["agent", "opencode"]) : "");
-            setNewSessionWorkspace("");
-            setNewSessionOpen(true);
-          }}
-        >
+        <button className="new-chat" onClick={() => beginSession()}>
           <Icon name="plus" /> New agent session
         </button>
         <button className="open-project-button" onClick={() => void openWorkspace()}>
@@ -1408,6 +1478,14 @@ export function DesktopApp(): React.JSX.Element {
                     {projectMenuWorkspace === group.workspace && (
                       <div className="session-menu project-menu" ref={projectMenuRef}>
                         <button
+                          onClick={() => {
+                            setProjectMenuWorkspace(undefined);
+                            beginSession(group.workspace);
+                          }}
+                        >
+                          New session in project
+                        </button>
+                        <button
                           disabled={projectBusy}
                           title={projectBusy ? "Stop project chats before archiving" : undefined}
                           onClick={() => void archiveProject(group.workspace)}
@@ -1435,9 +1513,43 @@ export function DesktopApp(): React.JSX.Element {
                         sessionState ?? "",
                       );
                       const isPinned = pinnedSessions.includes(session.id);
+                      const status =
+                        sessionState === "waiting"
+                          ? "waiting"
+                          : sessionState === "running"
+                            ? "running"
+                            : sessionState === "cancelling"
+                              ? "cancelling"
+                              : sessionState === "error" || session.lastTaskStatus === "failed"
+                                ? "error"
+                                : sessionState === "cancelled" ||
+                                    session.lastTaskStatus === "cancelled"
+                                  ? "cancelled"
+                                  : session.lastTaskStatus === "interrupted"
+                                    ? "interrupted"
+                                    : sessionState === "complete" ||
+                                        ["completed", "planned"].includes(
+                                          session.lastTaskStatus ?? "",
+                                        )
+                                      ? "complete"
+                                      : session.lastTaskStatus === "verification_required"
+                                        ? "review"
+                                        : "idle";
+                      const statusLabel = {
+                        waiting: "Needs your response",
+                        running: "Working",
+                        cancelling: "Stopping",
+                        error: "Failed",
+                        cancelled: "Cancelled",
+                        interrupted: "Interrupted",
+                        complete: "Completed",
+                        review: "Needs verification",
+                        idle: "Idle",
+                      }[status];
                       return (
                         <div
                           key={session.id}
+                          data-session-id={session.id}
                           className={`session-row ${session.id === state?.activeSessionId ? "selected" : ""}`}
                         >
                           <button
@@ -1447,11 +1559,29 @@ export function DesktopApp(): React.JSX.Element {
                             }
                             onClick={() => void openSession(session.id)}
                           >
+                            <span
+                              className={`session-status status-${status}`}
+                              title={statusLabel}
+                              role="img"
+                              aria-label={statusLabel}
+                            />
                             <span className="session-title" title={session.title}>
                               {session.title}
                             </span>
                           </button>
                           <div className="session-row-actions">
+                            <button
+                              className="session-action-button"
+                              aria-label={`Rename ${session.title}`}
+                              title="Rename session"
+                              onClick={() => {
+                                setRenameTitle(session.title);
+                                setRenameError("");
+                                setRenameSessionId(session.id);
+                              }}
+                            >
+                              ✎
+                            </button>
                             <button
                               className={`session-action-button ${isPinned ? "pinned" : ""}`}
                               aria-label={isPinned ? "Unpin chat" : "Pin chat"}
@@ -1470,9 +1600,6 @@ export function DesktopApp(): React.JSX.Element {
                             >
                               <Icon name="archive" />
                             </button>
-                            {isSessionBusy && (
-                              <span className="session-spinner" aria-label="Running" />
-                            )}
                           </div>
                         </div>
                       );
@@ -1553,25 +1680,55 @@ export function DesktopApp(): React.JSX.Element {
             <Icon name="sidebar" />
           </button>
           <div className="workspace-title">
-            <strong
-              title={
-                activeSession?.workspace.split("/").filter(Boolean).at(-1) ?? "Choose a project"
-              }
-            >
-              {activeSession?.workspace.split("/").filter(Boolean).at(-1) ?? "Choose a project"}
-            </strong>
+            {activeSession ? (
+              <select
+                className="project-switcher"
+                aria-label="Switch project"
+                value={activeSession.workspace}
+                onChange={(event) => {
+                  const group = projectGroups.find((item) => item.workspace === event.target.value);
+                  if (group?.sessions[0]) void openSession(group.sessions[0].id);
+                }}
+              >
+                {projectGroups.map((group) => (
+                  <option value={group.workspace} key={group.workspace}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <strong>Choose a project</strong>
+            )}
             <span title={activeSession?.workspace}>
               {activeSession?.workspace ?? "Open a local folder to get started"}
             </span>
           </div>
           <div className="top-actions">
             <button
-              className={`review-toggle ${reviewOpen ? "selected" : ""}`}
+              className={`review-toggle ${reviewOpen && contextTab === "files" ? "selected" : ""}`}
               disabled={!activeSession}
-              title={reviewOpen ? "Close review" : "Review workspace changes"}
-              aria-expanded={reviewOpen}
+              aria-expanded={reviewOpen && contextTab === "files"}
               aria-controls="workspace-panel"
-              onClick={() => setReviewOpen(!reviewOpen)}
+              title="Browse files (Cmd/Ctrl+Shift+E)"
+              onClick={() => {
+                setContextTab("files");
+                setReviewOpen(!(reviewOpen && contextTab === "files"));
+              }}
+            >
+              <Icon name="folder" /> <span>Files</span>
+            </button>
+            <button
+              className={`review-toggle ${reviewOpen && contextTab === "changes" ? "selected" : ""}`}
+              disabled={!activeSession}
+              title={
+                reviewOpen && contextTab === "changes" ? "Close review" : "Review workspace changes"
+              }
+              aria-expanded={reviewOpen && contextTab === "changes"}
+              aria-controls="workspace-panel"
+              onClick={() => {
+                setContextTab("changes");
+                setReviewOpen(!(reviewOpen && contextTab === "changes"));
+              }}
             >
               <Icon name="panel" /> <span>Review</span>
               {changes.length > 0 && <span className="count">{changes.length}</span>}
@@ -1992,19 +2149,63 @@ export function DesktopApp(): React.JSX.Element {
       <aside
         className="workbench"
         id="workspace-panel"
-        aria-label="Workspace review"
+        aria-label="Workspace context"
         hidden={!reviewOpen}
       >
-        <div className="workbench-tabs">
-          <span className="review-heading">
-            Changes{" "}
-            <span>
-              {changes.length} {changes.length === 1 ? "file" : "files"}
-            </span>
-          </span>
+        <div
+          className="context-resize-handle"
+          role="separator"
+          aria-label="Resize workspace panel"
+          aria-orientation="vertical"
+          tabIndex={0}
+          aria-valuemin={300}
+          aria-valuemax={720}
+          aria-valuenow={contextWidth}
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              setContextWidth(Math.max(300, Math.min(720, window.innerWidth - event.clientX)));
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              setContextWidth((width) =>
+                Math.max(300, Math.min(720, width + (event.key === "ArrowLeft" ? 20 : -20))),
+              );
+            }
+          }}
+        />
+        <div className="workbench-tabs" role="tablist" aria-label="Workspace views">
+          <button
+            role="tab"
+            id="files-tab"
+            aria-selected={contextTab === "files"}
+            aria-controls="files-view"
+            className={contextTab === "files" ? "active" : ""}
+            onClick={() => setContextTab("files")}
+          >
+            Files
+          </button>
+          <button
+            role="tab"
+            id="changes-tab"
+            aria-selected={contextTab === "changes"}
+            aria-controls="changes-view"
+            className={contextTab === "changes" ? "active" : ""}
+            onClick={() => setContextTab("changes")}
+          >
+            Changes <span>{changes.length}</span>
+          </button>
           <button
             className="refresh-button"
             aria-label="Refresh changed files"
+            hidden={contextTab !== "changes"}
             onClick={() => void refreshChanges()}
             title="Refresh"
           >
@@ -2018,81 +2219,101 @@ export function DesktopApp(): React.JSX.Element {
             <Icon name="close" />
           </button>
         </div>
-        {viewingChanges ? (
-          <section className="change-detail">
-            <div className="change-detail-header">
-              <button className="back-to-changes" onClick={() => setViewingChanges(false)}>
-                ← All changes
-              </button>
-              <strong>
-                {changes.length} {changes.length === 1 ? "file" : "files"} changed
-              </strong>
-              <span className="change-summary-stats">
-                <span className="addition-count">
-                  +{changes.reduce((total, item) => total + item.additions, 0)}
+        {reviewOpen && contextTab === "files" && activeSession && (
+          <div
+            className="workspace-tab-content"
+            id="files-view"
+            role="tabpanel"
+            aria-labelledby="files-tab"
+          >
+            <Suspense fallback={<p className="empty-small">Loading file browser…</p>}>
+              <FileBrowser key={activeSession.id} sessionId={activeSession.id} />
+            </Suspense>
+          </div>
+        )}
+        <div
+          className="workspace-tab-content"
+          id="changes-view"
+          role="tabpanel"
+          aria-labelledby="changes-tab"
+          hidden={contextTab !== "changes"}
+        >
+          {viewingChanges ? (
+            <section className="change-detail">
+              <div className="change-detail-header">
+                <button className="back-to-changes" onClick={() => setViewingChanges(false)}>
+                  ← All changes
+                </button>
+                <strong>
+                  {changes.length} {changes.length === 1 ? "file" : "files"} changed
+                </strong>
+                <span className="change-summary-stats">
+                  <span className="addition-count">
+                    +{changes.reduce((total, item) => total + item.additions, 0)}
+                  </span>
+                  <span className="deletion-count">
+                    −{changes.reduce((total, item) => total + item.deletions, 0)}
+                  </span>
                 </span>
-                <span className="deletion-count">
-                  −{changes.reduce((total, item) => total + item.deletions, 0)}
-                </span>
-              </span>
-            </div>
-            <div className="diff-scroll">
-              {changes.map((change) => (
-                <article className="file-diff-section" key={change.path}>
-                  <header className="file-diff-header">
-                    <span className="filetype-mark">{fileExtension(change.path)}</span>
-                    <strong title={change.path}>{change.path}</strong>
-                    <span className="change-summary-stats">
-                      <span className="addition-count">+{change.additions}</span>
-                      <span className="deletion-count">−{change.deletions}</span>
-                    </span>
-                    <button
-                      className="cursor-button"
-                      onClick={() => void openInCursor(change.path)}
-                    >
-                      Open in Cursor
-                    </button>
-                  </header>
-                  {change.unavailable && <div className="diff-notice">{change.unavailable}</div>}
-                  <div className="diff-rows-wrap">
-                    <DiffContents diff={change.diff} />
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        ) : (
-          <section className="changes-overview">
-            <div className="changes-overview-title">
-              <span>Edited files</span>
-              <button
-                className="view-changes-button"
-                disabled={!changes.length}
-                onClick={() => setViewingChanges(true)}
-              >
-                View changes ↗
-              </button>
-            </div>
-            {changes.length ? (
-              <div className="change-summary-list">
+              </div>
+              <div className="diff-scroll">
                 {changes.map((change) => (
-                  <div className="change-summary-row" key={change.path}>
-                    <div className="change-summary-file" title={change.path}>
+                  <article className="file-diff-section" key={change.path}>
+                    <header className="file-diff-header">
                       <span className="filetype-mark">{fileExtension(change.path)}</span>
-                      <span>{change.path}</span>
+                      <strong title={change.path}>{change.path}</strong>
+                      <span className="change-summary-stats">
+                        <span className="addition-count">+{change.additions}</span>
+                        <span className="deletion-count">−{change.deletions}</span>
+                      </span>
+                      <button
+                        className="cursor-button"
+                        onClick={() => void openInCursor(change.path)}
+                      >
+                        Open in Cursor
+                      </button>
+                    </header>
+                    {change.unavailable && <div className="diff-notice">{change.unavailable}</div>}
+                    <div className="diff-rows-wrap">
+                      <DiffContents diff={change.diff} />
                     </div>
-                    <div className="change-summary-stats">
-                      <span className="addition-count">+{change.additions}</span>
-                      <span className="deletion-count">−{change.deletions}</span>
-                    </div>
-                  </div>
+                  </article>
                 ))}
               </div>
-            ) : (
-              <div className="empty-small">No working tree changes</div>
-            )}
-          </section>
-        )}
+            </section>
+          ) : (
+            <section className="changes-overview">
+              <div className="changes-overview-title">
+                <span>Edited files</span>
+                <button
+                  className="view-changes-button"
+                  disabled={!changes.length}
+                  onClick={() => setViewingChanges(true)}
+                >
+                  View changes ↗
+                </button>
+              </div>
+              {changes.length ? (
+                <div className="change-summary-list">
+                  {changes.map((change) => (
+                    <div className="change-summary-row" key={change.path}>
+                      <div className="change-summary-file" title={change.path}>
+                        <span className="filetype-mark">{fileExtension(change.path)}</span>
+                        <span>{change.path}</span>
+                      </div>
+                      <div className="change-summary-stats">
+                        <span className="addition-count">+{change.additions}</span>
+                        <span className="deletion-count">−{change.deletions}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-small">No working tree changes</div>
+              )}
+            </section>
+          )}
+        </div>
       </aside>
       {activeSession && (
         <UsageFooter
@@ -2114,6 +2335,50 @@ export function DesktopApp(): React.JSX.Element {
         />
       )}
 
+      {renameSessionId && (
+        <div className="modal-backdrop">
+          <form
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rename-session-title"
+            onSubmit={(event) => void renameSession(event)}
+          >
+            <h2 id="rename-session-title">Rename session</h2>
+            <label className="session-picker-label">
+              Session name
+              <input
+                autoFocus
+                value={renameTitle}
+                maxLength={120}
+                disabled={renameBusy}
+                onChange={(event) => setRenameTitle(event.target.value)}
+              />
+            </label>
+            {renameError && (
+              <p role="alert" className="file-error">
+                {renameError}
+              </p>
+            )}
+            <div>
+              <button
+                type="button"
+                disabled={renameBusy}
+                onClick={() => setRenameSessionId(undefined)}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary"
+                disabled={renameBusy || !renameTitle.trim()}
+                type="submit"
+              >
+                {renameBusy ? "Saving…" : "Save name"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       {newSessionOpen && (
         <div
           className="modal-backdrop"
@@ -2128,7 +2393,7 @@ export function DesktopApp(): React.JSX.Element {
             aria-labelledby="new-session-title"
           >
             <h2 id="new-session-title">New agent session</h2>
-            <p>Choose an agent or model, then select the project folder it can work in.</p>
+            <p>Choose an agent or model for this project.</p>
             <div className="session-folder-picker">
               <span className="session-picker-caption">Project folder</span>
               <button

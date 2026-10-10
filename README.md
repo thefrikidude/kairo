@@ -1,8 +1,6 @@
 <img width="1916" height="942" alt="Screenshot 2026-10-02 at 2 30 56 PM" src="https://github.com/user-attachments/assets/ece583de-8282-499a-bd8d-4f5d1c658463" />
 
-
 Kairo is a desktop workspace for coding agents working on local repositories. Run multiple user-managed native chat sessions, inspect their activity, and review workspace files and diffs. There is no embedded terminal UI.
-
 
 ## Two ways to work
 
@@ -28,6 +26,16 @@ pnpm desktop:dev
 4. Select a model and send a message. Codex models come from its live catalog; OpenCode currently uses its configured default model. **Agent default model** follows the CLI configuration. An unavailable configured default produces an error; select a model from the catalog instead.
 5. Create additional chats and switch between them while tasks run. Session status appears in the sidebar. Open a waiting chat to answer its approval request.
 
+### Navigate and inspect
+
+Use the project selector above the conversation to switch projects. **New agent session** reuses the current folder and agent; project actions also include **New session in project**. Hover a chat and use its pencil button to rename it. Names survive restarts and archiving. Sidebar dots distinguish working (pulsing green), waiting or interrupted (amber), completed (green), failed (red), and idle (gray); hover a dot for its status.
+
+**Files** opens a folder browser and complete read-only text previews. Directories load on demand; dependency folders and Git metadata stay hidden. Binary files and files above 1 MB have an actionable error instead of a truncated preview. **Review** opens the existing working-tree changes view. The contextual panel stays hidden until opened; drag its left edge to resize it, or focus that edge and use the arrow keys.
+
+Keyboard shortcuts: **Cmd/Ctrl+Shift+E** opens Files, **Cmd/Ctrl+Shift+D** opens Changes, and **Cmd/Ctrl+Shift+B** toggles the sidebar. **Escape** closes the active dialog or contextual panel before cancelling a running task.
+
+Workspace identity, automatic Git worktree management, editable file buffers, improved per-file diffs and an optional PTY terminal are the next increments. See [the audit and implementation plan](docs/product-workspace-plan.md).
+
 ### Codex commands
 
 Codex chats support `/plan`, `/default`, `/model <model>`, and `/compact` through Codex's native app-server commands. `/plan`, `/default`, and `/model` can be used before the first message; Kairo saves those preferences and applies them when Codex starts the first real turn. `/compact` requires an existing Codex conversation history. Unsupported slash commands are rejected by Kairo and are not sent as prompts.
@@ -40,7 +48,7 @@ Use the composer’s **Task agent** selector at any point. Switching during a ru
 
 Kairo keeps the same chat, workspace, and history. It saves an expandable handoff containing the original request, recent conversation excerpts, task state, changed-file paths, and recorded verification evidence. The destination starts a fresh native session, including when switching back to an earlier agent. This is a bounded evidence handoff, not a complete copy of native context; the new agent must inspect current files and resolve missing details. Historical replies retain their author names. Checkpoints and handoff notices survive app restarts.
 
-OpenCode requires its CLI and a configured provider (`opencode auth login`). Refresh agents after setup. Kairo checks CLI authentication status without copying credentials. OpenCode authentication currently needs terminal setup; its default model comes from CLI configuration. OpenCode is preselected for new chats when it is installed and authenticated. Claude integration is deferred and is not shown in the agent selector.
+OpenCode requires its CLI and a configured provider (`opencode auth login`). Refresh agents after setup. Kairo checks CLI authentication status without copying credentials. OpenCode authentication currently needs terminal setup; its default model comes from CLI configuration. New chats reuse the current project and agent/model selection. Claude integration is deferred and is not shown in the agent selector.
 
 ACP processes are owned per run and stopped after completion. If an agent advertises session loading, Kairo reloads its recorded session on the next turn; otherwise it creates a fresh session with a Kairo handoff. ACP client filesystem and terminal methods are not advertised; tools run in the agent runtime. Permission requests select an `allow_once` or `reject_once` option; Kairo does not select persistent grants. Native agent settings still govern operations that do not request client approval. Unrecognized client requests fail explicitly. Slash-command expansion for these agents is deferred.
 
@@ -70,6 +78,8 @@ SQLite preserves chat history, runtime/model choices, Codex collaboration mode, 
 ```bash
 pnpm check
 pnpm test
+pnpm desktop:build
+node scripts/desktop-smoke.mjs
 ```
 
 The application is organized into domain, application, infrastructure, and desktop interface layers. The Electron renderer is isolated from Node.js and agent processes communicate over private stdio, without a network listener. Add native-chat agent adapters to the infrastructure registry by implementing discovery, official authentication, streamed turns, approvals, cancellation, and resume identity.

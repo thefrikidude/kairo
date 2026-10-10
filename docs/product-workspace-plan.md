@@ -57,3 +57,18 @@ Its workspace/session API demonstrates separating persisted ownership from termi
 ## Delivery log
 
 Implementation and measured validation are recorded here per phase. Remaining phases stay open until the complete developer workflow is demonstrated.
+
+### Phase 1 — delivered
+
+- Durable rename with additive legacy-schema migration; names retain conversation/runtime identity.
+- Sidebar state indicators include persisted completed, failed, interrupted and verification-required task states; waiting chats remain distinguishable during navigation.
+- Current-project and current-agent defaults, project-level session creation and a project selector.
+- Optional resizable Files/Changes context with lazy folder browsing, complete bounded read-only previews, shortcuts and session-scoped navigation guards. Escape closes context before stopping a run.
+- Dedicated desktop file reader rejects escaping paths, symlinks outside the workspace, binary/non-UTF-8 buffers and files above 1 MB. Previews above the agent's 48 KB output cap are complete.
+- Real Electron smoke harness (`pnpm build`, `pnpm desktop:build`, then `node scripts/desktop-smoke.mjs`) uses an isolated temporary state directory and exercises preload/backend IPC. It renames a chat, creates a chat using project defaults, browses/reloads files, resizes context, switches sessions, checks the narrow-window footer and captures dark/light screenshots. It quits the app and cleans fixture state.
+
+Validation: `pnpm check`, desktop build and all 143 tests passed. After the last migration assertion, the 18 focused persistence/file tests passed again. Desktop smoke passed; screenshots were visually inspected. No smoke/backend processes remained afterward.
+
+Local single-run measurements: 1,044 ms from the Electron smoke entrypoint to a selected chat; 61 ms from a session click to the selected title. Electron process working sets at the end of that fixture run: browser 123,840 KB, GPU 89,712 KB, utility 24,960 KB, renderer 87,856 KB. The Node backend is not included in `app.getAppMetrics()`. These are observations for this machine/fixture, not performance guarantees or evidence of improvement over the pre-change version. They establish the first instrumented baseline for later phases. Evidence was captured under `/tmp/kairo-phase1-ui` during this run; future runs choose a fresh temporary evidence directory unless `KAIRO_SMOKE_OUTPUT` is set.
+
+Still open: distinct workspace persistence and managed Git worktrees (Phase 2), editable buffers/syntax and per-file split review (Phase 3), PTY terminal (Phase 4), full-workflow and comparative performance evidence (Phase 5). File previews are intentionally read-only in this increment. There is no automatic agent delegation.
