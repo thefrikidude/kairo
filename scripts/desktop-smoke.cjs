@@ -136,7 +136,17 @@ async function run() {
   await waitFor(
     `window.kairo.fileSnapshot(${JSON.stringify(first.id)},'proof-a.txt').then(s=>s.content==='Primary agent\\n').catch(()=>false)`,
   );
-  await button("Use shell");
+  assert.equal(
+    await evaluate("!!document.querySelector('.agent-session-toolbar, .agent-session-notice')"),
+    false,
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.workspace-tools [aria-label=\"Browse files\"]')?.closest('aside')?.className",
+    ),
+    "workspace-tools",
+  );
+  await evaluate(`window.kairo.writeTerminal(${JSON.stringify(firstPty.id)}, "\\u001a")`);
   await waitFor(
     `window.kairo.attachTerminal(${JSON.stringify(firstPty.id)}).then(t=>/Stopped|suspended/i.test(t.buffer))`,
   );
@@ -207,16 +217,21 @@ async function run() {
     beforeStop.sessions.find((s) => s.id === second.id).nativeSession.id,
     (await nativeRecord(owner.directory)).id,
   );
-  await button("Stop terminal");
-  await button("Confirm", "document.querySelector('dialog')");
-  await waitFor("!document.querySelector('dialog[open]')");
-  await capture("terminal-recovery-controls.png");
+  await click(".settings-link");
+  await button("Workspaces");
+  await waitFor("document.querySelector('.terminal-catalog')");
+  await evaluate(
+    `Array.from(document.querySelectorAll('.terminal-catalog article')).find(row => row.textContent.includes(${JSON.stringify(owner.directory)})).querySelector('button').click()`,
+  );
+  await waitFor(
+    `window.kairo.listTerminals().then(all=>!all.some(t=>t.sessionId===${JSON.stringify(second.id)}))`,
+  );
+  await button("Back to workspace");
   const record = await nativeRecord(owner.directory);
-  await button("Resume ID");
-  await input('[aria-label="Native session ID"]', record.id);
-  await button("Save resume target");
-  await waitFor("!document.querySelector('dialog[open]')");
-  await button("Resume agent");
+  await evaluate(
+    `window.kairo.setNativeSession(${JSON.stringify(second.id)}, ${JSON.stringify({ id: record.id })})`,
+  );
+  await button("Open agent terminal");
   await waitFor("window.kairo.listTerminals().then(all=>all.filter(t=>t.sessionId).length===2)");
   value = await state();
   assert.notEqual(value.terminals.find((t) => t.sessionId === second.id).id, pty.id);

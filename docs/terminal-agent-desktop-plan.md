@@ -51,3 +51,11 @@ Agent sessions now launch a normal interactive shell and queue the safely quoted
 Native PTY tests cover literal arguments, suspension, normal shell commands, foreground resumption, CLI exit returning to the prompt, and independent session cleanup. The installed Codex CLI was also launched in a temporary workspace: suspension and ordinary shell commands in the same PTY passed, and all owned processes were closed afterward. This verifies the shell interaction; the broader installed-agent conversation/restart audit remains open.
 
 Validation: all 33 tests, typecheck and desktop build pass. The Electron fixture smoke and exact-resume restart pass; it clicks **Use shell**, runs a command through the terminal input API and resumes the foreground job. Existing agent keyboard-input checks still pass. Screenshots were inspected at `/var/folders/3x/rz0dj8y12pz759_q5skzxw380000gn/T/kairo-terminal-evidence-1791650266490`, including `normal-shell.png`. All fixture terminal processes were confirmed stopped.
+
+## Terminal layout and directory polish
+
+The center now contains the terminal without an agent toolbar or conversation/status notices. Files, Review and optional additional shells are opened from a separate right sidebar. Terminal lifecycle management stays in Settings → Workspaces; keyboard job control remains available directly inside the terminal.
+
+Shell prompts show the full current directory and follow `cd`. New isolated worktrees use a readable task directory and end in the original project folder name, rather than a UUID leaf. Existing worktrees are preserved in place. Native PTY tests verify prompt changes after navigation; Git tests verify readable directory names while preserving independent worktrees.
+
+The actual Electron fixture workflow and exact-resume restart pass, including the right sidebar, file editing, review, normal shell commands and closing terminals through Settings. Screenshots were inspected at `/var/folders/3x/rz0dj8y12pz759_q5skzxw380000gn/T/kairo-terminal-evidence-1791651652019`. Owned fixture terminal processes were confirmed stopped.

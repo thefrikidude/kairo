@@ -2853,23 +2853,9 @@ button svg {
   height: 100%;
   padding: 10px;
 }
-.agent-session-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid var(--line);
-  padding: 8px 16px;
-  color: var(--muted);
-}
 .agent-session-toolbar > div {
   display: flex;
   gap: 10px;
-}
-.agent-session-toolbar button {
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
 }
 .agent-session-notice {
   padding: 4px 16px;
@@ -3037,28 +3023,65 @@ button svg {
   .top-actions .review-toggle > span:not(.count) {
     display: none;
   }
-  .agent-session-toolbar {
-    gap: 8px;
-    padding: 8px 12px;
-  }
   .agent-session-toolbar button {
     white-space: nowrap;
   }
-  .agent-session-toolbar > span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-.agent-session-toolbar {
-  flex-wrap: wrap;
 }
 .agent-session-toolbar > div {
   flex-wrap: wrap;
 }
-.agent-session-notice {
-  margin: 4px 0;
+
+/* Keep workspace tools beside the terminal, independent of its content. */
+.app-shell.tools-visible {
+  grid-template-columns: var(--sidebar-width, 224px) minmax(0, 1fr) 64px;
+}
+.app-shell.tools-visible.sidebar-closed {
+  grid-template-columns: minmax(0, 1fr) 64px;
+}
+.app-shell.tools-visible.review-open {
+  grid-template-columns: var(--sidebar-width, 224px) minmax(0, 1fr) var(--context-width, 360px) 64px;
+}
+.app-shell.tools-visible.review-open.sidebar-closed {
+  grid-template-columns: minmax(0, 1fr) var(--context-width, 360px) 64px;
+}
+.workspace-tools {
+  grid-column: -2 / -1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 5px;
+  border-left: 1px solid var(--line);
+  background: var(--sidebar);
+}
+.workspace-tools .review-toggle {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 52px;
+  padding: 7px 2px;
   font-size: 11px;
-  overflow-wrap: anywhere;
+  border: 0;
+}
+.workspace-tools .review-toggle[aria-expanded="true"] {
+  background: var(--surface);
+  color: var(--text);
+}
+.app-shell.tools-visible .workbench {
+  grid-column: -3 / -2;
+  grid-row: 1;
+}
+@media (max-width: 900px) {
+  .app-shell.tools-visible.review-open {
+    grid-template-columns: var(--sidebar-width, 224px) minmax(0, 1fr) 64px;
+  }
+  .app-shell.tools-visible.review-open.sidebar-closed {
+    grid-template-columns: minmax(0, 1fr) 64px;
+  }
+  .app-shell.tools-visible .workbench {
+    right: 64px;
+    width: min(420px, calc(100vw - 64px));
+  }
 }

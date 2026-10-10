@@ -71,7 +71,6 @@ export function DesktopApp(): React.JSX.Element {
     description: string;
     action: () => Promise<unknown>;
   }>();
-  const [native, setNative] = useState<{ id: string; value: string; path: string }>();
   const stateRef = useRef(state);
   stateRef.current = state;
   const current = state?.sessions.find((session) => session.id === state.activeSessionId);
@@ -80,7 +79,6 @@ export function DesktopApp(): React.JSX.Element {
   );
   const accessId = current?.id ?? workspace?.id;
   const currentTerminal = state?.terminals.find((terminal) => terminal.sessionId === current?.id);
-  const currentAgent = state?.agents.find((agent) => agent.id === current?.agentId);
   const dirty = Object.values(buffers).some((all) =>
     Object.values(all).some((buffer) => buffer.draft !== buffer.saved),
   );
@@ -424,7 +422,7 @@ export function DesktopApp(): React.JSX.Element {
   );
   return (
     <div
-      className={`app-shell ${contextOpen && !settings ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
+      className={`app-shell ${!settings ? "tools-visible" : ""} ${contextOpen && !settings && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
       data-theme={theme}
       style={
         {
@@ -592,50 +590,7 @@ export function DesktopApp(): React.JSX.Element {
                 : "Open a local project to launch an agent"}
             </span>
           </div>
-          {settings ? (
-            <button onClick={() => setSettings(undefined)}>Back to workspace</button>
-          ) : (
-            <div className="top-actions">
-              <button
-                className={`review-toggle ${utilityOpen ? "selected" : ""}`}
-                disabled={!workspace || !!workspace.removedAt}
-                aria-label="Toggle terminal"
-                aria-expanded={utilityOpen}
-                onClick={() => setUtilityOpen((value) => !value)}
-              >
-                ›_ <span>Shell</span>
-              </button>
-              <button
-                className="review-toggle"
-                disabled={!accessId || !!workspace?.removedAt}
-                aria-label="Browse files"
-                title="Files"
-                aria-expanded={contextOpen && contextTab === "files"}
-                onClick={() => {
-                  setContextTab("files");
-                  setContextOpen(!(contextOpen && contextTab === "files"));
-                }}
-              >
-                <Icon name="folder" /> <span>Files</span>
-              </button>
-              <button
-                className="review-toggle"
-                disabled={!accessId || !!workspace?.removedAt}
-                aria-label="Review changes"
-                title="Review"
-                aria-expanded={contextOpen && contextTab === "changes"}
-                onClick={() => {
-                  setContextTab("changes");
-                  setContextOpen(!(contextOpen && contextTab === "changes"));
-                }}
-              >
-                <Icon name="panel" /> <span>Review</span>{" "}
-                {overview?.changes.length ? (
-                  <span className="count">{overview.changes.length}</span>
-                ) : null}
-              </button>
-            </div>
-          )}
+          {settings && <button onClick={() => setSettings(undefined)}>Back to workspace</button>}
         </header>
         {error && (
           <div className="desktop-error" role="alert">
@@ -783,119 +738,6 @@ export function DesktopApp(): React.JSX.Element {
           )}
         </section>
         <div className="agent-workspace" hidden={!!settings}>
-          {current && (
-            <div className="agent-session-toolbar">
-              <span>
-                {currentAgent?.name ?? current.agentId} ·{" "}
-                {currentTerminal?.state === "running"
-                  ? "Terminal open"
-                  : currentTerminal
-                    ? `Exited (${currentTerminal.exitCode ?? "—"})`
-                    : "Stopped"}
-              </span>
-              <div>
-                {currentTerminal?.state === "running" && (
-                  <button
-                    disabled={pending}
-                    title="Suspend the foreground agent (Ctrl+Z). Run fg at the shell prompt to return."
-                    onClick={() => {
-                      void window.kairo
-                        .writeTerminal(currentTerminal.id, "\x1a")
-                        .then(() =>
-                          document
-                            .getElementById(`terminal-view-${currentTerminal.id}`)
-                            ?.querySelector<HTMLTextAreaElement>("textarea")
-                            ?.focus(),
-                        )
-                        .catch((error) => onError(String(error)));
-                    }}
-                  >
-                    Use shell
-                  </button>
-                )}
-                {currentTerminal ? (
-                  <button
-                    disabled={pending}
-                    onClick={() =>
-                      setConfirm({
-                        title: "Close terminal?",
-                        description:
-                          "Close this shell, its agent and attached processes. Your workspace files are kept.",
-                        action: () => window.kairo.stopSession(current.id).then(apply),
-                      })
-                    }
-                  >
-                    Stop terminal
-                  </button>
-                ) : (
-                  <button
-                    disabled={pending || !!workspace?.removedAt}
-                    onClick={() => void action(() => window.kairo.startSession(current.id))}
-                  >
-                    {currentAgent?.resumable ? "Resume agent" : "Start agent"}
-                  </button>
-                )}
-                <button
-                  disabled={!!currentTerminal || pending || !currentAgent?.resumable}
-                  onClick={() =>
-                    setNative({
-                      id: current.id,
-                      value: current.nativeSession?.id ?? "",
-                      path: current.nativeSession?.transcriptPath ?? "",
-                    })
-                  }
-                >
-                  Resume ID
-                </button>
-                {!currentTerminal && (
-                  <button
-                    disabled={pending || !!workspace?.removedAt}
-                    onClick={() =>
-                      setConfirm({
-                        title: "Start a fresh conversation?",
-                        description:
-                          "Open a new CLI conversation in this workspace. The agent's previous history remains available in its own session browser.",
-                        action: () => window.kairo.startSession(current.id, "fresh").then(apply),
-                      })
-                    }
-                  >
-                    Start fresh
-                  </button>
-                )}
-                {!currentTerminal && currentAgent?.resumePicker && (
-                  <button
-                    disabled={pending || !!workspace?.removedAt}
-                    onClick={() =>
-                      void action(() => window.kairo.startSession(current.id, "picker"))
-                    }
-                  >
-                    Choose conversation
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-          {currentTerminal?.state === "running" && (
-            <p className="agent-session-notice">
-              Normal shell terminal · Exit the agent to use the shell, or choose Use shell and run
-              fg to return.
-            </p>
-          )}
-          {current && state?.sessionNotices[current.id] && (
-            <p className="agent-session-notice" role="status">
-              {state.sessionNotices[current.id]}
-            </p>
-          )}
-          {current?.nativeSession && (
-            <p className="agent-session-notice" title={current.nativeSession.id}>
-              Saved conversation · {current.nativeSession.id}
-            </p>
-          )}
-          {current && state?.sessionErrors[current.id] && (
-            <p className="file-error" role="alert">
-              {state.sessionErrors[current.id]}
-            </p>
-          )}
           <Suspense fallback={<p className="empty-small">Loading terminal…</p>}>
             <AgentTerminals
               terminals={state?.terminals ?? []}
@@ -948,6 +790,49 @@ export function DesktopApp(): React.JSX.Element {
           </Suspense>
         )}
       </main>
+      {!settings && (
+        <aside className="workspace-tools" aria-label="Workspace tools">
+          <button
+            className={`review-toggle ${utilityOpen ? "selected" : ""}`}
+            disabled={!workspace || !!workspace.removedAt}
+            aria-label="Toggle terminal"
+            aria-expanded={utilityOpen}
+            onClick={() => setUtilityOpen((value) => !value)}
+          >
+            ›_ <span>Shell</span>
+          </button>
+          <button
+            className="review-toggle"
+            disabled={!accessId || !!workspace?.removedAt}
+            aria-label="Browse files"
+            title="Files"
+            aria-expanded={contextOpen && contextTab === "files"}
+            onClick={() => {
+              setContextTab("files");
+              setContextOpen(!(contextOpen && contextTab === "files"));
+            }}
+          >
+            <Icon name="folder" /> <span>Files</span>
+          </button>
+          <button
+            className="review-toggle"
+            disabled={!accessId || !!workspace?.removedAt}
+            aria-label="Review changes"
+            title="Review"
+            aria-expanded={contextOpen && contextTab === "changes"}
+            onClick={() => {
+              setContextTab("changes");
+              setContextOpen(!(contextOpen && contextTab === "changes"));
+            }}
+          >
+            <Icon name="panel" /> <span>Review</span>{" "}
+            {overview?.changes.length ? (
+              <span className="count">{overview.changes.length}</span>
+            ) : null}
+          </button>
+        </aside>
+      )}
+
       {contextOpen && !settings && accessId && workspace && (
         <aside className="workbench" id="workspace-panel" aria-label="Workspace files and review">
           {resizeHandle("context")}
@@ -966,7 +851,7 @@ export function DesktopApp(): React.JSX.Element {
                   aria-selected={contextTab === tab}
                   onClick={() => setContextTab(tab)}
                 >
-                  {tab === "files" ? "Files" : "Changes"}
+                  {tab === "files" ? "Files" : "Review"}
                 </button>
               ))}
             </div>
@@ -1173,57 +1058,6 @@ export function DesktopApp(): React.JSX.Element {
               </button>
               <button className="primary" disabled={pending || !rename.title.trim()}>
                 Save name
-              </button>
-            </div>
-          </form>
-        </ModalFrame>
-      )}
-      {native && (
-        <ModalFrame
-          labelledBy="native-title"
-          blocked={pending}
-          onDismiss={() => setNative(undefined)}
-        >
-          <form
-            className="new-session-dialog"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void action(() =>
-                window.kairo.setNativeSession(native.id, {
-                  id: native.value,
-                  ...(native.path ? { transcriptPath: native.path } : {}),
-                }),
-              ).then(() => setNative(undefined));
-            }}
-          >
-            <h2 id="native-title">Native session resume</h2>
-            <p>
-              Use the session ID shown by the agent CLI. Kairo resumes this exact conversation in
-              its original workspace.
-            </p>
-            <label className="settings-field">
-              Native session ID
-              <input
-                autoFocus
-                aria-label="Native session ID"
-                value={native.value}
-                onChange={(event) => setNative({ ...native, value: event.target.value })}
-              />
-            </label>
-            <label className="settings-field">
-              Transcript path (Pi / Prime Agent)
-              <input
-                aria-label="Native transcript path"
-                value={native.path}
-                onChange={(event) => setNative({ ...native, path: event.target.value })}
-              />
-            </label>
-            <div className="modal-actions">
-              <button type="button" disabled={pending} onClick={() => setNative(undefined)}>
-                Cancel
-              </button>
-              <button className="primary" disabled={pending || !native.value.trim()}>
-                Save resume target
               </button>
             </div>
           </form>
