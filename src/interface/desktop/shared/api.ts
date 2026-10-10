@@ -1,3 +1,8 @@
+import type {
+  GitWorktree,
+  TaskWorkspace,
+  WorkspaceSelection,
+} from "../../../domain/task-workspace.js";
 import type { AgentUsage } from "../../../domain/agent-usage.js";
 import type { AgentAnswers, AgentQuestion } from "../../../domain/agent-user-input.js";
 import type { ExternalAgentInfo, SessionRuntime } from "../../../domain/agent-runtime.js";
@@ -35,6 +40,7 @@ export type DesktopBootstrap = {
   approvals: DesktopApproval[];
   userInputs: DesktopUserInput[];
   sessions: Session[];
+  workspaces: TaskWorkspace[];
   archivedSessions: Session[];
   activeSessionId?: string;
   config: ModelSelection;
@@ -59,7 +65,13 @@ export interface DesktopApi {
   openWorkspace(): Promise<DesktopBootstrap | undefined>;
   pickWorkspace(): Promise<string | undefined>;
   openSession(sessionId: string): Promise<DesktopBootstrap>;
-  newSession(runtime: SessionRuntime, workspace: string): Promise<DesktopBootstrap>;
+  newSession(
+    runtime: SessionRuntime,
+    workspace: string,
+    selection?: WorkspaceSelection,
+  ): Promise<DesktopBootstrap>;
+  listWorktrees(project: string): Promise<GitWorktree[]>;
+  removeWorktree(workspaceId: string): Promise<DesktopBootstrap>;
   /** Switching agents stops an active turn, saves a handoff, then continues it in a fresh native session. */
   setRuntime(sessionId: string, runtime: SessionRuntime): Promise<DesktopBootstrap>;
   readUsage(sessionId: string, force?: boolean): Promise<AgentUsage>;

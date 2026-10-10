@@ -1,8 +1,10 @@
+import { GitWorkspaces } from "../../../infrastructure/repository/git-workspaces.js";
+import type { WorkspaceSelection } from "../../../domain/task-workspace.js";
 import { buildAgentHandoff } from "../../../application/agent-handoff.js";
 import type { AgentUsage } from "../../../domain/agent-usage.js";
 import { validateAgentAnswers, type AgentAnswers } from "../../../domain/agent-user-input.js";
 import { realpath } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ApprovalDecision, ApprovalPolicy, JevFeatures } from "../../../domain/ports.js";
 import type { ExternalAgentInfo, SessionRuntime } from "../../../domain/agent-runtime.js";
 import { AgentRegistry } from "../../../infrastructure/agents/agent-registry.js";
@@ -47,16 +49,29 @@ export async function createDesktopRuntime(
   options: {
     store?: SqliteSessionStore;
     agents?: AgentRegistry;
+    worktrees?: GitWorkspaces;
     credentials?: Pick<MacOSKeychainStore, "get" | "save">;
   } = {},
 ) {
   const storePromise = options.store ? Promise.resolve(options.store) : SqliteSessionStore.open();
   const credentials = options.credentials ?? new MacOSKeychainStore();
+  const worktrees = options.worktrees ?? new GitWorkspaces();
+  const workspaceRuns = new Map<string, string>();
+  const overlaps = (a: string, b: string) => {
+    const contains = (parent: string, child: string) => {
+      const rel = relative(parent, child);
+      return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+    };
+    return contains(a, b) || contains(b, a);
+  };
+  const removingWorkspaces = new Set<string>();
+  const removalDirectories = new Map<string, string>();
   const registry = options.agents ?? new AgentRegistry();
   let agentInfo: ExternalAgentInfo[] = [];
   const liveSessions: Record<string, LiveSession> = {};
   const externalControllers = new Map<string, AbortController>();
   const activeRuns = new Set<Promise<void>>();
+  const activeRequests = new Set<Promise<unknown>>();
   const sessionRuns = new Map<string, Promise<void>>();
   const switchingSessions = new Set<string>();
   const handoffContinuation = Symbol("handoffContinuation");
@@ -324,6 +339,7 @@ export async function createDesktopRuntime(
       approvals: [...pendingApprovals.values()].map((item) => item.approval),
       userInputs: [...pendingUserInputs.values()].map((item) => item.request),
       sessions: store.list(),
+      workspaces: store.workspaces(true),
       archivedSessions: store.listArchived(),
       activeSessionId: session?.id,
       config: modelConfig,
@@ -340,7 +356,9 @@ export async function createDesktopRuntime(
     store: SqliteSessionStore,
     requested: string,
   ): Promise<DesktopBootstrap> {
-    const workspace = await realpath(requested);
+    const description = await worktrees.describe(requested);
+    const workspace = description.directory;
+    store.registerWorkspace(description);
     const session =
       store.list().find((item) => item.workspace === workspace) ?? store.create(workspace);
     activeSessionId = session.id;
@@ -442,10 +460,65 @@ export async function createDesktopRuntime(
                 selection: { provider: config.provider, model: config.model },
               } as const)
             : await validateRuntime(first);
-        const session = store.create(workspace, runtime);
+        const selection = third as WorkspaceSelection | undefined;
+        let description;
+        if (!selection || selection.kind === "folder")
+          description = await worktrees.describe(workspace);
+        else if (selection.kind === "worktree") {
+          description = await worktrees.create(workspace, selection.branch, selection.baseRef);
+        } else if (selection.kind === "existing" && typeof selection.directory === "string") {
+          description = await worktrees.existing(workspace, selection.directory);
+        } else throw new Error("Choose a folder, new worktree or existing worktree.");
+        let owned;
+        try {
+          owned = store.registerWorkspace(description);
+        } catch (error) {
+          throw new Error(
+            `Could not save workspace ${description.directory}. Its files were preserved. ${(error as Error).message}`,
+          );
+        }
+        if (removingWorkspaces.has(owned.id)) throw new Error("This workspace is being removed.");
+        const session = store.create(owned.directory, runtime);
         activeSessionId = session.id;
-        await new RepositoryAwareness(store).ensureFresh(session.id, workspace);
+        await new RepositoryAwareness(store).ensureFresh(session.id, session.workspace);
         return bootstrap(store, session.id);
+      }
+      case "worktrees:list": {
+        if (typeof first !== "string") throw new Error("Choose a project.");
+        const project = await worktrees.describe(first);
+        return project.kind === "folder" ? [] : worktrees.list(project.repositoryPath);
+      }
+      case "worktrees:remove": {
+        const workspace = store.workspace(String(first));
+        if (!workspace || workspace.removedAt) throw new Error("Workspace not found.");
+        if (removingWorkspaces.has(workspace.id))
+          throw new Error("This workspace is already being removed.");
+        const directory = await realpath(workspace.directory);
+        const associated = [...store.list(), ...store.listArchived()].filter((session) =>
+          overlaps(session.workspace, directory),
+        );
+        if (
+          associated.some(
+            (session) => runningSessions.has(session.id) || switchingSessions.has(session.id),
+          )
+        )
+          throw new Error("Stop all agents in this workspace before removing it.");
+        if (associated.some((session) => !session.archivedAt))
+          throw new Error(
+            "Archive all chats in this workspace before removing it. Their history will be kept.",
+          );
+        if (removingWorkspaces.has(workspace.id))
+          throw new Error("This workspace is already being removed.");
+        removingWorkspaces.add(workspace.id);
+        removalDirectories.set(workspace.id, directory);
+        try {
+          await worktrees.remove(workspace);
+          store.markWorkspaceRemoved(workspace.id);
+        } finally {
+          removingWorkspaces.delete(workspace.id);
+          removalDirectories.delete(workspace.id);
+        }
+        return bootstrap(store);
       }
       case "agents:usage": {
         const session = requireSession(store, String(first));
@@ -569,7 +642,13 @@ export async function createDesktopRuntime(
       }
       case "project:archive": {
         if (typeof first !== "string" || !first) throw new Error("Choose a project to archive.");
-        const projectSessions = store.list().filter((session) => session.workspace === first);
+        const projectSessions = store
+          .list()
+          .filter(
+            (session) =>
+              store.workspace(session.workspaceId)?.repositoryPath === first ||
+              session.workspace === first,
+          );
         if (!projectSessions.length) throw new Error("Project has no active chats to archive.");
         if (
           projectSessions.some(
@@ -586,7 +665,9 @@ export async function createDesktopRuntime(
       case "project:delete": {
         if (typeof first !== "string" || !first) throw new Error("Choose a project to delete.");
         const projectSessions = [...store.list(), ...store.listArchived()].filter(
-          (session) => session.workspace === first,
+          (session) =>
+            store.workspace(session.workspaceId)?.repositoryPath === first ||
+            session.workspace === first,
         );
         if (!projectSessions.length) throw new Error("Project not found.");
         if (
@@ -610,7 +691,10 @@ export async function createDesktopRuntime(
         return bootstrap(store, activeSessionId);
       }
       case "session:restore": {
-        store.restore(String(first));
+        const session = requireSession(store, String(first));
+        if (store.workspace(session.workspaceId)?.removedAt)
+          throw new Error("This chat's worktree was removed. Its history is kept in the archive.");
+        store.restore(session.id);
         return bootstrap(store, activeSessionId);
       }
       case "task:send": {
@@ -624,6 +708,32 @@ export async function createDesktopRuntime(
           throw new Error("A task is already running in this session.");
         if (typeof prompt !== "string" || !prompt.trim()) throw new Error("Enter a task first.");
         if (mode !== "build" && mode !== "plan") throw new Error("Invalid task mode.");
+        const owned = store.workspace(session.workspaceId);
+        if (!owned || owned.removedAt || removingWorkspaces.has(owned.id))
+          throw new Error(
+            "This workspace is unavailable. Choose another workspace for a new session.",
+          );
+        const runDirectory = await realpath(owned.directory);
+        if (closed) throw new Error("Kairo is shutting down.");
+        if (
+          store.workspace(session.workspaceId)?.removedAt ||
+          removingWorkspaces.has(session.workspaceId)
+        )
+          throw new Error("This workspace is unavailable.");
+        if (store.get(session.id)?.archivedAt)
+          throw new Error("Restore this chat before starting another task.");
+        if (runningSessions.has(session.id))
+          throw new Error("A task is already running in this session.");
+        if ([...removalDirectories.values()].some((directory) => overlaps(directory, runDirectory)))
+          throw new Error("This workspace is being removed.");
+        const owner = [...workspaceRuns].find(([directory]) =>
+          overlaps(directory, runDirectory),
+        )?.[1];
+        if (owner && owner !== session.id)
+          throw new Error(
+            "Another agent is working in this folder. Create an isolated worktree or wait for that task to finish.",
+          );
+        workspaceRuns.set(runDirectory, session.id);
         runningSessions.add(session.id);
         emit("task:state", { sessionId: session.id, state: "running" });
         const controller = new AbortController();
@@ -805,6 +915,7 @@ export async function createDesktopRuntime(
             }
             externalControllers.delete(session.id);
             runningSessions.delete(session.id);
+            if (workspaceRuns.get(runDirectory) === session.id) workspaceRuns.delete(runDirectory);
             cancellationRequested.delete(session.id);
             agentsBySession.delete(session.id);
             emit("task:state", {
@@ -887,7 +998,12 @@ export async function createDesktopRuntime(
       }
       case "workspace:write": {
         const session = requireSession(store, String(first));
-        if ([...runningSessions].some((id) => store.get(id)?.workspace === session.workspace))
+        const directory = await realpath(session.workspace);
+        if (
+          [...workspaceRuns.keys()].some((runningDirectory) =>
+            overlaps(directory, runningDirectory),
+          )
+        )
           throw new Error("Stop agents working in this workspace before saving files.");
         const result = await (
           await toolsFor(store, String(first))
@@ -992,6 +1108,17 @@ export async function createDesktopRuntime(
     }
   }
 
+  function dispatchRequest(request: DesktopRequest): Promise<unknown> {
+    if (closed && request.method !== "shutdown")
+      return Promise.reject(new Error("Kairo is shutting down."));
+    const pending = dispatch(request);
+    if (request.method !== "shutdown") {
+      activeRequests.add(pending);
+      void pending.finally(() => activeRequests.delete(pending)).catch(() => {});
+    }
+    return pending;
+  }
+
   async function close(): Promise<void> {
     if (closed) return;
     closed = true;
@@ -1006,14 +1133,22 @@ export async function createDesktopRuntime(
     for (const [sessionId, agent] of agentsBySession) agent.cancel(sessionId);
     await registry.close();
     await Promise.allSettled([...activeRuns]);
+    await Promise.allSettled([...activeRequests]);
     (await storePromise).close();
   }
 
   return {
-    ready: storePromise.then((store) => {
+    ready: storePromise.then(async (store) => {
+      for (const workspace of store.workspaces()) {
+        try {
+          store.reconcileWorkspace(workspace.id, await worktrees.describe(workspace.directory));
+        } catch {
+          /* A missing folder must not destroy persisted chat history. */
+        }
+      }
       activeSessionId = store.list()[0]?.id;
     }),
-    dispatch,
+    dispatch: dispatchRequest,
     close,
   };
 }

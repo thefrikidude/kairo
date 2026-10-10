@@ -2,12 +2,13 @@ import type { ExternalAgentAdapter, ExternalRun } from "../../../domain/agent-ru
 import type { AgentUsage, UsageChange } from "../../../domain/agent-usage.js";
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDesktopRuntime } from "./index.js";
 import { SqliteSessionStore } from "../../../infrastructure/persistence/sqlite-session-store.js";
+import { GitWorkspaces } from "../../../infrastructure/repository/git-workspaces.js";
 import { AgentRegistry } from "../../../infrastructure/agents/agent-registry.js";
 import { CodexAgentAdapter } from "../../../infrastructure/agents/codex-agent.js";
 import type { DesktopBootstrap, DesktopApproval } from "../shared/api.js";
@@ -17,9 +18,12 @@ async function setup(
   credentialProvider?: string,
   externalAdapter?: ExternalAgentAdapter | ExternalAgentAdapter[],
 ) {
-  const root = await mkdtemp(join(tmpdir(), "kairo-desktop-bridge-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-desktop-bridge-")));
+  const managedRoot = await mkdtemp(join(tmpdir(), "kairo-desktop-worktrees-"));
   const store = await SqliteSessionStore.open(join(root, "sessions.sqlite"));
-  const builtin = store.create(root, {
+  const builtinFolder = join(root, "builtin");
+  await mkdir(builtinFolder);
+  const builtin = store.create(builtinFolder, {
     kind: "builtin",
     selection: { provider: "mistral", model: "builtin-model" },
   });
@@ -28,6 +32,7 @@ async function setup(
     (event, payload) => events.push({ event, payload: payload as Record<string, unknown> }),
     {
       store,
+      worktrees: new GitWorkspaces(managedRoot),
       agents: new AgentRegistry(
         Array.isArray(externalAdapter)
           ? externalAdapter
@@ -67,21 +72,35 @@ async function setup(
   t.after(async () => {
     await runtime.close();
     await rm(root, { recursive: true, force: true });
+    await rm(managedRoot, { recursive: true, force: true });
   });
   return { store, builtin, root, runtime, events, request, wait };
 }
 
 test("desktop keeps API-key sessions and routes concurrent external chats independently", async (t) => {
-  const { request, store, builtin, events, wait } = await setup(t);
-  const first = await request<DesktopBootstrap>("session:new", {
-    kind: "external",
-    agentId: "codex",
-    model: "fixture-model",
-  });
-  const second = await request<DesktopBootstrap>("session:new", {
-    kind: "external",
-    agentId: "codex",
-  });
+  const { request, store, builtin, events, wait, root } = await setup(t);
+  const { mkdir } = await import("node:fs/promises");
+  const firstFolder = join(root, "first");
+  const secondFolder = join(root, "second");
+  await mkdir(firstFolder);
+  await mkdir(secondFolder);
+  const first = await request<DesktopBootstrap>(
+    "session:new",
+    {
+      kind: "external",
+      agentId: "codex",
+      model: "fixture-model",
+    },
+    firstFolder,
+  );
+  const second = await request<DesktopBootstrap>(
+    "session:new",
+    {
+      kind: "external",
+      agentId: "codex",
+    },
+    secondFolder,
+  );
   const a = first.activeSessionId!;
   const b = second.activeSessionId!;
   await request("task:send", a, "wait", "build");
@@ -306,11 +325,19 @@ test("archive deletion removes only the chosen history and bulk deletion keeps a
 });
 
 test("native Codex questions survive switching, validate answers, and stay scoped to their session", async (t) => {
-  const { request, events, builtin, wait, store } = await setup(t);
+  const { request, events, builtin, wait, store, root } = await setup(t);
+  const { mkdir } = await import("node:fs/promises");
+  const otherFolder = join(root, "questions");
+  await mkdir(otherFolder);
   const a = (await request<DesktopBootstrap>("session:new", { kind: "external", agentId: "codex" }))
     .activeSessionId!;
-  const b = (await request<DesktopBootstrap>("session:new", { kind: "external", agentId: "codex" }))
-    .activeSessionId!;
+  const b = (
+    await request<DesktopBootstrap>(
+      "session:new",
+      { kind: "external", agentId: "codex" },
+      otherFolder,
+    )
+  ).activeSessionId!;
   await request("task:send", a, "questions", "build");
   await request("task:send", b, "questions", "build");
   await wait(() => events.filter((event) => event.event === "user-input:request").length === 2);
@@ -600,7 +627,7 @@ test("idle switching and switching back reset native history but preserve Kairo 
     input.onText("Done");
     return "complete";
   };
-  const { request, store, wait, events } = await setup(t, undefined, [
+  const { request, store, wait, events, root } = await setup(t, undefined, [
     switchingAdapter("first", run),
     switchingAdapter("second", run),
   ]);
@@ -621,9 +648,7 @@ test("idle switching and switching back reset native history but preserve Kairo 
   await wait(() => store.messages(id).at(-1)?.content === "Done");
   assert.equal(inputs[1]?.threadId, undefined);
   assert.match(inputs[1]?.context ?? "", /Keep compatibility/);
-  const reopened = await SqliteSessionStore.open(
-    join(created.sessions.find((session) => session.id === id)!.workspace, "sessions.sqlite"),
-  );
+  const reopened = await SqliteSessionStore.open(join(root, "sessions.sqlite"));
   try {
     assert.equal(reopened.get(id)?.externalSessionId, "2-native");
     assert.match(reopened.latestCheckpoint(id)?.summary ?? "", /Keep compatibility/);
@@ -666,8 +691,8 @@ test("switching blocks new sends and another switch while cancellation is pendin
 test("desktop rename and directory preview APIs use the session workspace", async (t) => {
   const { request, builtin, root } = await setup(t);
   const { writeFile, mkdir } = await import("node:fs/promises");
-  await mkdir(join(root, "source"));
-  await writeFile(join(root, "source", "hello.txt"), "hello\n".repeat(10_000));
+  await mkdir(join(builtin.workspace, "source"));
+  await writeFile(join(builtin.workspace, "source", "hello.txt"), "hello\n".repeat(10_000));
   const next = await request<DesktopBootstrap>("session:rename", builtin.id, "My task");
   assert.equal(next.sessions.find((s) => s.id === builtin.id)?.title, "My task");
   const entries = await request<{ path: string }[]>("workspace:directory", builtin.id, "source");
@@ -681,4 +706,86 @@ test("desktop rename and directory preview APIs use the session workspace", asyn
   );
   await assert.rejects(request("workspace:directory", builtin.id, ".."), /outside/);
   await assert.rejects(request("session:rename", builtin.id, ""), /Enter/);
+});
+
+test("worktree sessions isolate execution and preserve workspace ownership on chat deletion", async (t) => {
+  const { request, root, store, events, wait } = await setup(t);
+  const { execFileSync } = await import("node:child_process");
+  const { writeFile, access } = await import("node:fs/promises");
+  const git = (args: string[], cwd = root) =>
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  git(["init", "-b", "main"]);
+  git(["config", "user.name", "Fixture"]);
+  git(["config", "user.email", "fixture@example.test"]);
+  await writeFile(join(root, "hello.txt"), "original\n");
+  git(["add", "hello.txt"]);
+  git(["commit", "-m", "Initial"]);
+  const external = { kind: "external", agentId: "codex" };
+  const first = await request<DesktopBootstrap>("session:new", external, root, {
+    kind: "worktree",
+    branch: "kairo/first",
+  });
+  const a = store.get(first.activeSessionId!)!;
+  const second = await request<DesktopBootstrap>("session:new", external, root, {
+    kind: "worktree",
+    branch: "kairo/second",
+  });
+  const b = store.get(second.activeSessionId!)!;
+  assert.notEqual(a.workspaceId, b.workspaceId);
+  assert.notEqual(a.workspace, b.workspace);
+  assert.equal(store.workspace(a.workspaceId)?.repositoryPath, root);
+  await request("task:send", a.id, "wait", "build");
+  await request("task:send", b.id, "other", "build");
+  await wait(() =>
+    events.some((e) => e.payload.sessionId === b.id && e.payload.state === "complete"),
+  );
+  const reused = await request<DesktopBootstrap>("session:new", external, root, {
+    kind: "existing",
+    directory: a.workspace,
+  });
+  assert.equal(store.get(reused.activeSessionId!)?.workspaceId, a.workspaceId);
+  await assert.rejects(
+    request("task:send", reused.activeSessionId, "other", "build"),
+    /Another agent/,
+  );
+  await request("workspace:write", b.id, "hello.txt", "changed in b\n");
+  assert.equal(await request("workspace:read", a.id, "hello.txt"), "original\n");
+  await assert.rejects(request("worktrees:remove", a.workspaceId), /Stop all agents/);
+  await request("task:cancel", a.id);
+  await wait(() =>
+    events.some((e) => e.payload.sessionId === a.id && e.payload.state === "cancelled"),
+  );
+  await assert.rejects(request("worktrees:remove", b.workspaceId), /Archive all chats/);
+  await request("session:archive", b.id);
+  await assert.rejects(request("worktrees:remove", b.workspaceId), /untracked or ignored/);
+  git(["restore", "hello.txt"], b.workspace);
+  await request("worktrees:remove", b.workspaceId);
+  await assert.rejects(access(b.workspace));
+  assert.equal(store.get(b.id)?.workspaceId, b.workspaceId);
+  await assert.rejects(request("session:restore", b.id), /worktree was removed/);
+  await request("session:delete", a.id);
+  await access(a.workspace);
+  assert.ok(store.workspace(a.workspaceId));
+});
+
+test("shutdown waits for in-flight desktop reads before closing SQLite", async (t) => {
+  const { request, runtime, builtin } = await setup(t);
+  const reading = request<DesktopBootstrap>("bootstrap");
+  // Let the accepted request enter bootstrap and await its asynchronous configuration read.
+  await Promise.resolve();
+  await runtime.close();
+  assert.ok((await reading).sessions.some((session) => session.id === builtin.id));
+  await assert.rejects(request("bootstrap"), /shutting down/);
+});
+
+test("a send awaiting workspace validation cannot start an agent after shutdown begins", async (t) => {
+  const { request, runtime, builtin, events } = await setup(t);
+  const sending = request("task:send", builtin.id, "Implement a feature", "build");
+  await Promise.resolve();
+  await runtime.close();
+  await assert.rejects(sending, /shutting down/);
+  assert.equal(
+    events.some((event) => event.payload.state === "running"),
+    false,
+  );
 });

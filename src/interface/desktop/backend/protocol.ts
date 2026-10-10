@@ -6,6 +6,8 @@ const methods = new Set([
   "workspace:open",
   "session:open",
   "session:new",
+  "worktrees:list",
+  "worktrees:remove",
   "session:rename",
   "session:runtime",
   "agents:refresh",

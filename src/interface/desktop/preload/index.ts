@@ -6,7 +6,10 @@ const api: DesktopApi = {
   openWorkspace: () => ipcRenderer.invoke("workspace:open"),
   pickWorkspace: () => ipcRenderer.invoke("workspace:pick"),
   openSession: (sessionId) => ipcRenderer.invoke("session:open", sessionId),
-  newSession: (runtime, workspace) => ipcRenderer.invoke("session:new", runtime, workspace),
+  newSession: (runtime, workspace, selection) =>
+    ipcRenderer.invoke("session:new", runtime, workspace, selection),
+  listWorktrees: (project) => ipcRenderer.invoke("worktrees:list", project),
+  removeWorktree: (workspaceId) => ipcRenderer.invoke("worktrees:remove", workspaceId),
   setRuntime: (sessionId, runtime) => ipcRenderer.invoke("session:runtime", sessionId, runtime),
   readUsage: (sessionId, force) => ipcRenderer.invoke("agents:usage", sessionId, force),
   onUsage: (listener) => subscribe("agents:usage", listener),

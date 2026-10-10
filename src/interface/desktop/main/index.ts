@@ -134,6 +134,8 @@ function registerIpc(): void {
   handle("session:open", "session:open");
   handle("session:rename", "session:rename");
   handle("workspace:directory", "workspace:directory");
+  handle("worktrees:list", "worktrees:list");
+  handle("worktrees:remove", "worktrees:remove");
   handle("session:new", "session:new");
   handle("session:runtime", "session:runtime");
   handle("agents:refresh", "agents:refresh");
