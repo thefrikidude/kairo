@@ -1,10 +1,10 @@
-// Repeated, identical fixtures. Pass an app checkout directory to compare revisions.
+// Repeated terminal-desktop fixtures. Compare only compatible terminal-desktop revisions.
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, readFile, copyFile, realpath, rm } from "node:fs/promises";
 import { tmpdir, cpus, platform, arch } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SqliteSessionStore } from "../dist/infrastructure/persistence/sqlite-session-store.js";
+import { SqliteTerminalSessionStore } from "../dist/infrastructure/persistence/sqlite-terminal-session-store.js";
 import { GitWorkspaces } from "../dist/infrastructure/repository/git-workspaces.js";
 const appRoot = resolve(process.argv[2] || process.cwd());
 const output = resolve(
@@ -30,22 +30,27 @@ git(["config", "user.email", "benchmark@example.test"]);
 git(["add", "."]);
 git(["commit", "-m", "Fixture"]);
 const seed = join(root, "seed.sqlite");
-const store = await SqliteSessionStore.open(seed);
+const store = await SqliteTerminalSessionStore.open(seed);
 const worktrees = new GitWorkspaces(join(root, "worktrees"));
 for (let index = 0; index < 24; index += 1) {
   const workspace = store.registerWorkspace(
     await worktrees.create(project, `kairo/benchmark-${index}`),
   );
-  const session = store.create(workspace.directory);
+  const session = store.create(workspace.id, "codex");
+  if (index === 0) store.setActiveSession(session.id);
   store.rename(session.id, `Benchmark session ${index + 1}`);
-  for (let message = 0; message < 10; message += 1)
-    store.addMessage(session.id, {
-      role: message % 2 ? "model" : "user",
-      content: "A short benchmark conversation message.",
-      createdAt: message + 1,
-    });
 }
 store.close();
+const bin = join(root, "bin"),
+  history = join(root, "history");
+await mkdir(bin);
+await mkdir(history);
+await writeFile(
+  join(bin, "codex"),
+  `#!${process.execPath}\n` +
+    (await readFile(new URL("./fixtures/agent-cli.cjs", import.meta.url), "utf8")),
+  { mode: 0o755 },
+);
 const samples = [];
 try {
   for (let index = 0; index < count; index += 1) {
@@ -59,7 +64,14 @@ try {
       {
         cwd: appRoot,
         stdio: "inherit",
-        env: { ...process.env, KAIRO_STATE_DIR: state, KAIRO_BENCH_SAMPLE: file },
+        env: {
+          ...process.env,
+          PATH: bin + delimiter + process.env.PATH,
+          SHELL: "/bin/sh",
+          KAIRO_FIXTURE_HISTORY: history,
+          KAIRO_STATE_DIR: state,
+          KAIRO_BENCH_SAMPLE: file,
+        },
       },
     );
     const timer = setTimeout(() => child.kill("SIGTERM"), 60_000);
@@ -85,7 +97,8 @@ try {
     fixture: {
       workspaces: 24,
       files: 100,
-      messagesPerChat: 10,
+      terminalSessions: 24,
+      initiallyLiveTerminals: 1,
       samples: count,
       switchesPerSample: 10,
     },

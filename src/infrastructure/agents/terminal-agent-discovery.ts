@@ -56,8 +56,8 @@ export class TerminalAgentDiscovery {
           : undefined;
       const home = this.options.home ?? homedir();
       const dirs = [
-        ...(hydrated || inherited).split(delimiter),
         ...inherited.split(delimiter),
+        ...(hydrated ?? "").split(delimiter),
         join(home, ".local/bin"),
         join(home, ".opencode/bin"),
         join(home, ".npm-global/bin"),

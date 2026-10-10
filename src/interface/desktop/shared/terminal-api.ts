@@ -72,6 +72,7 @@ export interface TerminalDesktopApi {
   deleteSession(id: string): Promise<TerminalDesktopBootstrap>;
   deleteArchivedSessions(): Promise<TerminalDesktopBootstrap>;
   refreshAgents(): Promise<TerminalAgentInfo[]>;
+  openAgentHomepage(agentId: string): Promise<void>;
   listWorktrees(project: string): Promise<GitWorktree[]>;
   removeWorktree(id: string): Promise<TerminalDesktopBootstrap>;
   listTerminals(workspaceId?: string): Promise<WorkspaceTerminal[]>;

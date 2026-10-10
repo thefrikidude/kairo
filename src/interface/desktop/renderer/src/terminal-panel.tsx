@@ -6,7 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import type { TerminalData, WorkspaceTerminal } from "../../shared/api.js";
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
-const TerminalView = memo(function TerminalView({
+export const TerminalView = memo(function TerminalView({
   info,
   visible,
   onError,
@@ -116,6 +116,9 @@ const TerminalView = memo(function TerminalView({
     };
   }, [info.id, onError]);
   useEffect(() => {
+    if (terminal.current) terminal.current.options.disableStdin = info.state !== "running";
+  }, [info.state]);
+  useEffect(() => {
     if (visible) {
       fit.current();
       if (!(
@@ -153,15 +156,14 @@ export default memo(function TerminalPanel({
   const [closing, setClosing] = useState<string>();
   const [height, setHeight] = useState(240);
   const onError = useCallback((value: string) => setError(value), []);
-  const upsert = useCallback(
-    (info: WorkspaceTerminal) =>
-      setTerminals((current) =>
-        current.some((item) => item.id === info.id)
-          ? current.map((item) => (item.id === info.id ? info : item))
-          : [...current, info],
-      ),
-    [],
-  );
+  const upsert = useCallback((info: WorkspaceTerminal) => {
+    if (info.sessionId) return;
+    setTerminals((current) =>
+      current.some((item) => item.id === info.id)
+        ? current.map((item) => (item.id === info.id ? info : item))
+        : [...current, info],
+    );
+  }, []);
   useEffect(() => {
     let cancelled = false;
     const offState = window.kairo.onTerminalState(upsert);
@@ -171,7 +173,7 @@ export default memo(function TerminalPanel({
     void window.kairo
       .listTerminals()
       .then((items) => {
-        if (!cancelled) setTerminals(items);
+        if (!cancelled) setTerminals(items.filter((item) => !item.sessionId));
       })
       .catch((cause) => {
         if (!cancelled) onError(message(cause));

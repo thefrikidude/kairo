@@ -193,6 +193,8 @@ export async function createTerminalDesktopRuntime(
     switch (request.method) {
       case "bootstrap":
         return snapshot();
+      case "agents:homepage":
+        return agentDefinition(first).homepage;
       case "agents:refresh":
         catalog = await agents.refresh();
         return catalog;

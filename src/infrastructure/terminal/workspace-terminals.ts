@@ -64,7 +64,7 @@ export class WorkspaceTerminals {
   async create(workspaceId: string, directory: string, reuse = false): Promise<WorkspaceTerminal> {
     if (this.closed) throw new Error("Kairo is shutting down.");
     if (reuse) {
-      const existing = this.list(workspaceId)[0];
+      const existing = this.list(workspaceId).find((terminal) => !terminal.sessionId);
       if (existing) return existing;
       const pending = this.creating.get(workspaceId);
       if (pending) return pending;

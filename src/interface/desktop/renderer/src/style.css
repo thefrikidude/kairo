@@ -2829,3 +2829,225 @@ button svg {
   background: var(--backdrop);
   backdrop-filter: blur(3px);
 }
+/* Agent CLI surface reuses the desktop shell, sidebar and optional workbench. */
+.agent-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+.agent-terminal-stack {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.agent-terminal-stack:empty {
+  display: none;
+}
+.agent-terminal-stack .terminal-view {
+  flex: 1;
+  height: 100%;
+  padding: 10px;
+}
+.agent-session-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 16px;
+  color: var(--muted);
+}
+.agent-session-toolbar > div {
+  display: flex;
+  gap: 10px;
+}
+.agent-session-toolbar button {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.agent-session-notice {
+  padding: 4px 16px;
+  color: var(--muted);
+}
+.desktop-error {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--negative-bg);
+  color: var(--negative);
+}
+.terminal-settings {
+  flex: 1;
+  padding: 24px;
+  overflow: auto;
+}
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.settings-tabs button {
+  padding: 8px 14px;
+  border-radius: 6px;
+}
+.settings-tabs button[aria-pressed="true"] {
+  background: var(--hover);
+}
+.agent-picker-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 12px 0 8px;
+}
+.agent-picker-heading input {
+  flex: 1;
+  min-width: 0;
+}
+.agent-picker-list {
+  max-height: 250px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.agent-picker-row {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  gap: 8px;
+}
+.agent-picker-row.selected {
+  background: var(--hover);
+}
+.agent-picker-row > button:first-child {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 8px;
+}
+.agent-picker-row strong,
+.agent-picker-row small {
+  display: block;
+}
+.agent-picker-row small {
+  color: var(--muted);
+}
+.agent-picker-row > button:last-child:not(:first-child) {
+  font-size: 11px;
+  padding: 8px;
+  color: var(--muted);
+}
+.folder-picker {
+  display: flex;
+  gap: 8px;
+}
+.folder-picker input {
+  flex: 1;
+  min-width: 0;
+}
+.new-session-dialog input,
+.agent-picker-heading input {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.new-session-dialog {
+  max-height: 85vh;
+  overflow: auto;
+}
+.context-tab-list {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+}
+.context-tab-list button {
+  padding: 8px;
+}
+.context-tab-list button[aria-selected="true"] {
+  color: var(--text);
+  background: var(--hover);
+  border-radius: 5px;
+}
+.modal-host {
+  width: min(calc(100vw - 48px), 520px);
+}
+.new-session-dialog {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 22px;
+}
+.new-session-dialog h2 {
+  margin: 0 0 16px;
+  font-size: 17px;
+}
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  color: var(--muted);
+}
+.settings-field select {
+  width: 100%;
+  padding: 8px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.modal-actions button {
+  padding: 8px 12px;
+  border-radius: 7px;
+}
+.workbench-header {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 12px;
+  flex: none;
+}
+.statusbar {
+  grid-column: 1/-1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  background: var(--sidebar);
+}
+
+@media (max-width: 1100px) {
+  .top-actions .review-toggle > span:not(.count) {
+    display: none;
+  }
+  .agent-session-toolbar {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .agent-session-toolbar button {
+    white-space: nowrap;
+  }
+  .agent-session-toolbar > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

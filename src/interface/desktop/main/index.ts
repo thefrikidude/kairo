@@ -146,40 +146,31 @@ function registerIpc(): void {
     return result.canceled ? undefined : result.filePaths[0];
   });
   handle("session:open", "session:open");
-  handle("session:history", "session:history");
-  handle("session:rename", "session:rename");
-  handle("workspace:directory", "workspace:directory");
-  handle("worktrees:list", "worktrees:list");
-  handle("worktrees:remove", "worktrees:remove");
   handle("session:new", "session:new");
-  handle("session:runtime", "session:runtime");
-  handle("agents:refresh", "agents:refresh");
-  handle("agents:usage", "agents:usage");
-  ipcMain.handle("agents:login", async (event, agentId: unknown) => {
-    assertTrusted(event);
-    const result = await request<{ url: string }>("agents:login", [agentId]);
-    const url = new URL(result.url);
-    if (url.protocol !== "https:" || url.hostname !== "auth.openai.com")
-      throw new Error("Agent returned an unrecognized sign-in URL.");
-    await shell.openExternal(url.href);
-  });
+  handle("session:start", "session:start");
+  handle("session:stop", "session:stop");
+  handle("session:native", "session:native");
+  handle("session:rename", "session:rename");
   handle("session:archive", "session:archive");
   handle("session:restore", "session:restore");
   handle("session:delete", "session:delete");
   handle("sessions:delete-archived", "sessions:delete-archived");
-  handle("project:archive", "project:archive");
-  handle("project:delete", "project:delete");
-  handle("task:send", "task:send");
-  handle("codex:command", "codex:command");
-  handle("task:cancel", "task:cancel");
-  handle("workspace:list", "workspace:list");
+  handle("worktrees:list", "worktrees:list");
+  handle("worktrees:remove", "worktrees:remove");
+  handle("workspace:select", "workspace:select");
+  handle("agents:refresh", "agents:refresh");
+  handle("workspace:directory", "workspace:directory");
   handle("workspace:snapshot", "workspace:snapshot");
   handle("workspace:search", "workspace:search");
-  handle("workspace:read", "workspace:read");
   handle("workspace:write", "workspace:write");
-  handle("workspace:changes", "workspace:changes");
   handle("workspace:review", "workspace:review");
   handle("workspace:diff", "workspace:diff");
+  ipcMain.handle("agents:homepage", async (event, agentId: unknown) => {
+    assertTrusted(event);
+    const url = new URL(await request<string>("agents:homepage", [agentId]));
+    if (url.protocol !== "https:") throw new Error("Invalid agent installation link.");
+    await shell.openExternal(url.href);
+  });
   ipcMain.handle("workspace:open-cursor", async (event, sessionId: unknown, filePath: unknown) => {
     assertTrusted(event);
     if (process.platform !== "darwin")
@@ -192,9 +183,6 @@ function registerIpc(): void {
       });
     });
   });
-  handle("model:save", "model:save");
-  handle("approval:resolve", "approval:resolve");
-  handle("user-input:resolve", "user-input:resolve");
 }
 
 function confirmUnsavedChanges(): boolean {

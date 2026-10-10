@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { WorkspaceTerminal } from "../../shared/api.js";
 
-/** Available even after every chat in a workspace has been archived or deleted. */
+/** Available even after every session in a workspace has been archived or deleted. */
 export function TerminalCatalog(): React.JSX.Element | null {
   const [items, setItems] = useState<WorkspaceTerminal[]>([]);
   const [error, setError] = useState("");
@@ -33,8 +33,8 @@ export function TerminalCatalog(): React.JSX.Element | null {
     <div className="terminal-catalog">
       <h3>Open terminals</h3>
       <p>
-        Terminals stay with their workspace when a chat is archived or deleted. Close them before
-        removing a worktree.
+        Close workspace terminals before removing a worktree. Agent terminals are attached to their
+        session.
       </p>
       {error && (
         <p className="file-error" role="alert">

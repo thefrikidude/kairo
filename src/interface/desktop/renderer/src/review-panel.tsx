@@ -1,7 +1,6 @@
 import React, { memo, useEffect, useMemo, useState } from "react";
 import { VirtualRows } from "./virtual-rows.js";
 import parseDiff from "parse-diff";
-import type { Task } from "../../shared/api.js";
 import type {
   ReviewScope,
   WorkspaceReview,
@@ -124,7 +123,6 @@ export default memo(function ReviewPanel({
   scope,
   canReviewTask,
   revision,
-  task,
   onScope,
   onOpenFile,
 }: {
@@ -134,7 +132,6 @@ export default memo(function ReviewPanel({
   scope: ReviewScope;
   canReviewTask: boolean;
   revision: number;
-  task?: Task;
   onScope(scope: ReviewScope): void;
   onOpenFile(path: string): void;
 }): React.JSX.Element {
@@ -187,21 +184,6 @@ export default memo(function ReviewPanel({
           {overview?.baseCommit ? ` · ${overview.baseCommit.slice(0, 8)}` : ""}
         </small>
       </div>
-      {task && (
-        <details className="review-evidence">
-          <summary>Agent result · {task.status.replaceAll("_", " ")}</summary>
-          <p>{task.summary || task.error || task.prompt}</p>
-          <p className={task.verificationPassed ? "addition-count" : ""}>
-            {task.verificationPassed
-              ? "Verification passed"
-              : task.verificationPassed === false
-                ? "Verification failed"
-                : "Verification has not been confirmed"}
-          </p>
-          {task.verificationCommand && <code>{task.verificationCommand}</code>}
-          {task.verificationOutput && <pre>{task.verificationOutput}</pre>}
-        </details>
-      )}
       {!overview && !error && (
         <p className="empty-small" role="status">
           Loading changes…
