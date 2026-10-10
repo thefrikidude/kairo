@@ -1,3 +1,4 @@
+import { TerminalCatalog } from "./terminal-catalog.js";
 import { UsageFooter } from "./usage-footer.js";
 import { UserInputCard } from "./user-input-card.js";
 import React, {
@@ -22,6 +23,7 @@ import type { SessionRuntime } from "../../../../domain/agent-runtime.js";
 import type { ModelSelection, Message, TaskEvent } from "../../../../domain/models.js";
 
 const ReviewPanel = lazy(() => import("./review-panel.js"));
+const TerminalPanel = lazy(() => import("./terminal-panel.js"));
 const FileBrowser = lazy(() => import("./file-browser.js"));
 
 const EMPTY_BUFFERS: Record<string, EditorBuffer> = {};
@@ -154,6 +156,20 @@ export function DesktopApp(): React.JSX.Element {
       ? (activeSession.runtime.codexMode ?? codexModes[activeSession.id] ?? "default")
       : "default";
   const [commandIndex, setCommandIndex] = useState(0);
+  const [terminalOpened, setTerminalOpened] = useState(false);
+  const [terminalVisible, setTerminalVisible] = useState<Record<string, boolean>>({});
+  const toggleTerminal = useCallback(() => {
+    if (!activeSession?.workspaceId) return;
+    setTerminalOpened(true);
+    setTerminalVisible((all) => ({
+      ...all,
+      [activeSession.workspaceId]: !all[activeSession.workspaceId],
+    }));
+  }, [activeSession?.workspaceId]);
+  const hideTerminal = useCallback(() => {
+    if (activeSession?.workspaceId)
+      setTerminalVisible((all) => ({ ...all, [activeSession.workspaceId]: false }));
+  }, [activeSession?.workspaceId]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [contextTab, setContextTab] = useState<"files" | "changes">("changes");
   const [contextWidth, setContextWidth] = useState(() => {
@@ -737,6 +753,11 @@ export function DesktopApp(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.code === "Backquote" && !event.altKey) {
+        event.preventDefault();
+        toggleTerminal();
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
         if (event.key.toLowerCase() === "e" || event.key.toLowerCase() === "d") {
           event.preventDefault();
@@ -753,6 +774,7 @@ export function DesktopApp(): React.JSX.Element {
         }
       }
       if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest(".terminal-panel")) return;
       if (archiveDeleteBusy) return;
       if (renameSessionId) {
         if (!renameBusy) setRenameSessionId(undefined);
@@ -771,6 +793,7 @@ export function DesktopApp(): React.JSX.Element {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    toggleTerminal,
     settingsOpen,
     renameSessionId,
     renameBusy,
@@ -1409,6 +1432,7 @@ export function DesktopApp(): React.JSX.Element {
         )}
         {settingsSection === "workspaces" && (
           <section className="settings-card workspace-catalog">
+            <TerminalCatalog />
             <p>
               Workspaces own files and Git state. Chats keep their conversations. Archive a
               workspace's chats before removing its worktree.
@@ -1812,6 +1836,18 @@ export function DesktopApp(): React.JSX.Element {
             </span>
           </div>
           <div className="top-actions">
+            <button
+              className={`review-toggle ${activeSession && terminalVisible[activeSession.workspaceId] ? "selected" : ""}`}
+              disabled={!activeSession}
+              aria-label="Toggle terminal"
+              aria-controls="terminal-panel"
+              aria-expanded={Boolean(activeSession && terminalVisible[activeSession.workspaceId])}
+              title="Terminal (Cmd/Ctrl+`)"
+              onClick={toggleTerminal}
+            >
+              <span aria-hidden="true">›_</span>
+              <span>Terminal</span>
+            </button>
             <button
               className={`review-toggle ${reviewOpen && contextTab === "files" ? "selected" : ""}`}
               disabled={!activeSession}
@@ -2260,6 +2296,15 @@ export function DesktopApp(): React.JSX.Element {
               </div>
             </div>
           </>
+        )}
+        {terminalOpened && activeSession && (
+          <Suspense fallback={<div className="terminal-empty">Loading terminal…</div>}>
+            <TerminalPanel
+              workspaceId={activeSession.workspaceId}
+              visible={Boolean(terminalVisible[activeSession.workspaceId])}
+              onHide={hideTerminal}
+            />
+          </Suspense>
         )}
       </main>
 

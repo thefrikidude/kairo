@@ -48,8 +48,13 @@ app.on("browser-window-created", (_event, window) => {
     if (event.level === "error") failures.push(event.message);
   });
   window.webContents.once("did-finish-load", () => {
-    void run().catch((error) => {
+    void run().catch(async (error) => {
       console.error(error);
+      await capture("failure.png").catch(() => {});
+      console.error(
+        "Terminal diagnostics:",
+        await evaluate("window.kairo.listTerminals()").catch(() => []),
+      );
       app.on("quit", () => process.exit(1));
       app.quit();
     });
@@ -60,6 +65,7 @@ async function run() {
   const startupMs = performance.now() - started;
   if (process.env.KAIRO_SMOKE_RESTART === "1") {
     const saved = await evaluate("window.kairo.bootstrap()");
+    assert.deepEqual(await evaluate("window.kairo.listTerminals()"), []);
     assert.ok(saved.sessions.some((session) => session.title === "Renamed task"));
     const workspace = saved.workspaces.find((item) => item.managed && !item.removedAt);
     assert.ok(workspace?.baseCommit);
@@ -306,6 +312,91 @@ async function run() {
   await waitFor("document.querySelector('.app-shell')?.dataset.theme === 'light'");
   await sleep(150);
   await capture("desktop-light.png");
+  // Exercise the lazy native terminal through the real renderer/preload/backend bridge.
+  assert.equal(await evaluate("!!document.querySelector('.terminal-panel')"), false);
+  await click("button[aria-label='Toggle terminal']");
+  await waitFor("document.querySelector('.terminal-panel:not([hidden]) .xterm-helper-textarea')");
+  const rootTerminal = (await evaluate("window.kairo.listTerminals()"))[0];
+  assert.equal(rootTerminal.directory, process.env.KAIRO_SMOKE_PROJECT);
+  await waitFor(
+    `window.kairo.attachTerminal(${JSON.stringify(rootTerminal.id)}).then(value => value.buffer.length > 0)`,
+  );
+  await sleep(300);
+  await evaluate(
+    "document.querySelector('.terminal-panel:not([hidden]) .terminal-view:not([hidden]) .xterm-helper-textarea').focus()",
+  );
+  for (const character of "printf '\\033[32mTERMINAL_INPUT_OK\\033[0m\\n'; pwd")
+    win.webContents.sendInputEvent({ type: "char", keyCode: character });
+  win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+  win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+  await waitFor(
+    `window.kairo.attachTerminal(${JSON.stringify(rootTerminal.id)}).then(value => value.buffer.includes("\\u001b[32mTERMINAL_INPUT_OK\\u001b[0m"))`,
+  );
+  const rootSnapshot = await evaluate(
+    `window.kairo.attachTerminal(${JSON.stringify(rootTerminal.id)})`,
+  );
+  assert.ok(rootSnapshot.buffer.includes("\x1b[32mTERMINAL_INPUT_OK\x1b[0m"));
+  assert.ok(rootSnapshot.buffer.includes(process.env.KAIRO_SMOKE_PROJECT));
+  await sleep(100);
+  await capture("terminal-input.png");
+  await click("button[aria-label='Hide terminal']");
+  assert.equal(await evaluate("document.querySelector('.terminal-panel').hidden"), true);
+  await click("button[aria-label='Toggle terminal']");
+  await waitFor("document.querySelector('.terminal-panel:not([hidden])')");
+  assert.equal((await evaluate("window.kairo.listTerminals()"))[0].id, rootTerminal.id);
+  await click("button[aria-label='New terminal']");
+  await waitFor("document.querySelectorAll('.terminal-tab').length === 2");
+  const heightBefore = await evaluate(
+    "Number(document.querySelector('[aria-label=\"Resize terminal\"]').getAttribute('aria-valuenow'))",
+  );
+  await evaluate(
+    "document.querySelector('[aria-label=\"Resize terminal\"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))",
+  );
+  assert.equal(
+    await evaluate(
+      "Number(document.querySelector('[aria-label=\"Resize terminal\"]').getAttribute('aria-valuenow'))",
+    ),
+    heightBefore + 20,
+  );
+  await capture("terminal-light.png");
+  await click(`[data-session-id="${isolatedSession.id}"] .session`);
+  await waitFor(
+    `document.querySelector('.session-row.selected').dataset.sessionId === ${JSON.stringify(isolatedSession.id)}`,
+  );
+  assert.equal(await evaluate("document.querySelector('.terminal-panel').hidden"), true);
+  await click("button[aria-label='Toggle terminal']");
+  await waitFor("document.querySelector('.terminal-panel:not([hidden]) .terminal-tab')");
+  const terminals = await evaluate("window.kairo.listTerminals()");
+  assert.equal(terminals.length, 3);
+  assert.ok(
+    terminals.some(
+      (item) =>
+        item.workspaceId === isolatedWorkspace.id && item.directory === isolatedWorkspace.directory,
+    ),
+  );
+  const terminalFooter = await evaluate(
+    "(() => { const r = document.querySelector('.agent-usage-footer').getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: innerHeight }; })()",
+  );
+  assert.ok(terminalFooter.top >= 0 && terminalFooter.bottom <= terminalFooter.height);
+  await capture("terminal-worktree.png");
+  await click("button[aria-label='Close terminal 1']");
+  await waitFor("document.querySelectorAll('.terminal-tab').length === 0");
+  await writeFile(
+    join(process.env.KAIRO_SMOKE_OUTPUT, "terminal-pids.json"),
+    JSON.stringify(terminals.map((item) => item.pid)),
+  );
+  await click(".settings-link");
+  await evaluate(
+    "Array.from(document.querySelectorAll('.settings-nav')).find(item => item.textContent === 'Workspaces').click()",
+  );
+  await waitFor(
+    "document.querySelectorAll('.terminal-catalog .workspace-catalog-row').length === 2",
+  );
+  await click(".terminal-catalog .workspace-catalog-row button");
+  await waitFor(
+    "document.querySelectorAll('.terminal-catalog .workspace-catalog-row').length === 1",
+  );
+  await capture("terminal-catalog.png");
   assert.deepEqual(failures, []);
   const metrics = {
     startupMs: Math.round(startupMs),

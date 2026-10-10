@@ -1,6 +1,6 @@
 <img width="1916" height="942" alt="Screenshot 2026-10-02 at 2 30 56 PM" src="https://github.com/user-attachments/assets/ece583de-8282-499a-bd8d-4f5d1c658463" />
 
-Kairo is a desktop workspace for coding agents working on local repositories. Run multiple user-managed native chat sessions, inspect their activity, and review workspace files and diffs. There is no embedded terminal UI.
+Kairo is a desktop workspace for coding agents working on local repositories. Run multiple user-managed native chat sessions, inspect their activity, and review workspace files and diffs. An optional workspace terminal stays hidden until needed.
 
 ## Two ways to work
 
@@ -36,9 +36,11 @@ Use the project selector above the conversation to switch projects. **New agent 
 
 The contextual panel stays hidden until opened; drag its left edge to resize it, or focus that edge and use the arrow keys. File lists and patches render a bounded window of rows as you scroll. Syntax highlighting uses selected [highlight.js grammars](https://highlightjs.org/); OpenCode file navigation follows [ACP tool locations](https://agentclientprotocol.com/protocol/v1/tool-calls#following-the-agent).
 
-Keyboard shortcuts: **Cmd/Ctrl+Shift+E** opens Files, **Cmd/Ctrl+Shift+D** opens Changes, and **Cmd/Ctrl+Shift+B** toggles the sidebar. **Escape** closes the active dialog or contextual panel before cancelling a running task.
+**Terminal** opens a collapsible bottom panel in the current workspace. Tabs retain their shells across chat and project switches; hiding the panel keeps commands running. Use **+** for another tab, **×** to stop a shell and its attached child processes, and the top edge to resize the panel. Terminals are ephemeral and stop when Kairo quits. **Settings → Workspaces** can close terminals even after their chats have been deleted. Manual shell input uses a separate native PTY service; Codex and OpenCode continue using their official protocols.
 
-The optional PTY terminal and final UX/performance verification are the next increments. See [the audit and implementation plan](docs/product-workspace-plan.md).
+Keyboard shortcuts: **Cmd/Ctrl+Shift+E** opens Files, **Cmd/Ctrl+Shift+D** opens Changes, and **Cmd/Ctrl+Shift+B** toggles the sidebar. **Cmd/Ctrl+`** toggles Terminal. **Escape** closes the active dialog or contextual panel before cancelling a running task. Escape inside Terminal is passed to the shell.
+
+Final UX/accessibility polish and complete-workflow/performance verification remain in progress. See [the audit and implementation plan](docs/product-workspace-plan.md).
 
 ### Codex commands
 

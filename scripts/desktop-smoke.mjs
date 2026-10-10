@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, rm, realpath } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { SqliteSessionStore } from "../dist/infrastructure/persistence/sqlite-session-store.js";
@@ -82,6 +82,19 @@ async function launch(restart = false) {
 }
 try {
   const code = await launch();
+  if (!code) {
+    const pids = JSON.parse(await readFile(join(output, "terminal-pids.json"), "utf8"));
+    for (const pid of pids) {
+      let alive = true;
+      try {
+        process.kill(pid, 0);
+      } catch (error) {
+        if (error.code === "ESRCH") alive = false;
+        else throw error;
+      }
+      if (alive) throw new Error(`Terminal ${pid} survived application shutdown.`);
+    }
+  }
   process.exitCode = code || (await launch(true));
 } finally {
   await rm(root, { recursive: true, force: true });
