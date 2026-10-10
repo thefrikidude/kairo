@@ -2,6 +2,7 @@ import type {
   TerminalAgentInfo,
   TerminalSession,
   NativeAgentSession,
+  SessionStartMode,
 } from "../../../domain/terminal-agent.js";
 import type {
   TaskWorkspace,
@@ -27,6 +28,7 @@ export type {
   TerminalAgentInfo,
   TerminalSession,
   NativeAgentSession,
+  SessionStartMode,
   TaskWorkspace,
   GitWorktree,
   WorkspaceSelection,
@@ -48,6 +50,7 @@ export type TerminalDesktopBootstrap = {
   activeSessionId?: string;
   activeWorkspaceId?: string;
   sessionErrors: Record<string, string>;
+  sessionNotices: Record<string, string>;
 };
 export interface TerminalDesktopApi {
   bootstrap(): Promise<TerminalDesktopBootstrap>;
@@ -60,7 +63,7 @@ export interface TerminalDesktopApi {
     workspace: string,
     selection?: WorkspaceSelection,
   ): Promise<TerminalDesktopBootstrap>;
-  startSession(id: string): Promise<TerminalDesktopBootstrap>;
+  startSession(id: string, mode?: SessionStartMode): Promise<TerminalDesktopBootstrap>;
   stopSession(id: string): Promise<TerminalDesktopBootstrap>;
   setNativeSession(
     id: string,

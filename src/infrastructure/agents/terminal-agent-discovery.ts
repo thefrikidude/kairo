@@ -13,6 +13,7 @@ import {
   agentDefinition,
   canResumeAgent,
   nativeResumeArgs,
+  nativePickerArgs,
   terminalAgentCatalog,
 } from "./terminal-agent-catalog.js";
 
@@ -121,6 +122,7 @@ export class TerminalAgentDiscovery {
         installed,
         executable: installed ? executable : undefined,
         resumable: canResumeAgent(agent.id),
+        resumePicker: !!nativePickerArgs(agent.id),
         unavailableReason: installed
           ? undefined
           : missing.length
@@ -133,13 +135,25 @@ export class TerminalAgentDiscovery {
     id: string,
     sessionId: string,
     nativeSession?: NativeAgentSession,
+    picker = false,
+    directory?: string,
   ): Promise<TerminalLaunch> {
     const definition = agentDefinition(id);
     const detected = (await this.refresh()).find((agent) => agent.id === id)!;
     if (!detected.installed || !detected.executable) throw new Error(detected.unavailableReason);
+    const recovery = picker
+      ? nativePickerArgs(id)
+      : nativeSession
+        ? nativeResumeArgs(id, nativeSession)
+        : [];
+    if (!recovery) throw new Error("This agent needs an exact native session ID to resume.");
     return {
       executable: detected.executable,
-      args: [...definition.args, ...(nativeSession ? nativeResumeArgs(id, nativeSession) : [])],
+      args: [
+        ...definition.args,
+        ...recovery,
+        ...(id === "codex" && directory ? ["--cd", directory] : []),
+      ],
       env: { ...definition.env, PATH: await this.environmentPath() },
       title: definition.name,
       sessionId,

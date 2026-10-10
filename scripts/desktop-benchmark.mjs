@@ -69,6 +69,8 @@ try {
           PATH: bin + delimiter + process.env.PATH,
           SHELL: "/bin/sh",
           KAIRO_FIXTURE_HISTORY: history,
+          CODEX_HOME: join(root, "codex"),
+          KAIRO_FIXTURE_NATIVE_HOME: join(root, "codex"),
           KAIRO_STATE_DIR: state,
           KAIRO_BENCH_SAMPLE: file,
         },

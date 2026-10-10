@@ -28,10 +28,12 @@ test("terminal migration deletes legacy chat data once and preserves workspace o
     store.rename(session.id, "Fix the bug");
     store.setNativeSession(session.id, { id: "native-123" });
     store.setActiveSession(session.id);
+    store.markStarted(session.id, 1234567890000);
     store.close();
     store = await SqliteTerminalSessionStore.open(path);
     assert.equal(store.list().length, 1);
     assert.equal(store.get(session.id)!.title, "Fix the bug");
+    assert.equal(store.get(session.id)!.lastStartedAt, 1234567890000);
     assert.equal(store.get(session.id)!.nativeSession!.id, "native-123");
     assert.equal(store.activeSessionId(), session.id);
     assert.equal(store.activeWorkspaceId(), workspace.id);

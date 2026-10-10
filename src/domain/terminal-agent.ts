@@ -14,6 +14,7 @@ export type TerminalAgentInfo = TerminalAgentDefinition & {
   executable?: string;
   unavailableReason?: string;
   resumable: boolean;
+  resumePicker?: boolean;
 };
 export type TerminalSession = {
   id: string;
@@ -22,6 +23,7 @@ export type TerminalSession = {
   title: string;
   createdAt: number;
   updatedAt: number;
+  lastStartedAt?: number;
   archivedAt?: number;
   nativeSession?: NativeAgentSession;
 };
@@ -32,3 +34,5 @@ export type TerminalLaunch = {
   title: string;
   sessionId?: string;
 };
+
+export type SessionStartMode = "auto" | "fresh" | "picker";

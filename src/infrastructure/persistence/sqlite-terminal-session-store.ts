@@ -26,6 +26,12 @@ export class SqliteTerminalSessionStore {
         );
         CREATE INDEX IF NOT EXISTS terminal_sessions_workspace ON terminal_sessions(workspace_id);
         CREATE TABLE IF NOT EXISTS desktop_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+      if (
+        !(db.prepare("PRAGMA table_info(terminal_sessions)").all() as { name: string }[]).some(
+          (column) => column.name === "last_started_at",
+        )
+      )
+        db.exec("ALTER TABLE terminal_sessions ADD COLUMN last_started_at INTEGER");
       // Explicitly requested reset. Runs once; never deletes terminal sessions or worktrees.
       if (!db.prepare("SELECT 1 FROM desktop_migrations WHERE name=?").get("terminal-desktop-v1")) {
         db.transaction(() => {
@@ -174,6 +180,7 @@ export class SqliteTerminalSessionStore {
       title: String(row.title),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
+      lastStartedAt: row.last_started_at == null ? undefined : Number(row.last_started_at),
       archivedAt: row.archived_at == null ? undefined : Number(row.archived_at),
       nativeSession:
         row.native_session_json == null
@@ -206,6 +213,16 @@ export class SqliteTerminalSessionStore {
     if (!session || this.workspace(session.workspaceId)?.removedAt)
       throw new Error("This session's workspace is unavailable.");
     this.update(id, "archived_at", null);
+  }
+  markStarted(id: string, at: number): void {
+    if (
+      this.db.prepare("UPDATE terminal_sessions SET last_started_at=? WHERE id=?").run(at, id)
+        .changes !== 1
+    )
+      throw new Error("Session not found.");
+  }
+  clearNativeSession(id: string): void {
+    this.update(id, "native_session_json", null);
   }
   setNativeSession(id: string, value: NativeAgentSession): void {
     this.update(id, "native_session_json", JSON.stringify(normalizeNativeSession(value)));

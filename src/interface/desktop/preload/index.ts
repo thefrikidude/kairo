@@ -18,7 +18,7 @@ const api: DesktopApi = {
   openSession: (id) => invoke("session:open", id),
   newSession: (agentId, workspace, selection) =>
     invoke("session:new", agentId, workspace, selection),
-  startSession: (id) => invoke("session:start", id),
+  startSession: (id, mode) => invoke("session:start", id, mode),
   stopSession: (id) => invoke("session:stop", id),
   setNativeSession: (id, nativeSession) => invoke("session:native", id, nativeSession),
   renameSession: (id, title) => invoke("session:rename", id, title),

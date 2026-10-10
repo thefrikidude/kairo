@@ -3051,3 +3051,14 @@ button svg {
     white-space: nowrap;
   }
 }
+.agent-session-toolbar {
+  flex-wrap: wrap;
+}
+.agent-session-toolbar > div {
+  flex-wrap: wrap;
+}
+.agent-session-notice {
+  margin: 4px 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}

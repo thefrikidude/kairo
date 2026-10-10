@@ -387,3 +387,10 @@ export function nativeResumeArgs(id: string, value: NativeAgentSession): string[
   const target = ["pi", "prime-agent"].includes(id) ? session.transcriptPath! : session.id;
   return id === "copilot" ? [`--resume=${target}`] : [...flags, target];
 }
+
+/** Known CLI-native conversation pickers, without a global last-session shortcut. */
+export function nativePickerArgs(id: string): string[] | undefined {
+  if (id === "codex") return ["resume"];
+  if (id === "claude" || id === "claude-agent-teams") return ["--resume"];
+  return undefined;
+}

@@ -830,14 +830,42 @@ export function DesktopApp(): React.JSX.Element {
                 >
                   Resume ID
                 </button>
+                {!currentTerminal && (
+                  <button
+                    disabled={pending || !!workspace?.removedAt}
+                    onClick={() =>
+                      setConfirm({
+                        title: "Start a fresh conversation?",
+                        description:
+                          "Open a new CLI conversation in this workspace. The agent's previous history remains available in its own session browser.",
+                        action: () => window.kairo.startSession(current.id, "fresh").then(apply),
+                      })
+                    }
+                  >
+                    Start fresh
+                  </button>
+                )}
+                {!currentTerminal && currentAgent?.resumePicker && (
+                  <button
+                    disabled={pending || !!workspace?.removedAt}
+                    onClick={() =>
+                      void action(() => window.kairo.startSession(current.id, "picker"))
+                    }
+                  >
+                    Choose conversation
+                  </button>
+                )}
               </div>
             </div>
           )}
-          {current && !current.nativeSession && !currentTerminal && (
-            <p className="agent-session-notice">
-              {currentAgent?.resumable
-                ? "Add the agent’s native session ID to resume a specific conversation. Without an ID, the CLI opens a new conversation."
-                : "This agent does not support native resume. Reopening starts a fresh conversation in the same workspace."}
+          {current && state?.sessionNotices[current.id] && (
+            <p className="agent-session-notice" role="status">
+              {state.sessionNotices[current.id]}
+            </p>
+          )}
+          {current?.nativeSession && (
+            <p className="agent-session-notice" title={current.nativeSession.id}>
+              Saved conversation · {current.nativeSession.id}
             </p>
           )}
           {current && state?.sessionErrors[current.id] && (

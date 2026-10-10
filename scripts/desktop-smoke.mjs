@@ -45,6 +45,8 @@ async function launch(restart) {
         SHELL: "/bin/sh",
         KAIRO_STATE_DIR: state,
         KAIRO_FIXTURE_HISTORY: history,
+        CODEX_HOME: join(root, "codex"),
+        KAIRO_FIXTURE_NATIVE_HOME: join(root, "codex"),
         KAIRO_SMOKE_OUTPUT: output,
         KAIRO_SMOKE_PROJECT: project,
         KAIRO_SMOKE_FIRST: first.id,

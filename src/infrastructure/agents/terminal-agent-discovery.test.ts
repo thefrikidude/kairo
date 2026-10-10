@@ -62,3 +62,28 @@ test("resume targets remain exact and invalid IDs or missing transcript locators
     ),
   );
 });
+
+test("CLI-native pickers are explicit and never use a global last-session shortcut", async () => {
+  const home = await mkdtemp(join(tmpdir(), "kairo-cli-picker-")),
+    bin = join(home, "bin");
+  await mkdir(bin);
+  await writeFile(join(bin, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  try {
+    const discovery = new TerminalAgentDiscovery({ path: bin, home });
+    const launch = await discovery.launch(
+      "codex",
+      "kairo-session",
+      undefined,
+      true,
+      "/tmp/workspace with spaces",
+    );
+    assert.deepEqual(launch.args, ["resume", "--cd", "/tmp/workspace with spaces"]);
+    assert.ok(!launch.args.includes("--last"));
+    assert.equal(
+      (await discovery.refresh()).find((agent) => agent.id === "codex")!.resumePicker,
+      true,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

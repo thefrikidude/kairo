@@ -1,3 +1,8 @@
+import {
+  NativeSessionReader,
+  freshNativeCandidates,
+  type NativeSessionLookup,
+} from "../../../infrastructure/agents/native-session-reader.js";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { GitWorkspaces } from "../../../infrastructure/repository/git-workspaces.js";
@@ -7,6 +12,8 @@ import { WorkspaceTerminals } from "../../../infrastructure/terminal/workspace-t
 import {
   agentDefinition,
   normalizeNativeSession,
+  canResumeAgent,
+  nativePickerArgs,
 } from "../../../infrastructure/agents/terminal-agent-catalog.js";
 import { WorkspaceFiles } from "../../../infrastructure/tools/workspace-files.js";
 import {
@@ -14,7 +21,11 @@ import {
   changedFileReview,
   type ReviewScope,
 } from "../../../infrastructure/tools/workspace-review.js";
-import type { TerminalSession, TerminalAgentInfo } from "../../../domain/terminal-agent.js";
+import type {
+  TerminalSession,
+  TerminalAgentInfo,
+  SessionStartMode,
+} from "../../../domain/terminal-agent.js";
 import type { WorkspaceSelection } from "../../../domain/task-workspace.js";
 import type { TerminalDesktopBootstrap } from "../shared/terminal-api.js";
 
@@ -37,10 +48,19 @@ export async function createTerminalDesktopRuntime(
     agents?: Pick<TerminalAgentDiscovery, "refresh" | "launch">;
     worktrees?: GitWorkspaces;
     terminals?: WorkspaceTerminals;
+    nativeReader?: NativeSessionReader;
   } = {},
 ) {
   const store = options.store ?? (await SqliteTerminalSessionStore.open());
   const agents = options.agents ?? new TerminalAgentDiscovery();
+  const nativeReader = options.nativeReader ?? new NativeSessionReader();
+  const captures = new Map<
+    string,
+    { lookup: NativeSessionLookup; baseline: Map<string, number> }
+  >();
+  const sessionNotices: Record<string, string> = {};
+  let capturePromise: Promise<void> | undefined;
+  let nativeTimer: ReturnType<typeof setInterval> | undefined;
   const git = options.worktrees ?? new GitWorkspaces();
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -104,33 +124,123 @@ export async function createTerminalDesktopRuntime(
         ? store.get(activeSessionId)!.workspaceId
         : store.activeWorkspaceId(),
       sessionErrors: { ...sessionErrors },
+      sessionNotices: { ...sessionNotices },
     };
   }
-  async function start(id: string): Promise<void> {
+  async function captureNative(): Promise<void> {
+    if (capturePromise) return capturePromise;
+    const pending = (async () => {
+      for (const [id, entry] of captures) {
+        const records = await nativeReader.list(entry.lookup);
+        if (captures.get(id) !== entry || !store.get(id)) continue;
+        const candidates = freshNativeCandidates(
+          records,
+          entry.baseline,
+          entry.lookup.includeExisting,
+        );
+        if (candidates.length > 1) {
+          const notice =
+            "More than one native conversation changed in this workspace. Save an exact Resume ID before reopening.";
+          if (sessionNotices[id] !== notice) {
+            store.clearNativeSession(id);
+            sessionNotices[id] = notice;
+            emit("sessions:changed", undefined);
+          }
+          continue;
+        }
+        const candidate = candidates[0];
+        if (!candidate) continue;
+        const previous = store.get(id)!.nativeSession;
+        if (previous?.id !== candidate.id || previous.transcriptPath !== candidate.transcriptPath) {
+          store.setNativeSession(id, candidate);
+          sessionNotices[id] = "Native conversation saved. Reopening resumes this exact session.";
+          emit("sessions:changed", undefined);
+        }
+        entry.baseline.set(candidate.id, candidate.updatedAt);
+      }
+    })();
+    capturePromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (capturePromise === pending) capturePromise = undefined;
+    }
+  }
+  async function start(id: string, mode: SessionStartMode = "auto"): Promise<void> {
     const pending = starts.get(id);
     if (pending) return pending;
     const launching = (async () => {
-      const current = session(id);
+      let current = session(id);
       if (current.archivedAt) throw new Error("Restore this session before opening its terminal.");
       const target = workspace(current.workspaceId);
       const existing = terminals.list().find((terminal) => terminal.sessionId === id);
       if (existing?.state === "running") return;
-      if (existing) await terminals.closeTerminal(existing.id);
+      if (existing) {
+        await captureNative();
+        await terminals.closeTerminal(existing.id);
+        await captureNative();
+        current = session(id);
+      }
       const root = await git.executionRoot(target.directory);
-      const owner = checkoutOwners.get(root);
-      if (owner && owner !== id)
+      const owner = [...checkoutOwners].find(
+        ([directory, ownerId]) => ownerId !== id && overlaps(directory, root),
+      )?.[1];
+      if (owner)
         throw new Error(
-          "Another agent terminal is open in this checkout. Stop it or create an isolated worktree.",
+          "Another agent terminal is open in an overlapping workspace. Stop it or create an isolated worktree.",
         );
       checkoutOwners.set(root, id);
       try {
-        const launch = await agents.launch(current.agentId, current.id, current.nativeSession);
+        const recovering = mode !== "fresh" && !!current.lastStartedAt;
+        const picker =
+          mode === "picker" ||
+          (recovering && !current.nativeSession && !!nativePickerArgs(current.agentId));
+        if (mode === "picker" && !nativePickerArgs(current.agentId))
+          throw new Error("Save this agent's exact native session ID to resume it.");
+        if (recovering && !current.nativeSession && canResumeAgent(current.agentId) && !picker)
+          throw new Error(
+            "This agent supports resume, but its native session ID is missing. Save a Resume ID, or choose Start fresh.",
+          );
+        const launch = await agents.launch(
+          current.agentId,
+          current.id,
+          mode === "fresh" || picker ? undefined : current.nativeSession,
+          picker,
+          target.directory,
+        );
+        const since = Date.now();
+        const lookup: NativeSessionLookup = {
+          agentId: current.agentId,
+          directory: target.directory,
+          since,
+          includeExisting: picker,
+          env: launch.env,
+        };
+        if (nativeReader.supports(current.agentId)) {
+          const baseline = new Map(
+            (await nativeReader.list(lookup)).map((entry) => [entry.id, entry.updatedAt]),
+          );
+          captures.set(id, { lookup, baseline });
+        }
         if (closed) throw new Error("Kairo is shutting down.");
         const terminal = await terminals.createAgent(target.id, target.directory, launch);
         rootsByTerminal.set(terminal.id, { root, sessionId: id });
+        if (mode === "fresh" || picker) store.clearNativeSession(id);
+        store.markStarted(id, since);
+        sessionNotices[id] = picker
+          ? "Choose a conversation in the agent's native resume picker."
+          : current.nativeSession && mode !== "fresh"
+            ? "Resumed the saved native conversation."
+            : !canResumeAgent(current.agentId)
+              ? "This agent starts a fresh conversation each time. Its workspace remains saved."
+              : nativeReader.supports(current.agentId)
+                ? "Waiting for the CLI to save its native session identity…"
+                : "Save the agent's native Resume ID before restarting to continue this conversation.";
+        if (closed) throw new Error("Kairo is shutting down.");
         delete sessionErrors[id];
       } catch (error) {
         if (checkoutOwners.get(root) === id) checkoutOwners.delete(root);
+        captures.delete(id);
         sessionErrors[id] = errorText(error);
         throw error;
       }
@@ -143,10 +253,13 @@ export async function createTerminalDesktopRuntime(
     }
   }
   async function stop(id: string): Promise<void> {
+    await captureNative();
     const pending = starts.get(id);
     if (pending) await pending.catch(() => {});
     for (const terminal of terminals.list().filter((terminal) => terminal.sessionId === id))
       await terminals.closeTerminal(terminal.id);
+    await captureNative();
+    captures.delete(id);
   }
   function requireStopped(id: string): void {
     if (starts.has(id) || terminals.list().some((terminal) => terminal.sessionId === id))
@@ -167,6 +280,12 @@ export async function createTerminalDesktopRuntime(
         }
       }),
     );
+    if (!closed) {
+      nativeTimer = setInterval(() => {
+        void captureNative().catch(() => {});
+      }, 1500);
+      nativeTimer.unref();
+    }
     const active = store.activeSessionId();
     if (active && store.get(active) && !store.get(active)!.archivedAt)
       await start(active).catch((error) => {
@@ -177,12 +296,16 @@ export async function createTerminalDesktopRuntime(
     if (closePromise) return closePromise;
     closed = true;
     terminals.beginClose();
+    if (nativeTimer) clearInterval(nativeTimer);
     closePromise = (async () => {
       await ready.catch(() => {});
       await Promise.allSettled([...mutations, ...starts.values()]);
       try {
+        await captureNative();
         await terminals.close();
+        await captureNative();
       } finally {
+        captures.clear();
         store.close();
       }
     })();
@@ -228,14 +351,15 @@ export async function createTerminalDesktopRuntime(
         const target = store.registerWorkspace(description);
         const current = store.create(target.id, first);
         store.setActiveSession(current.id);
-        await start(current.id);
+        await start(current.id, "fresh");
         return snapshot();
       }
       case "session:open":
       case "session:start": {
         const current = session(first);
         store.setActiveSession(current.id);
-        await start(current.id);
+        const mode: SessionStartMode = second === "fresh" || second === "picker" ? second : "auto";
+        await start(current.id, mode);
         return snapshot();
       }
       case "session:stop": {

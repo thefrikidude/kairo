@@ -184,9 +184,18 @@ async function run() {
   await waitFor(
     `document.querySelector('.session-row.selected')?.dataset.sessionId===${JSON.stringify(second.id)}`,
   );
+  await waitFor(
+    `window.kairo.bootstrap().then(all=>!!all.sessions.find(s=>s.id===${JSON.stringify(second.id)})?.nativeSession)`,
+  );
+  const beforeStop = await state();
+  assert.equal(
+    beforeStop.sessions.find((s) => s.id === second.id).nativeSession.id,
+    (await nativeRecord(owner.directory)).id,
+  );
   await button("Stop terminal");
   await button("Confirm", "document.querySelector('dialog')");
   await waitFor("!document.querySelector('dialog[open]')");
+  await capture("terminal-recovery-controls.png");
   const record = await nativeRecord(owner.directory);
   await button("Resume ID");
   await input('[aria-label="Native session ID"]', record.id);
