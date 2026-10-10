@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { TaskWorkspace } from "../../domain/task-workspace.js";
 import Database from "better-sqlite3";
 import type { SessionRuntime } from "../../domain/agent-runtime.js";
 import { databasePath, ensureStateDir } from "../filesystem/platform-paths.js";
@@ -20,6 +22,7 @@ import type {
 export interface Session {
   id: string;
   workspace: string;
+  workspaceId: string;
   title: string;
   lastTaskStatus?: TaskStatus;
   createdAt: number;
@@ -66,6 +69,30 @@ export class SqliteSessionStore {
       db.exec("ALTER TABLE sessions ADD COLUMN external_session_id TEXT");
     if (!sessionColumns.some((column) => column.name === "title"))
       db.exec("ALTER TABLE sessions ADD COLUMN title TEXT");
+    if (!sessionColumns.some((column) => column.name === "workspace_id"))
+      db.exec("ALTER TABLE sessions ADD COLUMN workspace_id TEXT");
+    db.exec(`CREATE TABLE IF NOT EXISTS task_workspaces (
+      id TEXT PRIMARY KEY, repository_path TEXT NOT NULL, directory TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL, branch TEXT, base_commit TEXT, managed INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL, removed_at INTEGER
+    ); CREATE INDEX IF NOT EXISTS sessions_workspace_id ON sessions(workspace_id);`);
+    const legacyWorkspaces = db
+      .prepare("SELECT DISTINCT workspace FROM sessions WHERE workspace_id IS NULL")
+      .all() as { workspace: string }[];
+    db.transaction(() => {
+      for (const { workspace } of legacyWorkspaces) {
+        const id = `ws-${createHash("sha256").update(workspace).digest("hex").slice(0, 24)}`;
+        db.prepare(
+          "INSERT OR IGNORE INTO task_workspaces(id, repository_path, directory, kind, managed, created_at) VALUES (?, ?, ?, 'folder', 0, ?)",
+        ).run(id, workspace, workspace, Date.now());
+        const row = db
+          .prepare("SELECT id FROM task_workspaces WHERE directory=?")
+          .get(workspace) as { id: string };
+        db.prepare(
+          "UPDATE sessions SET workspace_id=? WHERE workspace=? AND workspace_id IS NULL",
+        ).run(row.id, workspace);
+      }
+    })();
     const messageColumns = db.prepare("SELECT name FROM pragma_table_info('messages')").all() as {
       name: string;
     }[];
@@ -273,17 +300,110 @@ export class SqliteSessionStore {
     ).map((row) => ({ ...(JSON.parse(row.event_json) as TaskEvent), id: row.id }));
   }
   /** Creates a durable session associated with one resolved workspace. */
+  /** Catalog records survive chat deletion; removing a conversation never deletes files. */
+  registerWorkspace(input: Omit<TaskWorkspace, "id" | "createdAt" | "removedAt">): TaskWorkspace {
+    const previous = this.workspaces(true).find((item) => item.directory === input.directory);
+    if (previous?.removedAt) throw new Error("This workspace was removed. Choose another folder.");
+    const workspace: TaskWorkspace = {
+      ...input,
+      id: previous?.id ?? `ws-${crypto.randomUUID()}`,
+      createdAt: previous?.createdAt ?? Date.now(),
+      managed: previous?.managed || input.managed,
+      baseCommit: previous?.baseCommit ?? input.baseCommit,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO task_workspaces(id, repository_path, directory, kind, branch, base_commit, managed, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(directory) DO UPDATE SET repository_path=excluded.repository_path, kind=excluded.kind, branch=excluded.branch, base_commit=excluded.base_commit, managed=excluded.managed`,
+      )
+      .run(
+        workspace.id,
+        workspace.repositoryPath,
+        workspace.directory,
+        workspace.kind,
+        workspace.branch ?? null,
+        workspace.baseCommit ?? null,
+        workspace.managed ? 1 : 0,
+        workspace.createdAt,
+      );
+    return workspace;
+  }
+  /** Canonicalize legacy aliases without changing physical ownership or native session identity. */
+  reconcileWorkspace(
+    id: string,
+    input: Omit<TaskWorkspace, "id" | "createdAt" | "removedAt">,
+  ): TaskWorkspace {
+    return this.db.transaction(() => {
+      const previous = this.workspace(id);
+      if (!previous || previous.removedAt) throw new Error("Workspace not found.");
+      const target = this.workspaces().find((item) => item.directory === input.directory);
+      if (target && target.id !== id) {
+        this.db
+          .prepare("UPDATE sessions SET workspace_id=?, workspace=? WHERE workspace_id=?")
+          .run(target.id, target.directory, id);
+        this.db.prepare("DELETE FROM task_workspaces WHERE id=?").run(id);
+      } else {
+        this.db
+          .prepare("UPDATE task_workspaces SET directory=? WHERE id=?")
+          .run(input.directory, id);
+        this.db
+          .prepare("UPDATE sessions SET workspace=? WHERE workspace_id=?")
+          .run(input.directory, id);
+      }
+      return this.registerWorkspace({
+        ...input,
+        managed: previous.managed || input.managed,
+        baseCommit: previous.baseCommit ?? input.baseCommit,
+      });
+    })();
+  }
+  workspace(id: string): TaskWorkspace | undefined {
+    return this.workspaces(true).find((workspace) => workspace.id === id);
+  }
+  workspaces(includeRemoved = false): TaskWorkspace[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM task_workspaces ${includeRemoved ? "" : "WHERE removed_at IS NULL"} ORDER BY created_at DESC`,
+      )
+      .all() as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: String(row.id),
+      repositoryPath: String(row.repository_path),
+      directory: String(row.directory),
+      kind: row.kind as TaskWorkspace["kind"],
+      branch: row.branch == null ? undefined : String(row.branch),
+      baseCommit: row.base_commit == null ? undefined : String(row.base_commit),
+      managed: Boolean(row.managed),
+      createdAt: Number(row.created_at),
+      removedAt: row.removed_at == null ? undefined : Number(row.removed_at),
+    }));
+  }
+  markWorkspaceRemoved(id: string): void {
+    const result = this.db
+      .prepare("UPDATE task_workspaces SET removed_at=? WHERE id=? AND removed_at IS NULL")
+      .run(Date.now(), id);
+    if (result.changes !== 1) throw new Error("Workspace not found.");
+  }
   create(workspace: string, runtime: SessionRuntime = { kind: "builtin" }): Session {
+    const ownedWorkspace =
+      this.workspaces().find((item) => item.directory === workspace) ??
+      this.registerWorkspace({
+        repositoryPath: workspace,
+        directory: workspace,
+        kind: "folder",
+        managed: false,
+      });
     const now = Date.now();
     const id = `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
     this.db
       .prepare(
-        "INSERT INTO sessions (id, workspace, created_at, updated_at, runtime_json) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO sessions (id, workspace, workspace_id, created_at, updated_at, runtime_json) VALUES (?, ?, ?, ?, ?, ?)",
       )
-      .run(id, workspace, now, now, JSON.stringify(runtime));
+      .run(id, ownedWorkspace.directory, ownedWorkspace.id, now, now, JSON.stringify(runtime));
     return {
       id,
-      workspace,
+      workspace: ownedWorkspace.directory,
+      workspaceId: ownedWorkspace.id,
       title: "New session",
       createdAt: now,
       updatedAt: now,
@@ -357,13 +477,14 @@ export class SqliteSessionStore {
   get(id: string): Session | undefined {
     const row = this.db
       .prepare(
-        "SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT status FROM tasks WHERE session_id=sessions.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_task_status, COALESCE(title, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1)) AS title FROM sessions WHERE id = ?",
+        "SELECT id, workspace_id, COALESCE((SELECT directory FROM task_workspaces WHERE id=sessions.workspace_id), workspace) AS workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT status FROM tasks WHERE session_id=sessions.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_task_status, COALESCE(title, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1)) AS title FROM sessions WHERE id = ?",
       )
       .get(id) as Record<string, unknown> | undefined;
     return (
       row && {
         id: String(row.id),
         workspace: String(row.workspace),
+        workspaceId: String(row.workspace_id),
         title: sessionTitle(row.title),
         lastTaskStatus:
           row.last_task_status == null ? undefined : (row.last_task_status as TaskStatus),
@@ -391,12 +512,13 @@ export class SqliteSessionStore {
     return (
       this.db
         .prepare(
-          `SELECT id, workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT status FROM tasks WHERE session_id=sessions.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_task_status, COALESCE(title, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1)) AS title FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
+          `SELECT id, workspace_id, COALESCE((SELECT directory FROM task_workspaces WHERE id=sessions.workspace_id), workspace) AS workspace, created_at, updated_at, permission_mode, archived_at, runtime_json, external_session_id, (SELECT status FROM tasks WHERE session_id=sessions.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_task_status, COALESCE(title, (SELECT content FROM messages WHERE session_id=sessions.id AND role='user' ORDER BY id LIMIT 1)) AS title FROM sessions WHERE archived_at IS ${archived ? "NOT " : ""}NULL ORDER BY updated_at DESC`,
         )
         .all() as Record<string, unknown>[]
     ).map((r) => ({
       id: String(r.id),
       workspace: String(r.workspace),
+      workspaceId: String(r.workspace_id),
       title: sessionTitle(r.title),
       lastTaskStatus: r.last_task_status == null ? undefined : (r.last_task_status as TaskStatus),
       createdAt: Number(r.created_at),
@@ -420,16 +542,18 @@ export class SqliteSessionStore {
   archiveWorkspace(workspace: string): string[] {
     const ids = (
       this.db
-        .prepare("SELECT id FROM sessions WHERE workspace=? AND archived_at IS NULL")
-        .all(workspace) as { id: string }[]
+        .prepare(
+          "SELECT id FROM sessions WHERE (workspace=? OR workspace_id IN (SELECT id FROM task_workspaces WHERE repository_path=?)) AND archived_at IS NULL",
+        )
+        .all(workspace, workspace) as { id: string }[]
     ).map((row) => row.id);
     const now = Date.now();
     this.db.transaction(() => {
       this.db
         .prepare(
-          "UPDATE sessions SET archived_at=?, updated_at=? WHERE workspace=? AND archived_at IS NULL",
+          "UPDATE sessions SET archived_at=?, updated_at=? WHERE (workspace=? OR workspace_id IN (SELECT id FROM task_workspaces WHERE repository_path=?)) AND archived_at IS NULL",
         )
-        .run(now, now, workspace);
+        .run(now, now, workspace, workspace);
     })();
     return ids;
   }
@@ -449,7 +573,11 @@ export class SqliteSessionStore {
   /** Permanently removes every active and archived session for one workspace. */
   deleteWorkspace(workspace: string): string[] {
     const ids = (
-      this.db.prepare("SELECT id FROM sessions WHERE workspace=?").all(workspace) as {
+      this.db
+        .prepare(
+          "SELECT id FROM sessions WHERE workspace=? OR workspace_id IN (SELECT id FROM task_workspaces WHERE repository_path=?)",
+        )
+        .all(workspace, workspace) as {
         id: string;
       }[]
     ).map((row) => row.id);

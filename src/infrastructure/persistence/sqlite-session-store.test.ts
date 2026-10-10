@@ -416,3 +416,58 @@ test("custom session names persist independently of messages, archives and resta
   assert.equal(reopened.get(session.id)?.title, "Improve review");
   assert.equal(reopened.messages(session.id).length, 2);
 });
+
+test("workspace ownership is separate from chats and survives restart and chat deletion", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-owned-workspace-"));
+  const path = join(root, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(path);
+  const workspace = store.registerWorkspace({
+    repositoryPath: "/repo",
+    directory: "/isolated",
+    kind: "worktree",
+    branch: "kairo/a",
+    baseCommit: "base",
+    managed: true,
+  });
+  const a = store.create(workspace.directory);
+  const b = store.create(workspace.directory, { kind: "external", agentId: "codex" });
+  store.addMessage(a.id, { role: "user", content: "A conversation", createdAt: 1 });
+  assert.equal(a.workspaceId, workspace.id);
+  assert.equal(b.workspaceId, workspace.id);
+  store.delete(b.id);
+  assert.equal(store.workspace(workspace.id)?.directory, "/isolated");
+  store.close();
+  const reopened = await SqliteSessionStore.open(path);
+  t.after(() => reopened.close());
+  assert.equal(reopened.get(a.id)?.workspaceId, workspace.id);
+  assert.equal(reopened.workspace(workspace.id)?.baseCommit, "base");
+  assert.equal(reopened.messages(a.id)[0].content, "A conversation");
+  assert.deepEqual(reopened.archiveWorkspace("/repo"), [a.id]);
+  reopened.markWorkspaceRemoved(workspace.id);
+  assert.equal(reopened.workspaces().length, 0);
+  assert.ok(reopened.workspace(workspace.id)?.removedAt);
+  assert.equal(reopened.listArchived()[0].workspaceId, workspace.id);
+});
+
+test("canonical workspace reconciliation keeps native conversation identity and merges aliases", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-workspace-alias-"));
+  const store = await SqliteSessionStore.open(join(root, "sessions.sqlite"));
+  t.after(() => store.close());
+  const a = store.create("/alias/project", { kind: "external", agentId: "codex" });
+  store.setExternalSessionId(a.id, "native-conversation");
+  store.addMessage(a.id, { role: "user", content: "keep history", createdAt: 1 });
+  const b = store.create("/canonical/project");
+  const canonical = store.reconcileWorkspace(a.workspaceId, {
+    repositoryPath: "/canonical/project",
+    directory: "/canonical/project",
+    kind: "checkout",
+    branch: "main",
+    managed: false,
+  });
+  assert.equal(canonical.id, b.workspaceId);
+  assert.equal(store.get(a.id)?.workspace, "/canonical/project");
+  assert.equal(store.get(a.id)?.workspaceId, b.workspaceId);
+  assert.equal(store.get(a.id)?.externalSessionId, "native-conversation");
+  assert.equal(store.messages(a.id)[0].content, "keep history");
+  assert.equal(store.workspaces().length, 1);
+});
