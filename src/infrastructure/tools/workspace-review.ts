@@ -27,7 +27,7 @@ async function gitOutput(
     return (
       await execute(git, args, {
         cwd: workspace,
-        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_LITERAL_PATHSPECS: "1" },
         encoding: "utf8",
         windowsHide: true,
         timeout: 5_000,
@@ -134,13 +134,21 @@ async function safePath(workspace: string, path: string): Promise<void> {
   const candidate = resolve(workspace, path);
   if (!within(workspace, candidate) || candidate === workspace)
     throw new Error("Path is outside the workspace.");
-  try {
-    const actual = await realpath(candidate);
-    if (!within(workspace, actual)) throw new Error("Symlink escapes the workspace.");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    const parent = await realpath(dirname(candidate));
-    if (!within(workspace, parent)) throw new Error("Parent directory escapes the workspace.");
+  let ancestor = candidate;
+  while (true) {
+    try {
+      const actual = await realpath(ancestor);
+      if (!within(workspace, actual)) throw new Error("Symlink escapes the workspace.");
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const metadata = await lstat(ancestor).catch(() => undefined);
+      if (metadata?.isSymbolicLink())
+        throw new Error("This path goes through an unavailable symlink.");
+      const parent = dirname(ancestor);
+      if (parent === ancestor) throw error;
+      ancestor = parent;
+    }
   }
 }
 
@@ -162,6 +170,7 @@ export async function changedFileReview(
       diff: "",
       unavailable: "This file has no changes in the selected review scope.",
     };
+  if (change.oldPath) await safePath(directory, change.oldPath);
   const comparison = scope === "task" && baseCommit ? baseCommit : "HEAD";
   if (comparison === "HEAD") {
     const hasHead = await gitOutput(directory, ["rev-parse", "--verify", "HEAD"]).then(

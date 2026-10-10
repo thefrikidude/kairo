@@ -79,3 +79,14 @@ test("filename search finds nested files and excludes dependency folders", async
   const files = await WorkspaceFiles.create(root);
   assert.deepEqual(await files.search("HELLO"), { paths: ["src/hello.ts"], limited: false });
 });
+
+test("atomic saves support filenames near the filesystem's name length limit", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-long-file-name-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const name = "x".repeat(250);
+  await writeFile(join(root, name), "original");
+  const files = await WorkspaceFiles.create(root);
+  const before = await files.snapshot(name);
+  await files.save(name, "edited", before.revision);
+  assert.equal(await files.read(name), "edited");
+});

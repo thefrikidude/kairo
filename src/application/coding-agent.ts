@@ -1,7 +1,7 @@
 import { ContextManager } from "./context-manager.js";
 import { FailureAnalyzer } from "./failure-analyzer.js";
 import { VerificationPlanner } from "./verification-planner.js";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { conversationSystemInstruction } from "./model-system-instruction.js";
 import { RepositoryAwareness } from "../infrastructure/repository/repository-awareness.js";
 import type {
@@ -407,7 +407,7 @@ export class CodingAgent {
         kind: "tool_started",
         operationId: call.id,
         name: call.name,
-        paths: typeof call.args.path === "string" ? [call.args.path.slice(0, 1_000)] : undefined,
+        paths: this.navigationPaths(call),
       });
       this.store.updateTask(task.id, { status: "planned", plan });
       this.event(task, {
@@ -648,7 +648,7 @@ export class CodingAgent {
       kind: "tool_started",
       operationId: call.id,
       name: call.name,
-      paths: typeof call.args.path === "string" ? [call.args.path.slice(0, 1_000)] : undefined,
+      paths: this.navigationPaths(call),
     });
     const started = performance.now();
     let result: ToolResult;
@@ -659,7 +659,7 @@ export class CodingAgent {
         kind: "tool_finished",
         operationId: call.id,
         name: call.name,
-        paths: typeof call.args.path === "string" ? [call.args.path.slice(0, 1_000)] : undefined,
+        paths: this.navigationPaths(call),
         outcome: "failed",
         durationMs: performance.now() - started,
       });
@@ -669,7 +669,7 @@ export class CodingAgent {
       kind: "tool_finished",
       operationId: call.id,
       name: call.name,
-      paths: typeof call.args.path === "string" ? [call.args.path.slice(0, 1_000)] : undefined,
+      paths: this.navigationPaths(call),
       outcome: result.ok ? "succeeded" : "failed",
       durationMs: performance.now() - started,
       exitCode: result.exitCode,
@@ -780,6 +780,24 @@ export class CodingAgent {
       createdAt: Date.now(),
     });
     return result;
+  }
+
+  /** Navigation metadata uses real file operations and complete, bounded relative paths. */
+  private navigationPaths(call: ToolCall): string[] | undefined {
+    if (
+      !["read_file", "read_file_range", "write_file", "edit_file"].includes(call.name) ||
+      typeof call.args.path !== "string"
+    )
+      return undefined;
+    const path = relative(this.tools.root, resolve(this.tools.root, call.args.path));
+    return path &&
+      path.length <= 1_000 &&
+      !path.includes("\0") &&
+      path !== ".." &&
+      !path.startsWith(`..${sep}`) &&
+      !isAbsolute(path)
+      ? [path.split(sep).join("/")]
+      : undefined;
   }
 
   /** Returns a normalized relative path only for scoped file writes inside the active workspace. */

@@ -103,3 +103,22 @@ test("read-only review does not refresh or lock Git's index", async (t) => {
   assert.equal(overview.changes.length, 0);
   assert.equal((await stat(index, { bigint: true })).mtimeNs, before.mtimeNs);
 });
+
+test("selected patches treat wildcard filenames as literal paths", async (t) => {
+  const { root, git } = await fixture(t);
+  await writeFile(join(root, "*.txt"), "literal original\n");
+  git(["add", "."]);
+  git(["commit", "-m", "Literal path"]);
+  await writeFile(join(root, "*.txt"), "literal changed\n");
+  await writeFile(join(root, "remove.txt"), "other file changed\n");
+  const patch = await changedFileReview(root, "*.txt");
+  assert.match(patch.diff, /literal changed/);
+  assert.doesNotMatch(patch.diff, /other file changed/);
+});
+
+test("deleted files remain reviewable after their whole directory is removed", async (t) => {
+  const { root, git } = await fixture(t);
+  git(["rm", "-r", "src"]);
+  const patch = await changedFileReview(root, "src/code.ts");
+  assert.match(patch.diff, /-export const value = 1/);
+});

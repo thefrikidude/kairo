@@ -54,6 +54,10 @@ export class GitWorkspaces {
       directory,
       kind: root === repositoryPath ? "checkout" : "worktree",
       branch: tree?.branch,
+      baseCommit:
+        tree?.head && /^[a-f0-9]{40,64}$/i.test(tree.head) && !/^0+$/.test(tree.head)
+          ? tree.head
+          : undefined,
       managed: false,
     };
   }

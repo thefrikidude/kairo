@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { open, readdir, realpath, rename, unlink } from "node:fs/promises";
-import { dirname, basename, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 export type FileSnapshot = { content: string; revision: string };
 export type FileSearch = { paths: string[]; limited: boolean };
@@ -117,7 +117,7 @@ export class WorkspaceFiles {
     const metadata = await handle.stat().finally(() => handle.close());
     if (metadata.nlink > 1)
       throw new Error("This file has multiple hard links. Edit it in your external editor.");
-    const temporary = resolve(dirname(target), `.${basename(target)}.kairo-${randomUUID()}`);
+    const temporary = resolve(dirname(target), `.kairo-edit-${randomUUID()}.tmp`);
     try {
       const output = await open(temporary, "wx", metadata.mode & 0o777);
       try {

@@ -83,3 +83,10 @@ test("plain folders stay usable and foreign worktrees cannot be selected", async
   await assert.rejects(worktrees.create(folder, "kairo/task"), /Initialize Git/);
   await assert.rejects(worktrees.existing(repo, folder), /belonging/);
 });
+
+test("primary checkouts and adopted worktrees record a review baseline", async (t) => {
+  const { repo, git, worktrees } = await fixture(t);
+  assert.equal((await worktrees.describe(repo)).baseCommit, git(["rev-parse", "HEAD"]));
+  const created = await worktrees.create(repo, "kairo/adopted");
+  assert.equal((await worktrees.existing(repo, created.directory)).baseCommit, created.baseCommit);
+});

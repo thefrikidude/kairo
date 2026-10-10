@@ -5,7 +5,7 @@ export interface TaskWorkspace {
   directory: string;
   kind: "folder" | "checkout" | "worktree";
   branch?: string;
-  /** Commit from which an isolated task started; stays stable when its branch advances. */
+  /** Commit used for workspace review; stays stable when its branch advances. */
   baseCommit?: string;
   managed: boolean;
   createdAt: number;
