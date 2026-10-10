@@ -1,3 +1,4 @@
+import type { TerminalLaunch } from "../../domain/terminal-agent.js";
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename } from "node:path";
@@ -78,7 +79,36 @@ export class WorkspaceTerminals {
       if (this.creating.get(workspaceId) === pending) this.creating.delete(workspaceId);
     }
   }
-  private async spawn(workspaceId: string, requested: string): Promise<WorkspaceTerminal> {
+  /** Starts an interactive agent directly with argv, independently of any chat protocol. */
+  async createAgent(
+    workspaceId: string,
+    directory: string,
+    launch: TerminalLaunch,
+  ): Promise<WorkspaceTerminal> {
+    if (this.closed) throw new Error("Kairo is shutting down.");
+    if (!launch.sessionId) throw new Error("Agent terminals require a session identity.");
+    const existing = this.list(workspaceId).find(
+      (terminal) => terminal.sessionId === launch.sessionId,
+    );
+    if (existing) return existing;
+    const key = `agent:${launch.sessionId}`;
+    const creating = this.creating.get(key);
+    if (creating) return creating;
+    const pending = this.spawn(workspaceId, directory, launch);
+    this.creating.set(key, pending);
+    this.pendingCreates.add(pending);
+    try {
+      return await pending;
+    } finally {
+      this.pendingCreates.delete(pending);
+      if (this.creating.get(key) === pending) this.creating.delete(key);
+    }
+  }
+  private async spawn(
+    workspaceId: string,
+    requested: string,
+    launch?: TerminalLaunch,
+  ): Promise<WorkspaceTerminal> {
     const directory = await realpath(requested);
     if (!(await stat(directory)).isDirectory())
       throw new Error("This workspace folder is unavailable.");
@@ -92,14 +122,14 @@ export class WorkspaceTerminals {
         ? process.env.COMSPEC || "cmd.exe"
         : process.env.SHELL || "/bin/zsh");
     const pty = native.spawn(
-      shell,
-      this.options.args ?? (process.platform === "win32" ? [] : ["-l"]),
+      launch?.executable ?? shell,
+      launch?.args ?? this.options.args ?? (process.platform === "win32" ? [] : ["-l"]),
       {
         name: "xterm-256color",
         cwd: directory,
         cols: 80,
         rows: 24,
-        env: { ...process.env, ...this.options.env, TERM: "xterm-256color" },
+        env: { ...process.env, ...this.options.env, ...launch?.env, TERM: "xterm-256color" },
       },
     );
     let resolveExit!: () => void;
@@ -108,7 +138,8 @@ export class WorkspaceTerminals {
         id: randomUUID(),
         workspaceId,
         directory,
-        title: basename(shell),
+        title: launch?.title ?? basename(shell),
+        sessionId: launch?.sessionId,
         pid: pty.pid,
         state: "running",
         columns: 80,

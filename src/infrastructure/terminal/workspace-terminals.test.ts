@@ -148,3 +148,47 @@ test("terminal output is bounded and resumes after renderer acknowledgement", as
   assert.ok(snapshot.buffer.length <= 128_000);
   assert.ok(snapshot.buffer.includes("FLOW_DONE\r\n"));
 });
+
+test("agent PTYs launch argv directly and retain distinct durable session identities", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-agent-terminal-")));
+  const service = new WorkspaceTerminals(() => {});
+  t.after(async () => {
+    await service.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const literal = "$(touch SHOULD_NOT_EXIST); words 'quoted'";
+  const launch = {
+    executable: process.execPath,
+    args: [
+      "-e",
+      "console.log(JSON.stringify({cwd:process.cwd(),args:process.argv.slice(1),fixture:process.env.KAIRO_AGENT_FIXTURE}));setInterval(()=>{},1000)",
+      literal,
+    ],
+    title: "Fixture agent",
+    sessionId: "session-a",
+    env: { KAIRO_AGENT_FIXTURE: "ready" },
+  };
+  const [first, duplicate] = await Promise.all([
+    service.createAgent("workspace-a", root, launch),
+    service.createAgent("workspace-a", root, launch),
+  ]);
+  assert.equal(first.id, duplicate.id);
+  assert.equal(first.sessionId, "session-a");
+  await waitUntil(() => service.attach(first.id).buffer.includes('"fixture":"ready"'));
+  const output = JSON.parse(service.attach(first.id).buffer.trim());
+  assert.equal(output.cwd, root);
+  assert.deepEqual(output.args, [literal]);
+  const second = await service.createAgent("workspace-a", root, {
+    ...launch,
+    sessionId: "session-b",
+  });
+  assert.notEqual(first.pid, second.pid);
+  await service.closeTerminal(first.id);
+  assert.equal(service.list()[0].sessionId, "session-b");
+  await service.close();
+  assert.ok(
+    !(await terminalProcesses()).some(
+      (row) => [first.pid, second.pid].includes(row.pid) && !row.zombie,
+    ),
+  );
+});

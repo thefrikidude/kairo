@@ -1,7 +1,8 @@
-/** Ephemeral utilities belong to a workspace, never to an agent conversation. */
+/** A live PTY belongs to a workspace; agent PTYs also identify their durable session. */
 export type WorkspaceTerminal = {
   id: string;
   workspaceId: string;
+  sessionId?: string;
   directory: string;
   title: string;
   pid: number;
