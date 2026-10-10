@@ -380,6 +380,7 @@ export async function createTerminalDesktopRuntime(
       }
       case "session:archive": {
         const current = session(first);
+        await stop(current.id);
         requireStopped(current.id);
         store.archive(current.id);
         if (store.activeSessionId() === current.id) store.setActiveSession(undefined);

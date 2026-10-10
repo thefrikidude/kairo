@@ -19,6 +19,15 @@ async function waitFor(code) {
   }
 }
 const click = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+async function pointerClick(selector) {
+  const point = await evaluate(
+    `(()=>{const node=document.querySelector(${JSON.stringify(selector)});node.scrollIntoView({block:'nearest'});const r=node.getBoundingClientRect();const x=Math.round(r.x+r.width/2),y=Math.round(r.y+r.height/2);if(document.elementFromPoint(x,y)?.closest('button')!==node)throw new Error('Sidebar action is covered');return {x,y};})()`,
+  );
+  win.webContents.sendInputEvent({ type: "mouseMove", ...point });
+  await sleep(50);
+  win.webContents.sendInputEvent({ type: "mouseDown", button: "left", clickCount: 1, ...point });
+  win.webContents.sendInputEvent({ type: "mouseUp", button: "left", clickCount: 1, ...point });
+}
 const button = (text, scope = "document") =>
   evaluate(
     `Array.from(${scope}.querySelectorAll('button')).find(node=>node.textContent.trim()===${JSON.stringify(text)}).click()`,
@@ -107,6 +116,11 @@ async function run() {
     const saved = JSON.parse(await readFile(join(output, "saved.json"), "utf8")),
       value = await state();
     assert.equal(value.activeSessionId, saved.sessionId);
+    assert.ok(
+      await evaluate(
+        `!!document.querySelector('.pinned-sessions [data-session-id="${saved.sessionId}"]')`,
+      ),
+    );
     assert.equal(
       value.sessions.find((s) => s.id === saved.sessionId).nativeSession.id,
       saved.nativeId,
@@ -257,7 +271,36 @@ async function run() {
     `window.kairo.fileSnapshot(${JSON.stringify(second.id)},'proof-c.txt').then(s=>s.content==='Resumed conversation\\n').catch(()=>false)`,
   );
   assert.equal((await nativeRecord(owner.directory)).resumes, 1);
+  await pointerClick(`[data-session-id="${second.id}"] button[aria-label^="Pin "]`);
+  await waitFor(
+    `document.querySelector('.pinned-sessions [data-session-id="${second.id}"] button[aria-pressed="true"]')`,
+  );
+  await pointerClick(`[data-session-id="${second.id}"] button[aria-label^="Unpin "]`);
+  await waitFor(`!document.querySelector('.pinned-sessions [data-session-id="${second.id}"]')`);
+  await pointerClick(`[data-session-id="${second.id}"] button[aria-label^="Pin "]`);
+  await waitFor(`document.querySelector('.pinned-sessions [data-session-id="${second.id}"]')`);
+  await pointerClick(`[data-session-id="${first.id}"] button[aria-label^="Archive "]`);
+  await waitFor(
+    `window.kairo.bootstrap().then(all=>all.archivedSessions.some(s=>s.id===${JSON.stringify(first.id)}) && !all.terminals.some(t=>t.sessionId===${JSON.stringify(first.id)}))`,
+  );
+  assert.equal(
+    await evaluate(`!!document.querySelector('[data-session-id="${first.id}"]')`),
+    false,
+  );
+  assert.ok((await state()).terminals.some((t) => t.id === shell.id));
   await click(".settings-link");
+  await button("Archived sessions");
+  await waitFor(
+    "Array.from(document.querySelectorAll('.workspace-catalog-row')).some(row=>row.textContent.includes('First agent'))",
+  );
+  await capture("pinned-and-archived.png");
+  await evaluate(
+    "Array.from(document.querySelectorAll('.workspace-catalog-row')).find(row=>row.textContent.includes('First agent')).querySelector('button').click()",
+  );
+  await waitFor(
+    `window.kairo.bootstrap().then(all=>all.sessions.some(s=>s.id===${JSON.stringify(first.id)}))`,
+  );
+  await button("General");
   await select('[aria-label="Theme"]', "light");
   await button("Back to workspace");
   await capture("terminal-review-light.png");
@@ -279,6 +322,8 @@ async function run() {
       startupMs,
       embeddedAgentInput: true,
       terminalTabs: true,
+      pinUnpinAndPersistence: true,
+      archiveRunningAndRestore: true,
       sameTerminalShellJobControl: true,
       isolatedWorktree: true,
       parallelNavigation: true,

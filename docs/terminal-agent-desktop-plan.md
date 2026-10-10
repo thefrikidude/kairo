@@ -67,3 +67,9 @@ The center header now contains tabs for live terminals in the selected project, 
 Validation: typecheck and desktop build pass. The Electron smoke creates a shell from **+ Terminal**, switches back to its agent tab, creates an isolated agent from **+ Agent**, edits/reviews files and verifies native resume after restart. Screenshots were inspected at `/var/folders/3x/rz0dj8y12pz759_q5skzxw380000gn/T/kairo-terminal-evidence-1791651975092`; all owned fixture processes stopped.
 
 The separate Shell panel and its renderer/styles have been removed entirely. The right sidebar contains Files and Review only. Plain terminals are created through **+ Terminal**, using the same tab/view system as agent terminals.
+
+## Sidebar pin and archive fixes
+
+Pinned sessions now appear in a separate section above Projects, with explicit Pin/Unpin labels and validated saved pin state. Archiving a live session closes its attached terminal first, captures native identity and then archives its metadata. Failed process cleanup prevents archiving. Other terminals and workspace files remain available. Archived sessions can be restored through Settings.
+
+Validation: all 34 tests, typecheck and desktop build pass. The actual Electron smoke uses mouse clicks for Pin, Unpin and Archive, verifies visible placement, preserves unrelated terminals, restores the archived session, and confirms pin persistence and exact conversation resume after restart. Evidence: `/var/folders/3x/rz0dj8y12pz759_q5skzxw380000gn/T/kairo-terminal-evidence-1791652580514`. Owned fixture processes were confirmed stopped.

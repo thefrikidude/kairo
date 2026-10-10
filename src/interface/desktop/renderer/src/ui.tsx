@@ -44,7 +44,10 @@ export function DesktopApp(): React.JSX.Element {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [pinned, setPinned] = useState<string[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem("kairo-pinned-sessions") ?? "[]") as string[];
+      const value: unknown = JSON.parse(localStorage.getItem("kairo-pinned-sessions") ?? "[]");
+      return Array.isArray(value)
+        ? [...new Set(value.filter((id): id is string => typeof id === "string"))]
+        : [];
     } catch {
       return [];
     }
@@ -397,6 +400,73 @@ export function DesktopApp(): React.JSX.Element {
       />
     );
   };
+  const renderSession = (session: TerminalSession) => {
+    const owner = state?.workspaces.find((item) => item.id === session.workspaceId);
+    const terminal = state?.terminals.find((item) => item.sessionId === session.id);
+    return (
+      <div
+        key={session.id}
+        data-session-id={session.id}
+        className={`session-row ${current?.id === session.id ? "selected" : ""}`}
+      >
+        <button
+          className="session"
+          aria-current={current?.id === session.id ? "page" : undefined}
+          disabled={pending}
+          onClick={() => {
+            setSettings(undefined);
+            setShellId(undefined);
+            void action(() => window.kairo.openSession(session.id));
+          }}
+        >
+          <span
+            className={`session-status status-${terminal?.state === "running" ? "complete" : terminal?.state === "exited" && terminal.exitCode ? "error" : "idle"}`}
+            title={terminal?.state === "running" ? "Terminal open" : "Terminal stopped"}
+          />
+          <span className="session-labels">
+            <span className="session-title">{session.title}</span>
+            <small className="session-workspace-label">
+              {owner?.branch ?? state?.agents.find((agent) => agent.id === session.agentId)?.name}
+            </small>
+          </span>
+        </button>
+        <div className="session-row-actions">
+          <button
+            className="session-action-button"
+            aria-label={`Rename ${session.title}`}
+            onClick={() => setRename({ id: session.id, title: session.title })}
+          >
+            ✎
+          </button>
+          <button
+            className={`session-action-button ${pinned.includes(session.id) ? "pinned" : ""}`}
+            aria-label={`${pinned.includes(session.id) ? "Unpin" : "Pin"} ${session.title}`}
+            title={pinned.includes(session.id) ? "Unpin session" : "Pin session"}
+            disabled={pending}
+            aria-pressed={pinned.includes(session.id)}
+            onClick={() =>
+              setPinned((all) =>
+                all.includes(session.id)
+                  ? all.filter((id) => id !== session.id)
+                  : [...all, session.id],
+              )
+            }
+          >
+            <Icon name="pin" />
+          </button>
+          <button
+            className="session-action-button"
+            aria-label={`Archive ${session.title}`}
+            disabled={pending}
+            title={terminal ? "Archive session and close its terminal" : "Archive session"}
+            onClick={() => void action(() => window.kairo.archiveSession(session.id))}
+          >
+            <Icon name="archive" />
+          </button>
+        </div>
+      </div>
+    );
+  };
   const agentPicker = (
     <>
       <div className="agent-picker-heading">
@@ -481,6 +551,15 @@ export function DesktopApp(): React.JSX.Element {
         >
           <Icon name="folder" /> Open project
         </button>
+        {state?.sessions.some((session) => pinned.includes(session.id)) && (
+          <section className="pinned-sessions" aria-label="Pinned sessions">
+            <div className="section-label sidebar-section-title">Pinned</div>
+            {pinned
+              .map((id) => state.sessions.find((session) => session.id === id))
+              .filter((session): session is TerminalSession => !!session)
+              .map(renderSession)}
+          </section>
+        )}
         <div className="section-label sidebar-section-title">Projects</div>
         <div className="project-session-list">
           {groups.map((group) => (
@@ -509,78 +588,8 @@ export function DesktopApp(): React.JSX.Element {
               <div hidden={collapsed[group.path]}>
                 {[...group.sessions]
                   .sort((a, b) => Number(pinned.includes(b.id)) - Number(pinned.includes(a.id)))
-                  .map((session) => {
-                    const owner = state?.workspaces.find((item) => item.id === session.workspaceId);
-                    const terminal = state?.terminals.find((item) => item.sessionId === session.id);
-                    return (
-                      <div
-                        key={session.id}
-                        data-session-id={session.id}
-                        className={`session-row ${current?.id === session.id ? "selected" : ""}`}
-                      >
-                        <button
-                          className="session"
-                          aria-current={current?.id === session.id ? "page" : undefined}
-                          disabled={pending}
-                          onClick={() => {
-                            setSettings(undefined);
-                            setShellId(undefined);
-                            void action(() => window.kairo.openSession(session.id));
-                          }}
-                        >
-                          <span
-                            className={`session-status status-${terminal?.state === "running" ? "complete" : terminal?.state === "exited" && terminal.exitCode ? "error" : "idle"}`}
-                            title={
-                              terminal?.state === "running" ? "Terminal open" : "Terminal stopped"
-                            }
-                          />
-                          <span className="session-labels">
-                            <span className="session-title">{session.title}</span>
-                            <small className="session-workspace-label">
-                              {owner?.branch ??
-                                state?.agents.find((agent) => agent.id === session.agentId)?.name}
-                            </small>
-                          </span>
-                        </button>
-                        <div className="session-row-actions">
-                          <button
-                            className="session-action-button"
-                            aria-label={`Rename ${session.title}`}
-                            onClick={() => setRename({ id: session.id, title: session.title })}
-                          >
-                            ✎
-                          </button>
-                          <button
-                            className={`session-action-button ${pinned.includes(session.id) ? "pinned" : ""}`}
-                            aria-label="Pin session"
-                            aria-pressed={pinned.includes(session.id)}
-                            onClick={() =>
-                              setPinned((all) =>
-                                all.includes(session.id)
-                                  ? all.filter((id) => id !== session.id)
-                                  : [...all, session.id],
-                              )
-                            }
-                          >
-                            <Icon name="pin" />
-                          </button>
-                          <button
-                            className="session-action-button"
-                            aria-label={`Archive ${session.title}`}
-                            disabled={!!terminal || pending}
-                            title={
-                              terminal ? "Stop the terminal before archiving" : "Archive session"
-                            }
-                            onClick={() =>
-                              void action(() => window.kairo.archiveSession(session.id))
-                            }
-                          >
-                            <Icon name="archive" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  .filter((session) => !pinned.includes(session.id))
+                  .map(renderSession)}
                 {!group.sessions.length && (
                   <button
                     className="empty-session-list"

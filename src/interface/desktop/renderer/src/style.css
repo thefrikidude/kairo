@@ -3050,3 +3050,11 @@ button svg {
   font-size: 12px;
   white-space: nowrap;
 }
+.pinned-sessions {
+  flex-shrink: 0;
+  max-height: 35%;
+  overflow-y: auto;
+}
+.session-row-actions {
+  z-index: 1;
+}

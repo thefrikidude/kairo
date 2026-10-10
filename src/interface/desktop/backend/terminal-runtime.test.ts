@@ -141,9 +141,10 @@ test("terminal desktop owns independent workspaces, live navigation, Git review 
         .diff,
       /isolated/,
     );
-    await assert.rejects(request("session:archive", isolated.id), /Stop this session/);
-    await request("session:stop", isolated.id);
-    await request("session:archive", isolated.id);
+    state = (await request("session:archive", isolated.id)) as TerminalDesktopBootstrap;
+    assert.ok(state.archivedSessions.some((session) => session.id === isolated.id));
+    assert.ok(!state.terminals.some((terminal) => terminal.sessionId === isolated.id));
+    assert.ok(state.terminals.some((terminal) => terminal.sessionId === primary.id));
     await assert.rejects(request("worktrees:remove", isolated.workspaceId), /contains staged/);
     await rm(join(directory, "proof.txt"));
     state = (await request("worktrees:remove", isolated.workspaceId)) as TerminalDesktopBootstrap;
