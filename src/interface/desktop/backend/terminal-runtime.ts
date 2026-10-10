@@ -67,26 +67,10 @@ export async function createTerminalDesktopRuntime(
   let catalog: TerminalAgentInfo[] = [];
   const sessionErrors: Record<string, string> = {};
   const starts = new Map<string, Promise<void>>();
-  const checkoutOwners = new Map<string, string>();
-  const rootsByTerminal = new Map<string, { root: string; sessionId: string }>();
   const removing = new Set<string>();
   const mutations = new Set<Promise<unknown>>();
   const pendingTerminalCreates = new Map<string, number>();
   function emit(event: string, payload: unknown): void {
-    if (event === "terminal:state") {
-      const terminal = payload as { id: string; sessionId?: string; state: string };
-      if (terminal.sessionId && terminal.state === "exited") {
-        const owner = rootsByTerminal.get(terminal.id);
-        if (owner && checkoutOwners.get(owner.root) === terminal.sessionId)
-          checkoutOwners.delete(owner.root);
-      }
-    }
-    if (event === "terminal:closed") {
-      const owner = rootsByTerminal.get((payload as { id: string }).id);
-      if (owner && checkoutOwners.get(owner.root) === owner.sessionId)
-        checkoutOwners.delete(owner.root);
-      rootsByTerminal.delete((payload as { id: string }).id);
-    }
     if (!closed) emitEvent(event, payload);
   }
   const terminals = options.terminals ?? new WorkspaceTerminals(emit);
@@ -181,15 +165,7 @@ export async function createTerminalDesktopRuntime(
         await captureNative();
         current = session(id);
       }
-      const root = await git.executionRoot(target.directory);
-      const owner = [...checkoutOwners].find(
-        ([directory, ownerId]) => ownerId !== id && overlaps(directory, root),
-      )?.[1];
-      if (owner)
-        throw new Error(
-          "Another agent terminal is open in an overlapping workspace. Stop it or create an isolated worktree.",
-        );
-      checkoutOwners.set(root, id);
+      await git.executionRoot(target.directory);
       try {
         const recovering = mode !== "fresh" && !!current.lastStartedAt;
         const picker =
@@ -216,30 +192,58 @@ export async function createTerminalDesktopRuntime(
           includeExisting: picker,
           env: launch.env,
         };
-        if (nativeReader.supports(current.agentId)) {
+        const sharedNativeWorkspace = [
+          ...new Set([
+            ...terminals
+              .list()
+              .filter((terminal) => terminal.state === "running")
+              .map((terminal) => terminal.sessionId)
+              .filter((value): value is string => !!value),
+            ...starts.keys(),
+          ]),
+        ].some((otherId) => {
+          const other = store.get(otherId);
+          return (
+            otherId !== id &&
+            other?.agentId === current.agentId &&
+            store.workspace(other.workspaceId)?.directory === target.directory
+          );
+        });
+        if (sharedNativeWorkspace) {
+          // Cwd metadata cannot identify which of two concurrent CLIs owns a new conversation.
+          // Preserve IDs already captured before sharing began, and do not guess new ones.
+          for (const [otherId, capture] of captures)
+            if (
+              capture.lookup.agentId === current.agentId &&
+              capture.lookup.directory === target.directory
+            )
+              captures.delete(otherId);
+        }
+        if (!sharedNativeWorkspace && nativeReader.supports(current.agentId)) {
           const baseline = new Map(
             (await nativeReader.list(lookup)).map((entry) => [entry.id, entry.updatedAt]),
           );
           captures.set(id, { lookup, baseline });
         }
         if (closed) throw new Error("Kairo is shutting down.");
-        const terminal = await terminals.createAgent(target.id, target.directory, launch);
-        rootsByTerminal.set(terminal.id, { root, sessionId: id });
+        await terminals.createAgent(target.id, target.directory, launch);
         if (mode === "fresh" || picker) store.clearNativeSession(id);
         store.markStarted(id, since);
-        sessionNotices[id] = picker
-          ? "Choose a conversation in the agent's native resume picker."
-          : current.nativeSession && mode !== "fresh"
-            ? "Resumed the saved native conversation."
-            : !canResumeAgent(current.agentId)
-              ? "This agent starts a fresh conversation each time. Its workspace remains saved."
-              : nativeReader.supports(current.agentId)
-                ? "Waiting for the CLI to save its native session identity…"
-                : "Save the agent's native Resume ID before restarting to continue this conversation.";
+        sessionNotices[id] =
+          sharedNativeWorkspace && !current.nativeSession
+            ? "Shared workspace: use the CLI’s conversation picker to recover this conversation; automatic identity capture is unavailable while matching agents share a directory."
+            : picker
+              ? "Choose a conversation in the agent's native resume picker."
+              : current.nativeSession && mode !== "fresh"
+                ? "Resumed the saved native conversation."
+                : !canResumeAgent(current.agentId)
+                  ? "This agent starts a fresh conversation each time. Its workspace remains saved."
+                  : nativeReader.supports(current.agentId)
+                    ? "Waiting for the CLI to save its native session identity…"
+                    : "Save the agent's native Resume ID before restarting to continue this conversation.";
         if (closed) throw new Error("Kairo is shutting down.");
         delete sessionErrors[id];
       } catch (error) {
-        if (checkoutOwners.get(root) === id) checkoutOwners.delete(root);
         captures.delete(id);
         sessionErrors[id] = errorText(error);
         throw error;

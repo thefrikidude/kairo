@@ -26,7 +26,7 @@ Kairo currently runs from source. Installers, signing and release distribution a
 
 1. Select **Open project** and choose a local folder.
 2. Use **+ Terminal** in the tab bar to open a plain terminal in the current workspace, or **+ Agent** / **New agent session** to choose an agent.
-3. For an agent session, choose the project folder, a new isolated Git worktree or an existing worktree. Git projects default to a new isolated worktree.
+3. For an agent session, use the current workspace by default, or explicitly choose a new isolated Git worktree or another existing workspace.
 4. Select **Open agent terminal**. Kairo opens an interactive shell and runs the agent as a foreground command.
 
 The picker includes 45 agent choices from the referenced Orca catalog and detects installed commands, aliases and required binaries. Missing agents offer installation guides. Install the CLI yourself, then select **Refresh agents**; Kairo does not install it for you.
@@ -35,7 +35,7 @@ Agent and plain-terminal tabs share the center pane. Switching tabs keeps their 
 
 ## Projects and workspaces
 
-A workspace owns its repository path, directory, branch and Git baseline. An agent session owns its selected CLI and conversation identity. Multiple agent sessions can work independently in separate worktrees. Kairo prevents overlapping agent sessions from running in the same checkout.
+A workspace owns its repository path, directory, branch and Git baseline. An agent session owns its selected CLI and conversation identity. Multiple agent sessions can work independently in separate worktrees. Additional agent tabs can share the selected workspace. Their terminals are independent, but their files and Git state are shared. Choose an isolated worktree for independent changes.
 
 New worktrees start from committed files. Uncommitted edits, dependencies and ignored files are not copied. Install the project's dependencies in the new workspace when needed.
 
@@ -49,7 +49,7 @@ The left sidebar groups sessions by project and shows their branches. Rename a s
 
 Archiving closes the session's attached terminal and preserves its metadata, workspace and vendor-owned conversation history. Restore it through **Settings → Archived sessions**. Other terminals remain open. **Settings → Workspaces → Close terminal** closes a terminal and its attached processes. Close a session's terminal before deleting that session; deleting session metadata does not delete workspace files or CLI history.
 
-Session metadata persists in SQLite. Terminal processes stop when Kairo quits; the active agent session is reopened on startup. Codex and OpenCode conversation IDs are captured from their local metadata stores, matched to the workspace and launch time. Ambiguous matches are refused instead of choosing a global “last session.” Exact recovery requires a saved conversation ID. Automatic identity capture is currently limited to Codex and OpenCode; other agents use their own history/resume controls and may require a new Kairo session after restart.
+Session metadata persists in SQLite. Terminal processes stop when Kairo quits; the active agent session is reopened on startup. Codex and OpenCode conversation IDs are captured from their local metadata stores, matched to the workspace and launch time. Ambiguous matches are refused instead of choosing a global “last session.” When matching agents share a directory, Kairo preserves previously captured IDs but does not automatically assign new ones; use the CLI’s conversation picker for recovery. Exact recovery requires a saved conversation ID. Automatic identity capture is currently limited to Codex and OpenCode; other agents use their own history/resume controls and may require a new Kairo session after restart.
 
 ## Files and review
 

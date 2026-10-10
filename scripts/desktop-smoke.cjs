@@ -70,14 +70,18 @@ async function state() {
   return value;
 }
 async function nativeRecord(directory) {
+  const records = [];
   for (const file of await readdir(process.env.KAIRO_FIXTURE_HISTORY)) {
     const record = JSON.parse(
       await readFile(join(process.env.KAIRO_FIXTURE_HISTORY, file), "utf8"),
     );
-    if (record.cwd === directory) return record;
+    if (record.cwd === directory) records.push(record);
   }
-  throw new Error("Missing native fixture record");
+  const first = records.sort((a, b) => a.createdAt - b.createdAt)[0];
+  if (!first) throw new Error("Missing native fixture record");
+  return first;
 }
+
 app.on("browser-window-created", (_, window) => {
   win = window;
   win.webContents.setBackgroundThrottling(false);
@@ -200,6 +204,10 @@ async function run() {
   await input('[aria-label="Search agents"]', "Codex");
   await button("CodexInstalled · codex");
   await waitFor("document.querySelector('[aria-label=\"Workspace mode\"] option[value=worktree]')");
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Workspace mode\"]').value"),
+    "folder",
+  );
   await select('[aria-label="Workspace mode"]', "worktree");
   await input('[aria-label="Branch"]', "kairo/smoke-isolated");
   await button("Open agent terminal", "document.querySelector('dialog')");
@@ -248,6 +256,33 @@ async function run() {
     beforeStop.sessions.find((s) => s.id === second.id).nativeSession.id,
     (await nativeRecord(owner.directory)).id,
   );
+  await click('[aria-label="New agent tab"]');
+  await waitFor("document.querySelector('[aria-label=\"Workspace mode\"] option[value=existing]')");
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Workspace mode\"]').value"),
+    "existing",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Existing worktree\"]').value"),
+    owner.directory,
+  );
+  await button("Open agent terminal", "document.querySelector('dialog')");
+  await waitFor("!document.querySelector('dialog[open]')");
+  const sharedState = await state();
+  const shared = sharedState.sessions.find((s) => s.id === sharedState.activeSessionId);
+  assert.equal(shared.workspaceId, second.workspaceId);
+  assert.equal(shared.nativeSession, undefined);
+  assert.equal(
+    sharedState.sessions.find((s) => s.id === second.id).nativeSession.id,
+    beforeStop.sessions.find((s) => s.id === second.id).nativeSession.id,
+  );
+  assert.equal(sharedState.workspaces.length, beforeStop.workspaces.length);
+  await pointerClick(`[data-session-id="${shared.id}"] button[aria-label^="Archive "]`);
+  await waitFor(
+    `window.kairo.bootstrap().then(all=>all.archivedSessions.some(s=>s.id===${JSON.stringify(shared.id)}))`,
+  );
+  await click(`[data-session-id="${second.id}"] .session`);
+
   await click(".settings-link");
   await button("Workspaces");
   await waitFor("document.querySelector('.terminal-catalog')");

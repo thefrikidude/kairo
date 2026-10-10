@@ -73,3 +73,11 @@ The separate Shell panel and its renderer/styles have been removed entirely. The
 Pinned sessions now appear in a separate section above Projects, with explicit Pin/Unpin labels and validated saved pin state. Archiving a live session closes its attached terminal first, captures native identity and then archives its metadata. Failed process cleanup prevents archiving. Other terminals and workspace files remain available. Archived sessions can be restored through Settings.
 
 Validation: all 34 tests, typecheck and desktop build pass. The actual Electron smoke uses mouse clicks for Pin, Unpin and Archive, verifies visible placement, preserves unrelated terminals, restores the archived session, and confirms pin persistence and exact conversation resume after restart. Evidence: `/var/folders/3x/rz0dj8y12pz759_q5skzxw380000gn/T/kairo-terminal-evidence-1791652580514`. Owned fixture processes were confirmed stopped.
+
+## Workspace defaults aligned with Orca
+
+Opening a project uses its existing checkout. New agent tabs default to that workspace, including an already selected worktree. The creation dialog no longer forces a new worktree after asynchronous Git discovery; creating an isolated worktree is an explicit choice. Additional agents may share an existing workspace with independent terminals and shared files/Git state. Plain terminal tabs continue to use the current workspace.
+
+Shared directories make native conversation metadata ambiguous for matching agents. Previously captured IDs are preserved, but automatic capture is disabled for newly overlapping launches rather than assigning another agent’s conversation. The native CLI picker remains available on recovery. Worktree removal still requires closing all attached terminals and archiving associated sessions.
+
+Validation: 34 tests, typecheck and desktop build pass. The Electron workflow verifies the project-folder default, explicit isolation, the existing-worktree default and a second agent sharing the same workspace, then checks archival and exact resume after restart.

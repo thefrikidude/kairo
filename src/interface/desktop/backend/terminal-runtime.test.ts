@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTerminalDesktopRuntime } from "./terminal-runtime.js";
@@ -98,10 +98,15 @@ test("terminal desktop owns independent workspaces, live navigation, Git review 
         "AGENT_READY\r\n",
       ),
     );
-    await assert.rejects(
-      request("session:new", "codex", repo, { kind: "folder" }),
-      /Another agent terminal/,
-    );
+    state = (await request("session:new", "codex", repo, {
+      kind: "folder",
+    })) as TerminalDesktopBootstrap;
+    const shared = state.sessions.find((session) => session.id === state.activeSessionId)!;
+    const sharedPty = state.terminals.find((terminal) => terminal.sessionId === shared.id)!;
+    owned.push(sharedPty.pid);
+    assert.equal(shared.workspaceId, primary.workspaceId);
+    assert.notEqual(sharedPty.pid, primaryPty.pid);
+    await request("session:archive", shared.id);
     state = (await request("session:new", "codex", repo, {
       kind: "worktree",
       branch: "task-a",
@@ -260,10 +265,12 @@ test("missing resume identity invokes a native picker or requires an explicit fr
     assert.equal(launches.at(-1)!.picker, false);
     const child = join(root, "child");
     await mkdir(child);
-    await assert.rejects(
-      request("session:new", "codex", child, { kind: "folder" }),
-      /overlapping workspace/,
-    );
+    state = (await request("session:new", "codex", child, {
+      kind: "folder",
+    })) as TerminalDesktopBootstrap;
+    const canonicalChild = await realpath(child);
+    assert.ok(state.terminals.some((terminal) => terminal.directory === canonicalChild));
+    assert.ok(state.terminals.some((terminal) => terminal.sessionId === aider));
   } finally {
     await runtime.close();
     await rm(root, { recursive: true, force: true });

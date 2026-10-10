@@ -82,6 +82,8 @@ export function DesktopApp(): React.JSX.Element {
     (item) =>
       item.id === (selectedShell?.workspaceId ?? current?.workspaceId ?? state.activeWorkspaceId),
   );
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
   const accessId = selectedShell ? workspace?.id : (current?.id ?? workspace?.id);
   const currentTerminal = current
     ? state?.terminals.find((terminal) => terminal.sessionId === current.id)
@@ -231,14 +233,13 @@ export function DesktopApp(): React.JSX.Element {
   }, []);
   const beginSession = useCallback(
     (path?: string) => {
-      const selected = stateRef.current?.workspaces.find(
-        (item) => item.id === stateRef.current?.activeWorkspaceId,
-      );
+      const active = workspaceRef.current;
+      const selected = active && (!path || path === active.repositoryPath) ? active : undefined;
       setProject(path ?? selected?.repositoryPath ?? "");
       setBranch(`kairo/task-${Date.now().toString(36)}`);
       setBase("HEAD");
       setAgentQuery("");
-      setMode(selected && selected.kind !== "folder" ? "worktree" : "folder");
+      setMode(selected?.kind === "worktree" ? "existing" : "folder");
       setExisting(selected?.directory ?? "");
       setError("");
       setNewOpen(true);
@@ -257,7 +258,6 @@ export function DesktopApp(): React.JSX.Element {
       .then((items) => {
         if (disposed) return;
         setTrees(items);
-        if (items.length) setMode("worktree");
         setExisting((value) =>
           items.some((item) => item.directory === value) ? value : (items[0]?.directory ?? ""),
         );
@@ -1022,11 +1022,11 @@ export function DesktopApp(): React.JSX.Element {
                 value={mode}
                 onChange={(event) => setMode(event.target.value as typeof mode)}
               >
-                <option value="folder">Project folder</option>
+                <option value="folder">Project folder (shared)</option>
                 {trees.length > 0 && (
                   <>
                     <option value="worktree">New isolated worktree</option>
-                    <option value="existing">Existing worktree</option>
+                    <option value="existing">Existing workspace (shared)</option>
                   </>
                 )}
               </select>
