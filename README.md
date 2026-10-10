@@ -34,7 +34,7 @@ Use the project selector above the conversation to switch projects. **New agent 
 
 Keyboard shortcuts: **Cmd/Ctrl+Shift+E** opens Files, **Cmd/Ctrl+Shift+D** opens Changes, and **Cmd/Ctrl+Shift+B** toggles the sidebar. **Escape** closes the active dialog or contextual panel before cancelling a running task.
 
-Workspace identity, automatic Git worktree management, editable file buffers, improved per-file diffs and an optional PTY terminal are the next increments. See [the audit and implementation plan](docs/product-workspace-plan.md).
+Editable file buffers, improved per-file diffs and an optional PTY terminal are the next increments. See [the audit and implementation plan](docs/product-workspace-plan.md).
 
 ### Codex commands
 
@@ -52,7 +52,15 @@ OpenCode requires its CLI and a configured provider (`opencode auth login`). Ref
 
 ACP processes are owned per run and stopped after completion. If an agent advertises session loading, Kairo reloads its recorded session on the next turn; otherwise it creates a fresh session with a Kairo handoff. ACP client filesystem and terminal methods are not advertised; tools run in the agent runtime. Permission requests select an `allow_once` or `reject_once` option; Kairo does not select persistent grants. Native agent settings still govern operations that do not request client approval. Unrecognized client requests fail explicitly. Slash-command expansion for these agents is deferred.
 
-Chats opened in the same project currently share its files. Review shows the workspace's changes, not per-agent ownership. Use separate folders/worktrees for isolated work; automatic worktree management is not implemented. File saves are blocked while a session is working in that workspace.
+### Isolated task workspaces
+
+When creating a chat in a Git project, **New isolated worktree** is selected by default. Choose a branch and starting ref (HEAD, a branch, or a commit). It starts from committed files; uncommitted changes remain in the original folder. You can also choose **Use this folder** or an **Existing worktree** belonging to the same repository. Plain folders remain supported.
+
+Each workspace owns its directory, repository identity, branch and starting commit. Chats own their agent runtime, native conversation ID and history. Worktree chats stay grouped under their parent project, with branch names in the sidebar. All native agents, file tools and review requests use the chat's associated working directory. Kairo refuses concurrent agent runs in the same or overlapping folder; use separate worktrees for parallel tasks. File saves are blocked while agents are using the folder.
+
+Kairo stores managed worktrees under its state directory. **Settings → Workspaces** lists them, including workspaces whose chats were deleted. Archive all associated chats before removing a worktree. Removal refuses staged, unstaged, untracked or ignored files and task commits not merged into the primary checkout. It keeps the branch and archived conversation history. Kairo never removes a worktree when you delete a chat, and externally created worktrees cannot be removed from this screen. A removed worktree's chats stay archived and cannot resume against a different folder.
+
+Worktrees isolate files; they do not provide OS-level command sandboxing. Native agent safeguards and approval controls still apply. There is no automatic agent delegation.
 
 Build and preview with:
 

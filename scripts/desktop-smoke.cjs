@@ -43,6 +43,36 @@ app.on("browser-window-created", (_event, window) => {
 async function run() {
   await waitFor("document.querySelector('.session[aria-current=page]')");
   const startupMs = performance.now() - started;
+  if (process.env.KAIRO_SMOKE_RESTART === "1") {
+    const saved = await evaluate("window.kairo.bootstrap()");
+    assert.ok(saved.sessions.some((session) => session.title === "Renamed task"));
+    const workspace = saved.workspaces.find((item) => item.managed && !item.removedAt);
+    assert.ok(workspace?.baseCommit);
+    const session = saved.sessions.find((item) => item.workspaceId === workspace.id);
+    assert.ok(session);
+    assert.equal(session.workspace, workspace.directory);
+    if (saved.activeSessionId !== session.id)
+      await click(`[data-session-id="${session.id}"] .session`);
+    await waitFor(
+      `document.querySelector('.session-row.selected').dataset.sessionId === ${JSON.stringify(session.id)}`,
+    );
+    const text = await evaluate(
+      `window.kairo.readFile(${JSON.stringify(session.id)}, 'src/hello.ts')`,
+    );
+    assert.match(text, /Hello from the workspace/);
+    assert.equal(await evaluate("document.querySelector('#workspace-panel').hidden"), true);
+    await writeFile(
+      join(process.env.KAIRO_SMOKE_OUTPUT, "restart.json"),
+      JSON.stringify({
+        startupMs: Math.round(startupMs),
+        restoredWorkspaceId: workspace.id,
+        restoredSessionId: session.id,
+      }),
+    );
+    console.log("Desktop restart smoke passed");
+    app.quit();
+    return;
+  }
   assert.equal(await evaluate("document.querySelector('#workspace-panel').hidden"), true);
   assert.equal(await evaluate("!!document.querySelector('.status-complete')"), true);
   await click(".session-row.selected .session-action-button[title='Rename session']");
@@ -67,8 +97,20 @@ async function run() {
     await evaluate("document.querySelector('.session-folder-picker small').textContent"),
     process.env.KAIRO_SMOKE_PROJECT,
   );
+  await waitFor("!document.querySelector('.session-picker-dialog button.primary').disabled");
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Task workspace\"]').value"),
+    "worktree",
+  );
   await click(".session-picker-dialog button.primary");
   await waitFor("!document.querySelector('#new-session-title')");
+  const isolated = await evaluate("window.kairo.bootstrap()");
+  const isolatedSession = isolated.sessions.find((s) => s.id === isolated.activeSessionId);
+  const isolatedWorkspace = isolated.workspaces.find((w) => w.id === isolatedSession.workspaceId);
+  assert.equal(isolatedWorkspace.managed, true);
+  assert.equal(isolatedWorkspace.kind, "worktree");
+  assert.equal(isolatedWorkspace.repositoryPath, process.env.KAIRO_SMOKE_PROJECT);
+  assert.notEqual(isolatedWorkspace.directory, process.env.KAIRO_SMOKE_PROJECT);
   await click(".top-actions button[title^='Browse files']");
   await waitFor("document.querySelector('.file-entry')");
   await evaluate(

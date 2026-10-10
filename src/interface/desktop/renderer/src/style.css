@@ -2314,3 +2314,47 @@ button svg {
     animation: none;
   }
 }
+.session-labels {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.session-workspace-label {
+  color: var(--muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workspace-picker-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+.session-picker-dialog {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.workspace-catalog-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.workspace-catalog-row > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.workspace-catalog-row small {
+  color: var(--muted);
+}
+.workspace-catalog-row code {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.workspace-catalog-row button {
+  flex: none;
+}

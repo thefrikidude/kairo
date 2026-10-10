@@ -3,6 +3,7 @@ import { UserInputCard } from "./user-input-card.js";
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import parseDiff from "parse-diff";
 import type { DesktopBootstrap, LiveSession } from "../../shared/api.js";
+import type { GitWorktree, WorkspaceSelection } from "../../../../domain/task-workspace.js";
 import type { SessionRuntime } from "../../../../domain/agent-runtime.js";
 import type { ModelSelection, Message, TaskEvent } from "../../../../domain/models.js";
 
@@ -10,7 +11,7 @@ const FileBrowser = lazy(() => import("./file-browser.js"));
 
 type Mode = "build" | "plan";
 type Theme = "light" | "dark";
-type SettingsSection = "general" | "models" | "archived";
+type SettingsSection = "general" | "models" | "archived" | "workspaces";
 const SIDEBAR_DEFAULT_WIDTH = 224;
 const SIDEBAR_MIN_WIDTH = 176;
 const SIDEBAR_MAX_WIDTH = 420;
@@ -150,20 +151,26 @@ export function DesktopApp(): React.JSX.Element {
   const [state, setState] = useState<DesktopBootstrap>();
   const [, setClock] = useState(0);
   const activeSession = state?.sessions.find((item) => item.id === state.activeSessionId);
+  const activeWorkspace = state?.workspaces.find(
+    (workspace) => workspace.id === activeSession?.workspaceId,
+  );
   const projectGroups = useMemo(() => {
     const sessions = state?.sessions ?? [];
     const groups = new Map<string, typeof sessions>();
     for (const session of sessions) {
-      const group = groups.get(session.workspace) ?? [];
+      const project =
+        state?.workspaces.find((workspace) => workspace.id === session.workspaceId)
+          ?.repositoryPath ?? session.workspace;
+      const group = groups.get(project) ?? [];
       group.push(session);
-      groups.set(session.workspace, group);
+      groups.set(project, group);
     }
     return [...groups].map(([workspace, groupedSessions]) => ({
       workspace,
       name: workspace.split("/").filter(Boolean).at(-1) ?? workspace,
       sessions: groupedSessions,
     }));
-  }, [state?.sessions]);
+  }, [state?.sessions, state?.workspaces]);
   const activeModelSelection =
     activeSession?.runtime.kind === "builtin"
       ? (activeSession.runtime.selection ?? state?.config)
@@ -204,6 +211,16 @@ export function DesktopApp(): React.JSX.Element {
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [newSessionChoice, setNewSessionChoice] = useState("");
   const [newSessionWorkspace, setNewSessionWorkspace] = useState("");
+  const [newWorkspaceMode, setNewWorkspaceMode] = useState<WorkspaceSelection["kind"]>("folder");
+  const [newWorkspaceBranch, setNewWorkspaceBranch] = useState("");
+  const [newWorkspaceBase, setNewWorkspaceBase] = useState("HEAD");
+  const [existingWorktree, setExistingWorktree] = useState("");
+  const [worktreeChoices, setWorktreeChoices] = useState<GitWorktree[]>([]);
+  const [worktreeChoicesLoading, setWorktreeChoicesLoading] = useState(false);
+  const [newSessionBusy, setNewSessionBusy] = useState(false);
+  const [newSessionError, setNewSessionError] = useState("");
+  const [removingWorkspaceId, setRemovingWorkspaceId] = useState<string>();
+  const [workspaceRemovalError, setWorkspaceRemovalError] = useState("");
   const [workspacePickerBusy, setWorkspacePickerBusy] = useState(false);
   const [loginPending, setLoginPending] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -375,7 +392,9 @@ export function DesktopApp(): React.JSX.Element {
     }
   }, [contextWidth]);
 
-  const beginSession = (workspace = activeSession?.workspace ?? "") => {
+  const beginSession = (
+    workspace = activeWorkspace?.repositoryPath ?? activeSession?.workspace ?? "",
+  ) => {
     const runtime = activeSession?.runtime;
     setNewSessionChoice(
       runtime?.kind === "external"
@@ -387,7 +406,54 @@ export function DesktopApp(): React.JSX.Element {
           ]),
     );
     setNewSessionWorkspace(workspace);
+    const known = state?.workspaces.find(
+      (item) => item.repositoryPath === workspace && item.kind !== "folder",
+    );
+    setNewWorkspaceMode(known ? "worktree" : "folder");
+    setNewWorkspaceBranch(`kairo/task-${crypto.randomUUID().slice(0, 8)}`);
+    setNewWorkspaceBase("HEAD");
+    setExistingWorktree("");
+    setNewSessionError("");
     setNewSessionOpen(true);
+  };
+
+  useEffect(() => {
+    if (!newSessionOpen || !newSessionWorkspace) return;
+    let disposed = false;
+    setWorktreeChoices([]);
+    setWorktreeChoicesLoading(true);
+    void window.kairo
+      .listWorktrees(newSessionWorkspace)
+      .then((choices) => {
+        if (!disposed) {
+          setWorktreeChoices(choices);
+          setExistingWorktree(choices[0]?.directory ?? "");
+        }
+      })
+      .catch((cause: Error) => {
+        if (!disposed) setNewSessionError(cause.message);
+      })
+      .finally(() => {
+        if (!disposed) setWorktreeChoicesLoading(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [newSessionOpen, newSessionWorkspace]);
+
+  const removeWorkspace = async (id: string) => {
+    if (removingWorkspaceId) return;
+    setRemovingWorkspaceId(id);
+    setWorkspaceRemovalError("");
+    const revision = navigationRevision.current;
+    try {
+      const next = await window.kairo.removeWorktree(id);
+      if (revision === navigationRevision.current) applyState(next);
+    } catch (cause) {
+      setWorkspaceRemovalError((cause as Error).message);
+    } finally {
+      setRemovingWorkspaceId(undefined);
+    }
   };
 
   const renameSession = async (event: React.FormEvent) => {
@@ -448,6 +514,7 @@ export function DesktopApp(): React.JSX.Element {
   const focusSession = useCallback(
     async (next: DesktopBootstrap | undefined) => {
       if (!next) return;
+      if (activeSessionRef.current !== next.activeSessionId) setChanges([]);
       applyState(next);
       followTranscript.current = true;
       setViewingChanges(false);
@@ -483,9 +550,22 @@ export function DesktopApp(): React.JSX.Element {
   };
 
   const newSession = async (runtime: SessionRuntime, workspace: string) => {
+    if (newSessionBusy) return;
+    setNewSessionBusy(true);
+    setNewSessionError("");
     const revision = ++navigationRevision.current;
+    const selection: WorkspaceSelection =
+      newWorkspaceMode === "worktree"
+        ? {
+            kind: "worktree",
+            branch: newWorkspaceBranch.trim(),
+            baseRef: newWorkspaceBase.trim() || "HEAD",
+          }
+        : newWorkspaceMode === "existing"
+          ? { kind: "existing", directory: existingWorktree }
+          : { kind: "folder" };
     try {
-      const next = await window.kairo.newSession(runtime, workspace);
+      const next = await window.kairo.newSession(runtime, workspace, selection);
       if (revision === navigationRevision.current) {
         setNewSessionOpen(false);
         setNewSessionChoice("");
@@ -493,7 +573,9 @@ export function DesktopApp(): React.JSX.Element {
         await focusSession(next);
       }
     } catch (cause) {
-      setError((cause as Error).message);
+      setNewSessionError((cause as Error).message);
+    } finally {
+      setNewSessionBusy(false);
     }
   };
 
@@ -521,7 +603,11 @@ export function DesktopApp(): React.JSX.Element {
     setWorkspacePickerBusy(true);
     try {
       const workspace = await window.kairo.pickWorkspace();
-      if (workspace) setNewSessionWorkspace(workspace);
+      if (workspace) {
+        setNewSessionWorkspace(workspace);
+        setNewWorkspaceMode("folder");
+        setNewSessionError("");
+      }
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -763,8 +849,9 @@ export function DesktopApp(): React.JSX.Element {
       } else if (deleteSessionId) setDeleteSessionId(undefined);
       else if (deleteAllArchivedOpen) setDeleteAllArchivedOpen(false);
       else if (deleteProjectWorkspace) setDeleteProjectWorkspace(undefined);
-      else if (newSessionOpen) setNewSessionOpen(false);
-      else if (projectMenuWorkspace) setProjectMenuWorkspace(undefined);
+      else if (newSessionOpen) {
+        if (!newSessionBusy) setNewSessionOpen(false);
+      } else if (projectMenuWorkspace) setProjectMenuWorkspace(undefined);
       else if (settingsOpen) setSettingsOpen(false);
       else if (reviewOpen) setReviewOpen(false);
       else if (busy && state?.activeSessionId) {
@@ -783,6 +870,7 @@ export function DesktopApp(): React.JSX.Element {
     archiveDeleteBusy,
     deleteProjectWorkspace,
     newSessionOpen,
+    newSessionBusy,
     projectMenuWorkspace,
     busy,
     state?.activeSessionId,
@@ -1161,14 +1249,20 @@ export function DesktopApp(): React.JSX.Element {
           <span aria-hidden="true">←</span> Back to Kairo
         </button>
         <div className="settings-title">Settings</div>
-        {(["general", "models", "archived"] as const).map((section) => (
+        {(["general", "models", "workspaces", "archived"] as const).map((section) => (
           <button
             key={section}
             className={`settings-nav ${settingsSection === section ? "selected" : ""}`}
             aria-current={settingsSection === section ? "page" : undefined}
             onClick={() => setSettingsSection(section)}
           >
-            {section === "general" ? "General" : section === "models" ? "Models" : "Archived chats"}
+            {section === "general"
+              ? "General"
+              : section === "models"
+                ? "Models"
+                : section === "workspaces"
+                  ? "Workspaces"
+                  : "Archived chats"}
             {section === "archived" && <small>{state.archivedSessions.length}</small>}
           </button>
         ))}
@@ -1180,7 +1274,9 @@ export function DesktopApp(): React.JSX.Element {
               ? "General"
               : settingsSection === "models"
                 ? "Models"
-                : "Archived chats"}
+                : settingsSection === "workspaces"
+                  ? "Workspaces"
+                  : "Archived chats"}
           </h1>
         </header>
         {settingsSection === "general" && (
@@ -1367,6 +1463,60 @@ export function DesktopApp(): React.JSX.Element {
               ))
             ) : (
               <p className="empty-settings">Archived chats will appear here.</p>
+            )}
+          </section>
+        )}
+        {settingsSection === "workspaces" && (
+          <section className="settings-card workspace-catalog">
+            <p>
+              Workspaces own files and Git state. Chats keep their conversations. Archive a
+              workspace's chats before removing its worktree.
+            </p>
+            {workspaceRemovalError && (
+              <p className="file-error" role="alert">
+                {workspaceRemovalError}
+              </p>
+            )}
+            {state.workspaces
+              .filter((item) => !item.removedAt)
+              .map((workspace) => {
+                const activeChats = state.sessions.filter(
+                  (session) => session.workspaceId === workspace.id,
+                );
+                return (
+                  <article className="workspace-catalog-row" key={workspace.id}>
+                    <div>
+                      <strong>
+                        {workspace.branch ?? workspace.directory.split(/[\\/]/).at(-1)}
+                      </strong>
+                      <small>
+                        {workspace.kind === "worktree"
+                          ? "Git worktree"
+                          : workspace.kind === "checkout"
+                            ? "Primary checkout"
+                            : "Local folder"}
+                      </small>
+                      <code>{workspace.directory}</code>
+                    </div>
+                    {workspace.managed && (
+                      <button
+                        className="danger-outline-button"
+                        disabled={!!removingWorkspaceId || activeChats.length > 0}
+                        title={
+                          activeChats.length
+                            ? "Archive all chats in this workspace first"
+                            : "Remove this clean worktree; keep its branch and chat history"
+                        }
+                        onClick={() => void removeWorkspace(workspace.id)}
+                      >
+                        {removingWorkspaceId === workspace.id ? "Removing…" : "Remove worktree"}
+                      </button>
+                    )}
+                  </article>
+                );
+              })}
+            {!state.workspaces.some((item) => !item.removedAt) && (
+              <p className="empty-small">Open a project to create a workspace.</p>
             )}
           </section>
         )}
@@ -1565,8 +1715,17 @@ export function DesktopApp(): React.JSX.Element {
                               role="img"
                               aria-label={statusLabel}
                             />
-                            <span className="session-title" title={session.title}>
-                              {session.title}
+                            <span className="session-labels">
+                              <span className="session-title" title={session.title}>
+                                {session.title}
+                              </span>
+                              {state?.workspaces.find((item) => item.id === session.workspaceId)
+                                ?.kind === "worktree" && (
+                                <small className="session-workspace-label">
+                                  {state.workspaces.find((item) => item.id === session.workspaceId)
+                                    ?.branch ?? "Detached worktree"}
+                                </small>
+                              )}
                             </span>
                           </button>
                           <div className="session-row-actions">
@@ -1684,7 +1843,7 @@ export function DesktopApp(): React.JSX.Element {
               <select
                 className="project-switcher"
                 aria-label="Switch project"
-                value={activeSession.workspace}
+                value={activeWorkspace?.repositoryPath ?? activeSession.workspace}
                 onChange={(event) => {
                   const group = projectGroups.find((item) => item.workspace === event.target.value);
                   if (group?.sessions[0]) void openSession(group.sessions[0].id);
@@ -1700,7 +1859,9 @@ export function DesktopApp(): React.JSX.Element {
               <strong>Choose a project</strong>
             )}
             <span title={activeSession?.workspace}>
-              {activeSession?.workspace ?? "Open a local folder to get started"}
+              {activeWorkspace?.branch
+                ? `${activeWorkspace.branch} · ${activeSession?.workspace}`
+                : (activeSession?.workspace ?? "Open a local folder to get started")}
             </span>
           </div>
           <div className="top-actions">
@@ -2383,7 +2544,7 @@ export function DesktopApp(): React.JSX.Element {
         <div
           className="modal-backdrop"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setNewSessionOpen(false);
+            if (event.target === event.currentTarget && !newSessionBusy) setNewSessionOpen(false);
           }}
         >
           <div
@@ -2401,7 +2562,7 @@ export function DesktopApp(): React.JSX.Element {
                 aria-label="Choose project folder"
                 title={newSessionWorkspace || "Choose the project folder for this session"}
                 onClick={() => void pickSessionWorkspace()}
-                disabled={workspacePickerBusy}
+                disabled={workspacePickerBusy || newSessionBusy}
               >
                 <Icon name="folder" />
                 {workspacePickerBusy
@@ -2415,9 +2576,90 @@ export function DesktopApp(): React.JSX.Element {
               )}
             </div>
             <label className="session-picker-label">
+              Task workspace
+              <select
+                aria-label="Task workspace"
+                value={newWorkspaceMode}
+                disabled={newSessionBusy}
+                onChange={(event) =>
+                  setNewWorkspaceMode(event.target.value as WorkspaceSelection["kind"])
+                }
+              >
+                <option value="folder">Use this folder</option>
+                <option
+                  value="worktree"
+                  disabled={!worktreeChoices.length || worktreeChoicesLoading}
+                >
+                  New isolated worktree
+                </option>
+                <option
+                  value="existing"
+                  disabled={!worktreeChoices.length || worktreeChoicesLoading}
+                >
+                  Existing worktree
+                </option>
+              </select>
+            </label>
+            {newWorkspaceMode === "worktree" && (
+              <>
+                <label className="session-picker-label">
+                  Branch
+                  <input
+                    aria-label="Worktree branch"
+                    value={newWorkspaceBranch}
+                    disabled={newSessionBusy}
+                    onChange={(event) => setNewWorkspaceBranch(event.target.value)}
+                  />
+                </label>
+                <label className="session-picker-label">
+                  Start from
+                  <input
+                    aria-label="Worktree base"
+                    value={newWorkspaceBase}
+                    disabled={newSessionBusy}
+                    placeholder="HEAD, branch or commit"
+                    onChange={(event) => setNewWorkspaceBase(event.target.value)}
+                  />
+                </label>
+                <p className="workspace-picker-note">
+                  Starts from committed files. Changes in the original folder stay there.
+                </p>
+              </>
+            )}
+            {newWorkspaceMode === "existing" && (
+              <label className="session-picker-label">
+                Worktree
+                <select
+                  aria-label="Existing worktree"
+                  value={existingWorktree}
+                  disabled={newSessionBusy}
+                  onChange={(event) => setExistingWorktree(event.target.value)}
+                >
+                  {worktreeChoices
+                    .filter((tree) => !tree.prunable)
+                    .map((tree) => (
+                      <option value={tree.directory} key={tree.directory}>
+                        {tree.branch ?? "Detached HEAD"} · {tree.directory}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
+            {worktreeChoicesLoading && (
+              <p role="status" className="workspace-picker-note">
+                Checking Git workspaces…
+              </p>
+            )}
+            {newSessionError && (
+              <p className="file-error" role="alert">
+                {newSessionError}
+              </p>
+            )}
+            <label className="session-picker-label">
               Agent or model
               <select
                 value={newSessionChoice}
+                disabled={newSessionBusy}
                 onChange={(event) => setNewSessionChoice(event.target.value)}
               >
                 <option value="">Select an agent or model</option>
@@ -2457,13 +2699,23 @@ export function DesktopApp(): React.JSX.Element {
               Refresh agents
             </button>
             <div>
-              <button onClick={() => setNewSessionOpen(false)}>Cancel</button>
+              <button disabled={newSessionBusy} onClick={() => setNewSessionOpen(false)}>
+                Cancel
+              </button>
               <button
                 className="primary"
-                disabled={!newSessionChoice || !newSessionWorkspace || workspacePickerBusy}
+                disabled={
+                  newSessionBusy ||
+                  !newSessionChoice ||
+                  !newSessionWorkspace ||
+                  workspacePickerBusy ||
+                  worktreeChoicesLoading ||
+                  (newWorkspaceMode === "worktree" && !newWorkspaceBranch.trim()) ||
+                  (newWorkspaceMode === "existing" && !existingWorktree)
+                }
                 onClick={createSelectedSession}
               >
-                Start session
+                {newSessionBusy ? "Creating workspace…" : "Start session"}
               </button>
             </div>
           </div>
