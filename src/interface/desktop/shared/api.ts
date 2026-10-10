@@ -65,6 +65,14 @@ export type DesktopBootstrap = {
   taskEvents: TaskEvent[];
 };
 
+export type ArchivedHistory = {
+  session: Session;
+  workspace?: TaskWorkspace;
+  messages: Message[];
+  task?: Task;
+  taskEvents: TaskEvent[];
+};
+
 export type DesktopUserInput = { id: string; sessionId: string; questions: AgentQuestion[] };
 
 export type DesktopApproval = {
@@ -110,6 +118,7 @@ export interface DesktopApi {
     sessionId: string,
     path?: string,
   ): Promise<import("../../../infrastructure/tools/workspace-files.js").WorkspaceEntry[]>;
+  archivedHistory(sessionId: string): Promise<ArchivedHistory>;
   archiveSession(sessionId: string): Promise<DesktopBootstrap>;
   restoreSession(sessionId: string): Promise<DesktopBootstrap>;
   deleteSession(sessionId: string): Promise<DesktopBootstrap>;

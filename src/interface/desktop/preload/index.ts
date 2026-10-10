@@ -38,6 +38,7 @@ const api: DesktopApi = {
   loginAgent: (agentId) => invoke("agents:login", agentId),
   renameSession: (sessionId, title) => invoke("session:rename", sessionId, title),
   directory: (sessionId, path) => invoke("workspace:directory", sessionId, path),
+  archivedHistory: (sessionId) => invoke("session:history", sessionId),
   archiveSession: (sessionId) => invoke("session:archive", sessionId),
   restoreSession: (sessionId) => invoke("session:restore", sessionId),
   deleteSession: (sessionId) => invoke("session:delete", sessionId),

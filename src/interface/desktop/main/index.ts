@@ -146,6 +146,7 @@ function registerIpc(): void {
     return result.canceled ? undefined : result.filePaths[0];
   });
   handle("session:open", "session:open");
+  handle("session:history", "session:history");
   handle("session:rename", "session:rename");
   handle("workspace:directory", "workspace:directory");
   handle("worktrees:list", "worktrees:list");

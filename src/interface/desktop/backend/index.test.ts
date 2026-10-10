@@ -766,6 +766,23 @@ test("worktree sessions isolate execution and preserve workspace ownership on ch
   await request("worktrees:remove", b.workspaceId);
   await assert.rejects(access(b.workspace));
   assert.equal(store.get(b.id)?.workspaceId, b.workspaceId);
+  const beforeHistory = await request<DesktopBootstrap>("bootstrap");
+  const history = await request<import("../shared/api.js").ArchivedHistory>(
+    "session:history",
+    b.id,
+  );
+  assert.equal(history.session.id, b.id);
+  assert.ok(history.workspace?.removedAt);
+  assert.ok(
+    history.messages.some((message) => message.role === "user" && message.content === "other"),
+  );
+  assert.ok(history.task);
+  assert.deepEqual(history.taskEvents, store.taskEvents(history.task.id));
+  assert.equal(
+    (await request<DesktopBootstrap>("bootstrap")).activeSessionId,
+    beforeHistory.activeSessionId,
+  );
+  await assert.rejects(request("session:history", a.id), /chat is active/);
   await assert.rejects(request("session:restore", b.id), /worktree was removed/);
   await request("session:delete", a.id);
   await access(a.workspace);
@@ -912,4 +929,56 @@ test("workspace terminals survive chat changes and stay separate from running ag
   assert.ok(
     !(await terminalProcesses()).some((process) => process.pid === terminal.pid && !process.zombie),
   );
+});
+
+test("sibling folders share a checkout execution guard but independent worktrees remain concurrent", async (t) => {
+  const { request, root, store, events, wait } = await setup(t);
+  const { execFileSync } = await import("node:child_process");
+  const { writeFile } = await import("node:fs/promises");
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+  git(["init", "-b", "main"]);
+  git(["config", "user.name", "Fixture"]);
+  git(["config", "user.email", "fixture@example.test"]);
+  const a = join(root, "a");
+  const b = join(root, "b");
+  await mkdir(a);
+  await mkdir(b);
+  await writeFile(join(a, "file.txt"), "first\n");
+  await writeFile(join(b, "file.txt"), "second\n");
+  git(["add", "a", "b"]);
+  git(["commit", "-m", "Initial"]);
+  const external = { kind: "external", agentId: "codex" };
+  const first = await request<DesktopBootstrap>("session:new", external, a);
+  const second = await request<DesktopBootstrap>("session:new", external, b);
+  const firstId = first.activeSessionId!;
+  const secondId = second.activeSessionId!;
+  assert.equal(store.get(firstId)!.workspace, a);
+  assert.equal(store.get(secondId)!.workspace, b);
+  await request("task:send", firstId, "wait", "build");
+  await assert.rejects(request("task:send", secondId, "other", "build"), /Another agent.*checkout/);
+  const snapshot = await request<{ revision: string }>("workspace:snapshot", secondId, "file.txt");
+  await assert.rejects(
+    request("workspace:write", secondId, "file.txt", "changed\n", snapshot.revision),
+    /Stop agents/,
+  );
+  const isolated = await request<DesktopBootstrap>("session:new", external, root, {
+    kind: "worktree",
+    branch: "kairo/independent",
+  });
+  await request("task:send", isolated.activeSessionId!, "other", "build");
+  await wait(() =>
+    events.some(
+      (event) =>
+        event.payload.sessionId === isolated.activeSessionId && event.payload.state === "complete",
+    ),
+  );
+  await request("task:cancel", firstId);
+  await wait(() =>
+    events.some(
+      (event) => event.payload.sessionId === firstId && event.payload.state === "cancelled",
+    ),
+  );
+  await request("workspace:write", secondId, "file.txt", "changed\n", snapshot.revision);
+  assert.equal(await request("workspace:read", secondId, "file.txt"), "changed\n");
 });

@@ -14,6 +14,7 @@ const methods = new Set([
 
   "workspace:open",
   "session:open",
+  "session:history",
   "session:new",
   "worktrees:list",
   "worktrees:remove",

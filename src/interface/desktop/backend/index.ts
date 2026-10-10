@@ -460,6 +460,18 @@ export async function createDesktopRuntime(
         activeSessionId = requireSession(store, String(first)).id;
         return bootstrap(store, activeSessionId);
       }
+      case "session:history": {
+        const session = requireSession(store, String(first));
+        if (!session.archivedAt) throw new Error("This chat is active. Open it from the sidebar.");
+        const task = store.latestTask(session.id);
+        return {
+          session,
+          workspace: store.workspace(session.workspaceId),
+          messages: store.messages(session.id),
+          task,
+          taskEvents: task ? store.taskEvents(task.id) : [],
+        };
+      }
       case "session:rename": {
         const session = requireSession(store, String(first));
         store.rename(session.id, second);
@@ -783,7 +795,7 @@ export async function createDesktopRuntime(
           throw new Error(
             "This workspace is unavailable. Choose another workspace for a new session.",
           );
-        const runDirectory = await realpath(owned.directory);
+        const runDirectory = await worktrees.executionRoot(owned.directory);
         if (closed) throw new Error("Kairo is shutting down.");
         if (
           store.workspace(session.workspaceId)?.removedAt ||
@@ -803,7 +815,7 @@ export async function createDesktopRuntime(
         )?.[1];
         if (owner && owner !== session.id)
           throw new Error(
-            "Another agent is working in this folder. Create an isolated worktree or wait for that task to finish.",
+            "Another agent is working in this checkout. Create an isolated worktree or wait for that task to finish.",
           );
         workspaceRuns.set(runDirectory, session.id);
         runningSessions.add(session.id);
@@ -1098,28 +1110,31 @@ export async function createDesktopRuntime(
       case "workspace:write": {
         const session = requireSession(store, String(first));
         const directory = await realpath(session.workspace);
+        const leaseDirectory = await worktrees.executionRoot(directory);
         if (
           [...workspaceRuns.keys()].some((runningDirectory) =>
-            overlaps(directory, runningDirectory),
+            overlaps(leaseDirectory, runningDirectory),
           )
         )
           throw new Error("Stop agents working in this workspace before saving files.");
-        if ([...workspaceWrites].some((savingDirectory) => overlaps(directory, savingDirectory)))
+        if (
+          [...workspaceWrites].some((savingDirectory) => overlaps(leaseDirectory, savingDirectory))
+        )
           throw new Error("Another file save is in progress. Try again in a moment.");
         if (
           [...removalDirectories.values()].some((removingDirectory) =>
-            overlaps(directory, removingDirectory),
+            overlaps(leaseDirectory, removingDirectory),
           )
         )
           throw new Error("This workspace is being removed.");
         if (closed) throw new Error("Kairo is shutting down.");
-        workspaceWrites.add(directory);
+        workspaceWrites.add(leaseDirectory);
         try {
           return await (
             await WorkspaceFiles.create(directory)
           ).save(second, third, request.args[3]);
         } finally {
-          workspaceWrites.delete(directory);
+          workspaceWrites.delete(leaseDirectory);
         }
       }
       case "workspace:review": {

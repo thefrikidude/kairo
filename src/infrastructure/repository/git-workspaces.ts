@@ -32,6 +32,17 @@ export class GitWorkspaces {
   private mutations = new Map<string, Promise<unknown>>();
   constructor(private readonly managedRoot = join(stateDir(), "worktrees")) {}
 
+  /** Git's index/branch belong to the checkout root, even when a chat starts in a subfolder. */
+  async executionRoot(requested: string): Promise<string> {
+    const directory = await realpath(requested);
+    try {
+      return await realpath((await command(directory, ["rev-parse", "--show-toplevel"])).trim());
+    } catch (error) {
+      if ((error as Error).message.includes("not a git repository")) return directory;
+      throw error;
+    }
+  }
+
   async describe(requested: string): Promise<WorkspaceDescription> {
     const directory = await realpath(requested);
     if (!(await stat(directory)).isDirectory()) throw new Error("Choose a project folder.");
