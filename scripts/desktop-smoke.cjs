@@ -318,6 +318,13 @@ async function run() {
   const switchMs = performance.now() - switchStart;
   await waitFor("document.querySelector('.file-entry')");
   assert.equal(await evaluate("!!document.querySelector('.file-preview')"), false);
+  await evaluate("document.querySelector('#files-tab').focus()");
+  await key("Right");
+  assert.equal(await evaluate("document.activeElement.id"), "changes-tab");
+  await key("Home");
+  assert.equal(await evaluate("document.activeElement.id"), "files-tab");
+  await key("End");
+  assert.equal(await evaluate("document.activeElement.id"), "changes-tab");
   await click("#changes-tab");
   await waitFor("document.querySelector('#changes-tab').getAttribute('aria-selected') === 'true'");
   await sleep(100);
@@ -373,6 +380,21 @@ async function run() {
   assert.equal((await evaluate("window.kairo.listTerminals()"))[0].id, rootTerminal.id);
   await click("button[aria-label='New terminal']");
   await waitFor("document.querySelectorAll('.terminal-tab').length === 2");
+  await evaluate("document.querySelector('.terminal-tabs [role=tab][aria-selected=true]').focus()");
+  await key("Left");
+  assert.equal(
+    await evaluate(
+      "document.activeElement === document.querySelectorAll('.terminal-tabs [role=tab]')[0]",
+    ),
+    true,
+  );
+  await key("End");
+  assert.equal(
+    await evaluate(
+      "document.activeElement === document.querySelectorAll('.terminal-tabs [role=tab]')[1]",
+    ),
+    true,
+  );
   const heightBefore = await evaluate(
     "Number(document.querySelector('[aria-label=\"Resize terminal\"]').getAttribute('aria-valuenow'))",
   );

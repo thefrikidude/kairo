@@ -1,3 +1,4 @@
+import { navigateTabs } from "./tab-navigation.js";
 import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -117,7 +118,11 @@ const TerminalView = memo(function TerminalView({
   useEffect(() => {
     if (visible) {
       fit.current();
-      terminal.current?.focus();
+      if (!(
+        document.activeElement instanceof Element &&
+        document.activeElement.closest('[role="tablist"]')
+      ))
+        terminal.current?.focus();
     }
   }, [visible]);
   return (
@@ -268,11 +273,17 @@ export default memo(function TerminalPanel({
         }}
       />
       <div className="terminal-toolbar">
-        <div className="terminal-tabs" role="tablist" aria-label="Terminal tabs">
+        <div
+          className="terminal-tabs"
+          role="tablist"
+          aria-label="Terminal tabs"
+          onKeyDown={navigateTabs}
+        >
           {current.map((info, index) => (
             <div className="terminal-tab" key={info.id}>
               <button
                 role="tab"
+                tabIndex={selected?.id === info.id ? 0 : -1}
                 aria-selected={selected?.id === info.id}
                 aria-controls={`terminal-view-${info.id}`}
                 title={info.directory}
@@ -283,6 +294,7 @@ export default memo(function TerminalPanel({
               </button>
               <button
                 aria-label={`Close terminal ${index + 1}`}
+                tabIndex={selected?.id === info.id ? 0 : -1}
                 title="Stop shell and close terminal"
                 disabled={Boolean(closing)}
                 onClick={() => void close(info.id)}

@@ -1,3 +1,4 @@
+import { navigateTabs } from "./tab-navigation.js";
 import { TerminalCatalog } from "./terminal-catalog.js";
 import { UsageFooter } from "./usage-footer.js";
 import { UserInputCard } from "./user-input-card.js";
@@ -2400,10 +2401,16 @@ export function DesktopApp(): React.JSX.Element {
             }
           }}
         />
-        <div className="workbench-tabs" role="tablist" aria-label="Workspace views">
+        <div
+          className="workbench-tabs"
+          role="tablist"
+          aria-label="Workspace views"
+          onKeyDown={navigateTabs}
+        >
           <button
             role="tab"
             id="files-tab"
+            tabIndex={contextTab === "files" ? 0 : -1}
             aria-selected={contextTab === "files"}
             aria-controls="files-view"
             className={contextTab === "files" ? "active" : ""}
@@ -2414,6 +2421,7 @@ export function DesktopApp(): React.JSX.Element {
           <button
             role="tab"
             id="changes-tab"
+            tabIndex={contextTab === "changes" ? 0 : -1}
             aria-selected={contextTab === "changes"}
             aria-controls="changes-view"
             className={contextTab === "changes" ? "active" : ""}
@@ -2976,7 +2984,7 @@ function ArchivedHistoryView({
                         {event.name ?? event.kind.replaceAll("_", " ")}
                         {event.outcome ? ` · ${event.outcome}` : ""}
                         {event.durationMs !== undefined ? ` · ${event.durationMs} ms` : ""}
-                        {event.exitCode !== undefined ? ` · exit ${event.exitCode}` : ""}
+                        {typeof event.exitCode === "number" ? ` · exit ${event.exitCode}` : ""}
                         {event.paths?.length ? <code>{event.paths.join(", ")}</code> : null}
                       </li>
                     ))}
