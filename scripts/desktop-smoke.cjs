@@ -25,6 +25,11 @@ async function waitFor(code) {
   }
   throw new Error(`UI timed out: ${code}`);
 }
+async function key(keyCode, modifiers = []) {
+  win.webContents.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+  win.webContents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+  await sleep(20);
+}
 async function click(selector) {
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
 }
@@ -98,6 +103,15 @@ async function run() {
   assert.equal(await evaluate("!!document.querySelector('.status-complete')"), true);
   await click(".session-row.selected .session-action-button[title='Rename session']");
   await waitFor("document.querySelector('#rename-session-title')");
+  await waitFor(
+    "document.activeElement === document.querySelector('[aria-labelledby=rename-session-title] input')",
+  );
+  for (let index = 0; index < 6; index += 1) {
+    await key("Tab");
+    assert.equal(await evaluate("!!document.activeElement.closest('dialog[open]')"), true);
+  }
+  await key("Tab", ["shift"]);
+  assert.equal(await evaluate("document.activeElement.getAttribute('type')"), "submit");
   await evaluate(`(() => {
     const input = document.querySelector('[aria-labelledby=rename-session-title] input');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Renamed task');
@@ -111,6 +125,19 @@ async function run() {
   assert.equal(
     current.sessions.find((s) => s.id === current.activeSessionId).title,
     "Renamed task",
+  );
+  await evaluate("document.querySelector('.new-chat').focus()");
+  await click(".new-chat");
+  await waitFor("document.querySelector('#new-session-title')");
+  for (let index = 0; index < 12; index += 1) {
+    await key("Tab");
+    assert.equal(await evaluate("!!document.activeElement.closest('dialog[open]')"), true);
+  }
+  await key("Escape");
+  await waitFor("!document.querySelector('#new-session-title')");
+  assert.equal(
+    await evaluate("document.activeElement === document.querySelector('.new-chat')"),
+    true,
   );
   await click(".new-chat");
   await waitFor("document.querySelector('#new-session-title')");
@@ -397,6 +424,36 @@ async function run() {
     "document.querySelectorAll('.terminal-catalog .workspace-catalog-row').length === 1",
   );
   await capture("terminal-catalog.png");
+  const beforeHistory = await evaluate("window.kairo.bootstrap()");
+  await evaluate(
+    "Array.from(document.querySelectorAll('.settings-nav')).find(item => item.textContent.startsWith('Archived chats')).click()",
+  );
+  await waitFor("document.querySelector('.archived-row')");
+  assert.equal(
+    await evaluate(
+      "Array.from(document.querySelectorAll('.archived-actions button')).find(item => item.textContent === 'Restore').disabled",
+    ),
+    true,
+  );
+  await click("button[aria-label='View Archived removed worktree']");
+  await waitFor(
+    "document.querySelector('.history-messages')?.textContent.includes('Saved history remains available')",
+  );
+  assert.ok(
+    await evaluate(
+      "document.querySelector('.history-notice').textContent.includes('Worktree removed')",
+    ),
+  );
+  assert.equal(await evaluate("!!document.querySelector('.composer')"), false);
+  await click(".history-task > summary");
+  await waitFor("document.querySelector('.history-task').textContent.includes('1 test passed')");
+  assert.equal(
+    (await evaluate("window.kairo.bootstrap()")).activeSessionId,
+    beforeHistory.activeSessionId,
+  );
+  await capture("archived-history.png");
+  await click(".history-back");
+  await waitFor("document.querySelector('.archived-row')");
   assert.deepEqual(failures, []);
   const metrics = {
     startupMs: Math.round(startupMs),

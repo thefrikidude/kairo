@@ -17,7 +17,7 @@ import type {
   WorkspaceChange,
 } from "../../../../infrastructure/tools/workspace-review.js";
 import { retainBuffer, type EditorBuffer } from "./editor-buffer.js";
-import type { DesktopBootstrap, LiveSession } from "../../shared/api.js";
+import type { ArchivedHistory, DesktopBootstrap, LiveSession } from "../../shared/api.js";
 import type { GitWorktree, WorkspaceSelection } from "../../../../domain/task-workspace.js";
 import type { SessionRuntime } from "../../../../domain/agent-runtime.js";
 import type { ModelSelection, Message, TaskEvent } from "../../../../domain/models.js";
@@ -219,6 +219,7 @@ export function DesktopApp(): React.JSX.Element {
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [archivedHistoryId, setArchivedHistoryId] = useState<string>();
   const [deleteSessionId, setDeleteSessionId] = useState<string>();
   const [deleteAllArchivedOpen, setDeleteAllArchivedOpen] = useState(false);
   const [projectMenuWorkspace, setProjectMenuWorkspace] = useState<string>();
@@ -256,6 +257,7 @@ export function DesktopApp(): React.JSX.Element {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const followTranscript = useRef(true);
   const activeSessionRef = useRef<string | undefined>(undefined);
+  const sessionWorkspacesRef = useRef(new Map<string, string>());
   const navigationRevision = useRef(0);
 
   useEffect(() => {
@@ -420,6 +422,9 @@ export function DesktopApp(): React.JSX.Element {
       setReviewError("");
     }
     activeSessionRef.current = next.activeSessionId;
+    sessionWorkspacesRef.current = new Map(
+      next.sessions.map((session) => [session.id, session.workspaceId]),
+    );
     setState(next);
     setError("");
   }, []);
@@ -553,8 +558,14 @@ export function DesktopApp(): React.JSX.Element {
       });
     });
     let reviewTimer: ReturnType<typeof setTimeout> | undefined;
+    const affectsActiveWorkspace = (sessionId: string) => {
+      const workspace = sessionWorkspacesRef.current.get(sessionId);
+      return Boolean(
+        workspace && workspace === sessionWorkspacesRef.current.get(activeSessionRef.current ?? ""),
+      );
+    };
     const stopTaskEvent = window.kairo.onTaskEvent((event) => {
-      if (event.kind === "tool_finished" && event.sessionId === activeSessionRef.current) {
+      if (event.kind === "tool_finished" && affectsActiveWorkspace(event.sessionId)) {
         clearTimeout(reviewTimer);
         reviewTimer = setTimeout(() => setReviewRevision((value) => value + 1), 500);
       }
@@ -594,6 +605,13 @@ export function DesktopApp(): React.JSX.Element {
         }
         return {
           ...current,
+          sessions: event.task
+            ? current.sessions.map((session) =>
+                session.id === event.sessionId
+                  ? { ...session, lastTaskStatus: event.task!.status }
+                  : session,
+              )
+            : current.sessions,
           liveSessions: { ...current.liveSessions, [event.sessionId]: next },
           userInputs: terminal
             ? current.userInputs.filter((item) => item.sessionId !== event.sessionId)
@@ -604,6 +622,7 @@ export function DesktopApp(): React.JSX.Element {
         };
       });
       if (["complete", "cancelled", "error"].includes(event.state)) {
+        if (affectsActiveWorkspace(event.sessionId)) setReviewRevision((value) => value + 1);
         void reload(event.sessionId).catch((cause) => setError((cause as Error).message));
       }
     });
@@ -753,6 +772,7 @@ export function DesktopApp(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]")) return;
       if ((event.metaKey || event.ctrlKey) && event.code === "Backquote" && !event.altKey) {
         event.preventDefault();
         toggleTerminal();
@@ -784,6 +804,7 @@ export function DesktopApp(): React.JSX.Element {
       else if (newSessionOpen) {
         if (!newSessionBusy) setNewSessionOpen(false);
       } else if (projectMenuWorkspace) setProjectMenuWorkspace(undefined);
+      else if (archivedHistoryId) setArchivedHistoryId(undefined);
       else if (settingsOpen) setSettingsOpen(false);
       else if (reviewOpen) setReviewOpen(false);
       else if (busy && state?.activeSessionId) {
@@ -794,6 +815,7 @@ export function DesktopApp(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     toggleTerminal,
+    archivedHistoryId,
     settingsOpen,
     renameSessionId,
     renameBusy,
@@ -1218,7 +1240,10 @@ export function DesktopApp(): React.JSX.Element {
             key={section}
             className={`settings-nav ${settingsSection === section ? "selected" : ""}`}
             aria-current={settingsSection === section ? "page" : undefined}
-            onClick={() => setSettingsSection(section)}
+            onClick={() => {
+              setArchivedHistoryId(undefined);
+              setSettingsSection(section);
+            }}
           >
             {section === "general"
               ? "General"
@@ -1383,50 +1408,82 @@ export function DesktopApp(): React.JSX.Element {
         )}
         {settingsSection === "archived" && (
           <section className="settings-card archived-list">
-            <div className="archived-list-header">
-              <span>
-                {state.archivedSessions.length} archived{" "}
-                {state.archivedSessions.length === 1 ? "chat" : "chats"}
-              </span>
-              <button
-                className="danger-outline-button"
-                disabled={!state.archivedSessions.length}
-                onClick={() => {
-                  setArchiveDeleteError("");
-                  setDeleteAllArchivedOpen(true);
-                }}
-              >
-                <Icon name="trash" /> Delete all
-              </button>
-            </div>
-            {state.archivedSessions.length ? (
-              state.archivedSessions.map((session) => (
-                <div className="archived-row" key={session.id}>
-                  <div className="archived-chat-details">
-                    <strong title={session.title}>{session.title}</strong>
-                    <small title={session.workspace}>
-                      <Icon name="folder" />{" "}
-                      {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
-                    </small>
-                  </div>
-                  <div className="archived-actions">
-                    <button onClick={() => void restoreSession(session.id)}>Restore</button>
-                    <button
-                      className="archive-delete-button"
-                      aria-label={`Delete ${session.title}`}
-                      title="Delete chat"
-                      onClick={() => {
-                        setArchiveDeleteError("");
-                        setDeleteSessionId(session.id);
-                      }}
-                    >
-                      <Icon name="trash" />
-                    </button>
-                  </div>
-                </div>
-              ))
+            {archivedHistoryId ? (
+              <ArchivedHistoryView
+                key={archivedHistoryId}
+                sessionId={archivedHistoryId}
+                onBack={() => setArchivedHistoryId(undefined)}
+              />
             ) : (
-              <p className="empty-settings">Archived chats will appear here.</p>
+              <>
+                <div className="archived-list-header">
+                  <span>
+                    {state.archivedSessions.length} archived{" "}
+                    {state.archivedSessions.length === 1 ? "chat" : "chats"}
+                  </span>
+                  <button
+                    className="danger-outline-button"
+                    disabled={!state.archivedSessions.length}
+                    onClick={() => {
+                      setArchiveDeleteError("");
+                      setDeleteAllArchivedOpen(true);
+                    }}
+                  >
+                    <Icon name="trash" /> Delete all
+                  </button>
+                </div>
+                {state.archivedSessions.length ? (
+                  state.archivedSessions.map((session) => (
+                    <div className="archived-row" key={session.id}>
+                      <div className="archived-chat-details">
+                        <strong title={session.title}>{session.title}</strong>
+                        <small title={session.workspace}>
+                          <Icon name="folder" />{" "}
+                          {session.workspace.split("/").filter(Boolean).at(-1) ?? session.workspace}
+                        </small>
+                      </div>
+                      <div className="archived-actions">
+                        <button
+                          aria-label={`View ${session.title}`}
+                          onClick={() => setArchivedHistoryId(session.id)}
+                        >
+                          View
+                        </button>
+                        <button
+                          disabled={Boolean(
+                            state.workspaces.find(
+                              (workspace) => workspace.id === session.workspaceId,
+                            )?.removedAt,
+                          )}
+                          title={
+                            state.workspaces.find(
+                              (workspace) => workspace.id === session.workspaceId,
+                            )?.removedAt
+                              ? "This worktree was removed. View its saved history."
+                              : "Restore chat"
+                          }
+                          onClick={() => void restoreSession(session.id)}
+                        >
+                          Restore
+                        </button>
+                        <button
+                          className="archive-delete-button"
+                          aria-label={`Delete ${session.title}`}
+                          title="Delete chat"
+                          onClick={() => {
+                            setArchiveDeleteError("");
+                            setDeleteSessionId(session.id);
+                          }}
+                        >
+                          <Icon name="trash" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-settings">Archived chats will appear here.</p>
+                )}
+              </>
             )}
           </section>
         )}
@@ -1648,13 +1705,13 @@ export function DesktopApp(): React.JSX.Element {
                                   ? "cancelled"
                                   : session.lastTaskStatus === "interrupted"
                                     ? "interrupted"
-                                    : sessionState === "complete" ||
-                                        ["completed", "planned"].includes(
-                                          session.lastTaskStatus ?? "",
-                                        )
-                                      ? "complete"
-                                      : session.lastTaskStatus === "verification_required"
-                                        ? "review"
+                                    : session.lastTaskStatus === "verification_required"
+                                      ? "review"
+                                      : sessionState === "complete" ||
+                                          ["completed", "planned"].includes(
+                                            session.lastTaskStatus ?? "",
+                                          )
+                                        ? "complete"
                                         : "idle";
                       const statusLabel = {
                         waiting: "Needs your response",
@@ -2449,11 +2506,13 @@ export function DesktopApp(): React.JSX.Element {
       )}
 
       {renameSessionId && (
-        <div className="modal-backdrop">
+        <ModalFrame
+          labelledBy="rename-session-title"
+          blocked={renameBusy}
+          onDismiss={() => setRenameSessionId(undefined)}
+        >
           <form
             className="confirm-dialog"
-            role="dialog"
-            aria-modal="true"
             aria-labelledby="rename-session-title"
             onSubmit={(event) => void renameSession(event)}
           >
@@ -2490,21 +2549,15 @@ export function DesktopApp(): React.JSX.Element {
               </button>
             </div>
           </form>
-        </div>
+        </ModalFrame>
       )}
       {newSessionOpen && (
-        <div
-          className="modal-backdrop"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !newSessionBusy) setNewSessionOpen(false);
-          }}
+        <ModalFrame
+          labelledBy="new-session-title"
+          blocked={newSessionBusy}
+          onDismiss={() => setNewSessionOpen(false)}
         >
-          <div
-            className="confirm-dialog session-picker-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="new-session-title"
-          >
+          <div className="confirm-dialog session-picker-dialog" aria-labelledby="new-session-title">
             <h2 id="new-session-title">New agent session</h2>
             <p>Choose an agent or model for this project.</p>
             <div className="session-folder-picker">
@@ -2671,17 +2724,16 @@ export function DesktopApp(): React.JSX.Element {
               </button>
             </div>
           </div>
-        </div>
+        </ModalFrame>
       )}
 
       {deleteProjectWorkspace && (
-        <div className="modal-backdrop">
-          <div
-            className="confirm-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-project-title"
-          >
+        <ModalFrame
+          labelledBy="delete-project-title"
+          blocked={projectDeleteBusy}
+          onDismiss={() => setDeleteProjectWorkspace(undefined)}
+        >
+          <div className="confirm-dialog" aria-labelledby="delete-project-title">
             <h2 id="delete-project-title">Delete project?</h2>
             <p>
               This permanently deletes all active and archived chats and task history for this
@@ -2699,9 +2751,58 @@ export function DesktopApp(): React.JSX.Element {
               </button>
             </div>
           </div>
-        </div>
+        </ModalFrame>
       )}
     </div>
+  );
+}
+
+function ModalFrame({
+  labelledBy,
+  blocked,
+  onDismiss,
+  children,
+}: {
+  labelledBy: string;
+  blocked: boolean;
+  onDismiss(): void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const previous =
+      document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    const dialog = ref.current!;
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      if (previous?.isConnected) previous.focus();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className="modal-host"
+      aria-labelledby={labelledBy}
+      aria-busy={blocked}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!blocked) onDismiss();
+      }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget || blocked) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        )
+          onDismiss();
+      }}
+    >
+      {children}
+    </dialog>
   );
 }
 
@@ -2785,6 +2886,132 @@ function DeleteChatDialog({
         </button>
       </div>
     </dialog>
+  );
+}
+
+function ArchivedHistoryView({
+  sessionId,
+  onBack,
+}: {
+  sessionId: string;
+  onBack(): void;
+}): React.JSX.Element {
+  const [history, setHistory] = useState<ArchivedHistory>();
+  const [error, setError] = useState("");
+  const [messageCount, setMessageCount] = useState(50);
+  const [eventCount, setEventCount] = useState(50);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setError("");
+    void window.kairo
+      .archivedHistory(sessionId)
+      .then((value) => {
+        if (!cancelled) setHistory(value);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError((cause as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, revision]);
+  return (
+    <div className="archived-history">
+      <button className="history-back" onClick={onBack}>
+        ← Archived chats
+      </button>
+      {error && (
+        <div className="file-error" role="alert">
+          {error}
+          <button onClick={() => setRevision((value) => value + 1)}>Retry</button>
+        </div>
+      )}
+      {!history && !error && <p role="status">Loading saved conversation…</p>}
+      {history && (
+        <>
+          <h2>{history.session.title}</h2>
+          <p className="history-notice">
+            Read-only saved conversation
+            {history.workspace?.removedAt ? " · Worktree removed" : " · Archived"}
+          </p>
+          <code className="history-directory">{history.session.workspace}</code>
+          {history.task && (
+            <details className="history-task">
+              <summary>Last task · {history.task.status.replaceAll("_", " ")}</summary>
+              <p>{history.task.summary ?? history.task.prompt}</p>
+              {history.task.error && <p className="file-error">{history.task.error}</p>}
+              {history.task.changedFiles.length > 0 && (
+                <p>Changed files: {history.task.changedFiles.join(", ")}</p>
+              )}
+              {history.task.plan && (
+                <>
+                  <h3>{history.task.plan.goal}</h3>
+                  <ol>
+                    {history.task.plan.steps.map((step, index) => (
+                      <li key={index}>{step}</li>
+                    ))}
+                  </ol>
+                </>
+              )}
+              {history.task.verificationCommand && (
+                <>
+                  <p>
+                    Verification: <code>{history.task.verificationCommand}</code> ·{" "}
+                    {history.task.verificationPassed === true
+                      ? "Passed"
+                      : history.task.verificationPassed === false
+                        ? "Failed"
+                        : "Not verified"}
+                  </p>
+                  <pre>{history.task.verificationOutput}</pre>
+                </>
+              )}
+              {!!history.taskEvents.length && (
+                <details>
+                  <summary>Recorded activity ({history.taskEvents.length})</summary>
+                  <ul>
+                    {history.taskEvents.slice(-eventCount).map((event, index) => (
+                      <li key={event.id ?? index}>
+                        {event.name ?? event.kind.replaceAll("_", " ")}
+                        {event.outcome ? ` · ${event.outcome}` : ""}
+                        {event.durationMs !== undefined ? ` · ${event.durationMs} ms` : ""}
+                        {event.exitCode !== undefined ? ` · exit ${event.exitCode}` : ""}
+                        {event.paths?.length ? <code>{event.paths.join(", ")}</code> : null}
+                      </li>
+                    ))}
+                  </ul>
+                  {history.taskEvents.length > eventCount && (
+                    <button onClick={() => setEventCount((value) => value + 50)}>
+                      Show earlier activity
+                    </button>
+                  )}
+                </details>
+              )}
+            </details>
+          )}
+          {history.messages.length > messageCount && (
+            <button onClick={() => setMessageCount((value) => value + 50)}>
+              Show earlier messages ({history.messages.length - messageCount})
+            </button>
+          )}
+          <div className="history-messages">
+            {history.messages.slice(-messageCount).map((message, index) => (
+              <ChatMessage
+                key={`${message.createdAt}-${index}`}
+                message={message}
+                agentName={
+                  history.session.runtime.kind === "external"
+                    ? history.session.runtime.agentId
+                    : "Kairo"
+                }
+              />
+            ))}
+          </div>
+          {!history.messages.length && <p>This chat has no saved messages.</p>}
+        </>
+      )}
+    </div>
   );
 }
 

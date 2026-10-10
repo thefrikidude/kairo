@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { GitWorkspaces } from "../dist/infrastructure/repository/git-workspaces.js";
 import { SqliteSessionStore } from "../dist/infrastructure/persistence/sqlite-session-store.js";
 
 const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-ui-smoke-")));
@@ -50,6 +51,34 @@ const task = store.startTask(first.id, "Inspect the workspace");
 store.updateTask(task.id, { status: "completed", summary: "Fixture complete" });
 const second = store.create(project);
 store.rename(second.id, "Second session");
+const worktrees = new GitWorkspaces(join(state, "worktrees"));
+const historyWorkspace = store.registerWorkspace(
+  await worktrees.create(project, "kairo/archived-history"),
+);
+const archived = store.create(historyWorkspace.directory);
+store.rename(archived.id, "Archived removed worktree");
+store.addMessage(archived.id, {
+  role: "user",
+  content: "Keep this conversation after removing its worktree.",
+  createdAt: 1,
+});
+store.addMessage(archived.id, {
+  role: "model",
+  agentName: "Kairo",
+  content: "Saved history remains available in the archive.",
+  createdAt: 2,
+});
+const historyTask = store.startTask(archived.id, "Keep saved history");
+store.updateTask(historyTask.id, {
+  status: "completed",
+  summary: "Archive fixture complete",
+  verificationCommand: "node --test",
+  verificationPassed: true,
+  verificationOutput: "1 test passed",
+});
+store.archive(archived.id);
+await worktrees.remove(historyWorkspace);
+store.markWorkspaceRemoved(historyWorkspace.id);
 store.close();
 console.log(`Desktop smoke evidence: ${output}`);
 async function launch(restart = false) {
@@ -66,6 +95,7 @@ async function launch(restart = false) {
         KAIRO_SMOKE_PROJECT: project,
         KAIRO_SMOKE_FIRST: first.id,
         KAIRO_SMOKE_SECOND: second.id,
+        KAIRO_SMOKE_ARCHIVED: archived.id,
         KAIRO_SMOKE_RESTART: restart ? "1" : "0",
       },
     },

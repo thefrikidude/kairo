@@ -2768,3 +2768,64 @@ button svg {
   padding: 16px;
   font-size: 12px;
 }
+
+.history-back {
+  margin-bottom: 16px;
+}
+.archived-history h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+.history-notice {
+  color: var(--muted);
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.history-directory {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 11px;
+}
+.history-task {
+  margin: 20px 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.history-task summary {
+  cursor: pointer;
+}
+.history-task pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.history-task li code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.history-messages {
+  margin-top: 20px;
+}
+.history-messages .message {
+  margin-bottom: 24px;
+}
+
+.modal-host {
+  width: min(calc(100vw - 48px), 390px);
+  max-width: none;
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text);
+  overflow: auto;
+}
+.modal-host > .confirm-dialog {
+  width: 100%;
+}
+.modal-host::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(3px);
+}
