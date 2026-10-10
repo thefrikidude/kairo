@@ -71,6 +71,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         sessionUpdate: "tool_call",
         toolCallId: "tool-1",
         title: "Read file",
+        locations: [{ path: "/tmp/fixture.ts", line: 1 }],
         status: "pending",
       });
       notification({

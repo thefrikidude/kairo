@@ -35,6 +35,8 @@ export interface TaskEvent {
   createdAt: number;
   operationId?: string;
   name?: string;
+  /** Bounded file paths for navigation; never file contents or tool arguments. */
+  paths?: string[];
   outcome?: string;
   durationMs?: number;
   exitCode?: number | null;

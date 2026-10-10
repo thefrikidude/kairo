@@ -35,7 +35,7 @@ export type ExternalRun = {
   signal: AbortSignal;
   onThread(id: string): void;
   onText(text: string): void;
-  onTool(id: string, name: string, complete: boolean, outcome?: string): void;
+  onTool(id: string, name: string, complete: boolean, outcome?: string, paths?: string[]): void;
   requestUserInput?(
     questions: AgentQuestion[],
     signal: AbortSignal,

@@ -403,7 +403,12 @@ export class CodingAgent {
       });
       const plan = this.validatePlan(call.args);
       if (!plan) return this.record(task, call, false, "Invalid plan submission.", false);
-      this.event(task, { kind: "tool_started", operationId: call.id, name: call.name });
+      this.event(task, {
+        kind: "tool_started",
+        operationId: call.id,
+        name: call.name,
+        paths: typeof call.args.path === "string" ? [call.args.path.slice(0, 1_000)] : undefined,
+      });
       this.store.updateTask(task.id, { status: "planned", plan });
       this.event(task, {
         kind: "tool_finished",
@@ -639,7 +644,12 @@ export class CodingAgent {
       }
     }
     onText(`\n[Tool] ${call.name}\n`);
-    this.event(task, { kind: "tool_started", operationId: call.id, name: call.name });
+    this.event(task, {
+      kind: "tool_started",
+      operationId: call.id,
+      name: call.name,
+      paths: typeof call.args.path === "string" ? [call.args.path.slice(0, 1_000)] : undefined,
+    });
     const started = performance.now();
     let result: ToolResult;
     try {
@@ -649,6 +659,7 @@ export class CodingAgent {
         kind: "tool_finished",
         operationId: call.id,
         name: call.name,
+        paths: typeof call.args.path === "string" ? [call.args.path.slice(0, 1_000)] : undefined,
         outcome: "failed",
         durationMs: performance.now() - started,
       });
@@ -658,6 +669,7 @@ export class CodingAgent {
       kind: "tool_finished",
       operationId: call.id,
       name: call.name,
+      paths: typeof call.args.path === "string" ? [call.args.path.slice(0, 1_000)] : undefined,
       outcome: result.ok ? "succeeded" : "failed",
       durationMs: performance.now() - started,
       exitCode: result.exitCode,

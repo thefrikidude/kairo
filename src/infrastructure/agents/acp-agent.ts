@@ -104,6 +104,7 @@ export class AcpAgentAdapter implements ExternalAgentAdapter {
     let cancelTimer: ReturnType<typeof setTimeout> | undefined;
     const toolNames = new Map<string, string>();
     const toolStates = new Map<string, string>();
+    const toolPaths = new Map<string, string[]>();
     const cancel = () => {
       if (sessionId) {
         try {
@@ -184,6 +185,7 @@ export class AcpAgentAdapter implements ExternalAgentAdapter {
         title?: string;
         kind?: string;
         status?: string;
+        locations?: { path?: unknown }[] | null;
       };
       if (update.sessionUpdate === "agent_message_chunk" && update.content?.type === "text")
         input.onText(update.content.text ?? "");
@@ -193,14 +195,33 @@ export class AcpAgentAdapter implements ExternalAgentAdapter {
       ) {
         const id = update.toolCallId;
         if (update.title || update.kind) toolNames.set(id, update.title ?? update.kind!);
-        const status = update.status ?? "pending";
-        if (!toolStates.has(id)) input.onTool(id, toolNames.get(id) ?? "Agent operation", false);
+        const status = update.status ?? toolStates.get(id) ?? "pending";
+        const locationsChanged = update.locations !== undefined;
+        if (locationsChanged)
+          toolPaths.set(
+            id,
+            Array.isArray(update.locations)
+              ? update.locations
+                  .map((location) => location?.path)
+                  .filter((path): path is string => typeof path === "string")
+                  .slice(0, 20)
+              : [],
+          );
+        if (!toolStates.has(id) || (locationsChanged && !["completed", "failed"].includes(status)))
+          input.onTool(
+            id,
+            toolNames.get(id) ?? "Agent operation",
+            false,
+            undefined,
+            toolPaths.get(id),
+          );
         if (toolStates.get(id) !== status && ["completed", "failed"].includes(status))
           input.onTool(
             id,
             toolNames.get(id) ?? "Agent operation",
             true,
             status === "completed" ? "succeeded" : "failed",
+            toolPaths.get(id),
           );
         toolStates.set(id, status);
       }

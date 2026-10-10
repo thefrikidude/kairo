@@ -176,6 +176,27 @@ input.on("line", (line) => {
         },
       });
     } else if (prompt !== "wait") {
+      if (prompt === "file-change") {
+        notify("item/started", {
+          threadId: params.threadId,
+          turnId: turn.id,
+          item: {
+            id: "edit-file",
+            type: "fileChange",
+            changes: [{ path: "/tmp/fixture.ts", kind: { type: "update" }, diff: "" }],
+          },
+        });
+        notify("item/completed", {
+          threadId: params.threadId,
+          turnId: turn.id,
+          item: {
+            id: "edit-file",
+            type: "fileChange",
+            status: "completed",
+            changes: [{ path: "/tmp/fixture.ts", kind: { type: "update" }, diff: "" }],
+          },
+        });
+      }
       notify("item/started", {
         threadId: params.threadId,
         item: { id: `command-${turn.id}`, type: "commandExecution" },

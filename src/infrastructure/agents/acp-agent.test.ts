@@ -114,3 +114,13 @@ test("ACP forcibly stops a process that ignores cancellation", { timeout: 15000 
   assert.equal(result, "cancelled");
   assert.ok(Date.now() - started < 14000, "Cancellation must not wait indefinitely");
 });
+
+test("ACP file locations survive tool updates that omit them", async (t) => {
+  const agent = adapter();
+  t.after(() => agent.close());
+  const paths: (string[] | undefined)[] = [];
+  await agent.run(
+    input("inspect", { onTool: (_id, _name, _done, _outcome, files) => paths.push(files) }),
+  );
+  assert.deepEqual(paths, [["/tmp/fixture.ts"], ["/tmp/fixture.ts"]]);
+});

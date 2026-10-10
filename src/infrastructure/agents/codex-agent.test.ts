@@ -315,3 +315,17 @@ test("Codex reads account usage and emits usage/account events without an active
   assert.ok(changes.includes("limits"));
   stop();
 });
+
+test("Codex file-change items expose bounded paths for review navigation", async (t) => {
+  const agent = adapter();
+  t.after(() => agent.close());
+  const paths: string[][] = [];
+  await agent.run(
+    input("file-change", {
+      onTool: (_id, _name, _done, _outcome, files) => {
+        if (files) paths.push(files);
+      },
+    }),
+  );
+  assert.deepEqual(paths, [["/tmp/fixture.ts"], ["/tmp/fixture.ts"]]);
+});

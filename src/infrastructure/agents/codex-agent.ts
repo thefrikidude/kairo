@@ -371,6 +371,7 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
             type: string;
             text?: string;
             command?: string;
+            changes?: { path?: unknown }[];
             status?: string;
             exitCode?: number | null;
             error?: unknown;
@@ -396,6 +397,12 @@ export class CodexAgentAdapter implements ExternalAgentAdapter {
               !item.error
               ? "succeeded"
               : "failed"
+            : undefined,
+          item.type === "fileChange" && Array.isArray(item.changes)
+            ? item.changes
+                .map((change) => change?.path)
+                .filter((path): path is string => typeof path === "string")
+                .slice(0, 20)
             : undefined,
         );
       }
