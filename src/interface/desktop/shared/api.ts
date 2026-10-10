@@ -3,6 +3,10 @@ import type {
   TaskWorkspace,
   WorkspaceSelection,
 } from "../../../domain/task-workspace.js";
+import type {
+  WorkspaceReview,
+  ReviewScope,
+} from "../../../infrastructure/tools/workspace-review.js";
 import type { AgentUsage } from "../../../domain/agent-usage.js";
 import type { AgentAnswers, AgentQuestion } from "../../../domain/agent-user-input.js";
 import type { ExternalAgentInfo, SessionRuntime } from "../../../domain/agent-runtime.js";
@@ -16,7 +20,11 @@ import type {
 } from "../../../domain/models.js";
 import type { Session } from "../../../infrastructure/persistence/sqlite-session-store.js";
 
-export type { WorkspaceEntry } from "../../../infrastructure/tools/workspace-files.js";
+export type {
+  FileSnapshot,
+  FileSearch,
+  WorkspaceEntry,
+} from "../../../infrastructure/tools/workspace-files.js";
 
 export type DesktopProvider = {
   id: ModelSelection["provider"];
@@ -48,6 +56,7 @@ export type DesktopBootstrap = {
   providers: DesktopProvider[];
   messages: Message[];
   task?: Task;
+  taskEvents: TaskEvent[];
 };
 
 export type DesktopUserInput = { id: string; sessionId: string; questions: AgentQuestion[] };
@@ -61,6 +70,7 @@ export type DesktopApproval = {
 };
 
 export interface DesktopApi {
+  setUnsavedChanges(dirty: boolean): void;
   bootstrap(): Promise<DesktopBootstrap>;
   openWorkspace(): Promise<DesktopBootstrap | undefined>;
   pickWorkspace(): Promise<string | undefined>;
@@ -103,9 +113,27 @@ export interface DesktopApi {
   cancel(sessionId: string): Promise<void>;
   listFiles(sessionId: string): Promise<string[]>;
   readFile(sessionId: string, path: string): Promise<string>;
-  saveFile(sessionId: string, path: string, content: string): Promise<void>;
+  fileSnapshot(
+    sessionId: string,
+    path: string,
+  ): Promise<import("../../../infrastructure/tools/workspace-files.js").FileSnapshot>;
+  searchFiles(
+    sessionId: string,
+    query: string,
+  ): Promise<import("../../../infrastructure/tools/workspace-files.js").FileSearch>;
+  saveFile(
+    sessionId: string,
+    path: string,
+    content: string,
+    revision: string,
+  ): Promise<import("../../../infrastructure/tools/workspace-files.js").FileSnapshot>;
   changedFiles(sessionId: string): Promise<string[]>;
-  diff(sessionId: string, path: string): Promise<{ diff: string; unavailable?: string }>;
+  review(sessionId: string, scope?: ReviewScope): Promise<WorkspaceReview>;
+  diff(
+    sessionId: string,
+    path: string,
+    scope?: ReviewScope,
+  ): Promise<{ diff: string; unavailable?: string }>;
   openInCursor(sessionId: string, path: string): Promise<void>;
   saveModel(selection: ModelSelection, apiKey?: string): Promise<DesktopBootstrap>;
   resolveApproval(id: string, decision: "approve" | "task_file" | "deny"): Promise<void>;

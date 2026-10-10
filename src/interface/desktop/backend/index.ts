@@ -25,6 +25,8 @@ import { WorkspaceFiles } from "../../../infrastructure/tools/workspace-files.js
 import { WorkspaceTools, definitions } from "../../../infrastructure/tools/workspace-tools.js";
 import {
   changedFileReview,
+  workspaceReview,
+  type ReviewScope,
   changedWorkspaceFiles,
 } from "../../../infrastructure/tools/workspace-review.js";
 import { RepositoryAwareness } from "../../../infrastructure/repository/repository-awareness.js";
@@ -57,6 +59,7 @@ export async function createDesktopRuntime(
   const credentials = options.credentials ?? new MacOSKeychainStore();
   const worktrees = options.worktrees ?? new GitWorkspaces();
   const workspaceRuns = new Map<string, string>();
+  const workspaceWrites = new Set<string>();
   const overlaps = (a: string, b: string) => {
     const contains = (parent: string, child: string) => {
       const rel = relative(parent, child);
@@ -333,6 +336,7 @@ export async function createDesktopRuntime(
         })),
       })),
     );
+    const task = session ? store.latestTask(session.id) : undefined;
     return {
       agents: agentInfo,
       liveSessions: structuredClone(liveSessions),
@@ -348,7 +352,8 @@ export async function createDesktopRuntime(
       ),
       providers,
       messages: session ? store.messages(session.id) : [],
-      task: session ? store.latestTask(session.id) : undefined,
+      task,
+      taskEvents: task ? store.taskEvents(task.id) : [],
     };
   }
 
@@ -509,6 +514,8 @@ export async function createDesktopRuntime(
           );
         if (removingWorkspaces.has(workspace.id))
           throw new Error("This workspace is already being removed.");
+        if ([...workspaceWrites].some((savingDirectory) => overlaps(directory, savingDirectory)))
+          throw new Error("Wait for file saves to finish before removing this worktree.");
         removingWorkspaces.add(workspace.id);
         removalDirectories.set(workspace.id, directory);
         try {
@@ -726,6 +733,8 @@ export async function createDesktopRuntime(
           throw new Error("A task is already running in this session.");
         if ([...removalDirectories.values()].some((directory) => overlaps(directory, runDirectory)))
           throw new Error("This workspace is being removed.");
+        if ([...workspaceWrites].some((directory) => overlaps(directory, runDirectory)))
+          throw new Error("A file is being saved in this workspace. Try again in a moment.");
         const owner = [...workspaceRuns].find(([directory]) =>
           overlaps(directory, runDirectory),
         )?.[1];
@@ -801,11 +810,23 @@ export async function createDesktopRuntime(
                     text += chunk;
                     emit("task:chunk", { sessionId: session.id, chunk });
                   },
-                  onTool: (id, name, complete, outcome) => {
+                  onTool: (id, name, complete, outcome, paths) => {
+                    const navigationPaths = paths?.slice(0, 20).flatMap((path) => {
+                      if (typeof path !== "string" || path.length > 1_000 || path.includes("\0"))
+                        return [];
+                      const local = relative(session.workspace, resolve(session.workspace, path));
+                      return local &&
+                        local !== ".." &&
+                        !local.startsWith(`..${sep}`) &&
+                        !isAbsolute(local)
+                        ? [local.split(sep).join("/")]
+                        : [];
+                    });
                     const event = {
                       taskId: task.id,
                       operationId: id,
                       name,
+                      paths: navigationPaths ? [...new Set(navigationPaths)] : undefined,
                       kind: complete ? ("tool_finished" as const) : ("tool_started" as const),
                       outcome,
                       createdAt: Date.now(),
@@ -843,7 +864,14 @@ export async function createDesktopRuntime(
                     return decision === true;
                   },
                 });
-                const changes = changedWorkspaceFiles(session.workspace);
+                const ownedWorkspace = store.workspace(session.workspaceId);
+                const changes = await workspaceReview(
+                  session.workspace,
+                  ownedWorkspace?.baseCommit ? "task" : "working",
+                  ownedWorkspace?.baseCommit,
+                )
+                  .then((review) => review.changes.map((change) => change.path))
+                  .catch(() => changedWorkspaceFiles(session.workspace));
                 store.updateTask(task.id, {
                   status:
                     state === "cancelled"
@@ -996,6 +1024,14 @@ export async function createDesktopRuntime(
         const files = await WorkspaceFiles.create(requireSession(store, String(first)).workspace);
         return files.read(second);
       }
+      case "workspace:snapshot": {
+        const files = await WorkspaceFiles.create(requireSession(store, String(first)).workspace);
+        return files.snapshot(second);
+      }
+      case "workspace:search": {
+        const files = await WorkspaceFiles.create(requireSession(store, String(first)).workspace);
+        return files.search(second);
+      }
       case "workspace:write": {
         const session = requireSession(store, String(first));
         const directory = await realpath(session.workspace);
@@ -1005,22 +1041,41 @@ export async function createDesktopRuntime(
           )
         )
           throw new Error("Stop agents working in this workspace before saving files.");
-        const result = await (
-          await toolsFor(store, String(first))
-        ).execute({
-          id: crypto.randomUUID(),
-          name: "write_file",
-          args: { path: second, content: third },
-        });
-        if (!result.ok) throw new Error(result.output);
-        return undefined;
+        if ([...workspaceWrites].some((savingDirectory) => overlaps(directory, savingDirectory)))
+          throw new Error("Another file save is in progress. Try again in a moment.");
+        if (
+          [...removalDirectories.values()].some((removingDirectory) =>
+            overlaps(directory, removingDirectory),
+          )
+        )
+          throw new Error("This workspace is being removed.");
+        if (closed) throw new Error("Kairo is shutting down.");
+        workspaceWrites.add(directory);
+        try {
+          return await (
+            await WorkspaceFiles.create(directory)
+          ).save(second, third, request.args[3]);
+        } finally {
+          workspaceWrites.delete(directory);
+        }
+      }
+      case "workspace:review": {
+        const session = requireSession(store, String(first));
+        const workspace = store.workspace(session.workspaceId);
+        const scope = second === "task" && workspace?.baseCommit ? "task" : "working";
+        return workspaceReview(session.workspace, scope, workspace?.baseCommit);
       }
       case "workspace:changes":
         return changedWorkspaceFiles(requireSession(store, String(first)).workspace);
       case "workspace:diff": {
-        const review = changedFileReview(
-          requireSession(store, String(first)).workspace,
+        const session = requireSession(store, String(first));
+        const workspace = store.workspace(session.workspaceId);
+        const scope: ReviewScope = third === "task" && workspace?.baseCommit ? "task" : "working";
+        const review = await changedFileReview(
+          session.workspace,
           String(second),
+          scope,
+          workspace?.baseCommit,
         );
         return { diff: review.diff, unavailable: review.unavailable };
       }
@@ -1028,7 +1083,9 @@ export async function createDesktopRuntime(
         const session = requireSession(store, String(first));
         if (typeof second !== "string" || !second.trim())
           throw new Error("Choose a changed file to open in Cursor.");
-        const absolutePath = resolve(session.workspace, second);
+        const absolutePath = await (
+          await WorkspaceFiles.create(session.workspace)
+        ).resolveFile(second);
         const workspaceRelative = relative(session.workspace, absolutePath);
         if (
           !workspaceRelative ||

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopApi } from "../shared/api.js";
 
 const api: DesktopApi = {
+  setUnsavedChanges: (dirty) => ipcRenderer.send("workspace:unsaved", dirty),
   bootstrap: () => ipcRenderer.invoke("desktop:bootstrap"),
   openWorkspace: () => ipcRenderer.invoke("workspace:open"),
   pickWorkspace: () => ipcRenderer.invoke("workspace:pick"),
@@ -30,10 +31,13 @@ const api: DesktopApi = {
   cancel: (sessionId) => ipcRenderer.invoke("task:cancel", sessionId),
   listFiles: (sessionId) => ipcRenderer.invoke("workspace:list", sessionId),
   readFile: (sessionId, path) => ipcRenderer.invoke("workspace:read", sessionId, path),
-  saveFile: (sessionId, path, content) =>
-    ipcRenderer.invoke("workspace:write", sessionId, path, content),
+  fileSnapshot: (sessionId, path) => ipcRenderer.invoke("workspace:snapshot", sessionId, path),
+  searchFiles: (sessionId, query) => ipcRenderer.invoke("workspace:search", sessionId, query),
+  saveFile: (sessionId, path, content, revision) =>
+    ipcRenderer.invoke("workspace:write", sessionId, path, content, revision),
   changedFiles: (sessionId) => ipcRenderer.invoke("workspace:changes", sessionId),
-  diff: (sessionId, path) => ipcRenderer.invoke("workspace:diff", sessionId, path),
+  review: (sessionId, scope) => ipcRenderer.invoke("workspace:review", sessionId, scope),
+  diff: (sessionId, path, scope) => ipcRenderer.invoke("workspace:diff", sessionId, path, scope),
   openInCursor: (sessionId, path) => ipcRenderer.invoke("workspace:open-cursor", sessionId, path),
   saveModel: (selection, apiKey) => ipcRenderer.invoke("model:save", selection, apiKey),
   resolveApproval: (id, decision) => ipcRenderer.invoke("approval:resolve", id, decision),

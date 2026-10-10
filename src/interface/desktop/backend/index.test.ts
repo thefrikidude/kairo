@@ -748,7 +748,8 @@ test("worktree sessions isolate execution and preserve workspace ownership on ch
     request("task:send", reused.activeSessionId, "other", "build"),
     /Another agent/,
   );
-  await request("workspace:write", b.id, "hello.txt", "changed in b\n");
+  const snapshot = await request<{ revision: string }>("workspace:snapshot", b.id, "hello.txt");
+  await request("workspace:write", b.id, "hello.txt", "changed in b\n", snapshot.revision);
   assert.equal(await request("workspace:read", a.id, "hello.txt"), "original\n");
   await assert.rejects(request("worktrees:remove", a.workspaceId), /Stop all agents/);
   await request("task:cancel", a.id);
@@ -787,5 +788,80 @@ test("a send awaiting workspace validation cannot start an agent after shutdown 
   assert.equal(
     events.some((event) => event.payload.state === "running"),
     false,
+  );
+});
+
+test("desktop file navigation exposes only workspace-relative native tool paths and durable activity", async (t) => {
+  const adapter = switchingAdapter("files", async (input) => {
+    input.onTool("edit", "fileChange", false, undefined, [
+      join(input.workspace, "hello.ts"),
+      "../outside.ts",
+    ]);
+    input.onTool("edit", "fileChange", true, "succeeded", [
+      join(input.workspace, "hello.ts"),
+      "../outside.ts",
+    ]);
+    input.onText("Edited hello.ts");
+    return "complete";
+  });
+  const { request, events, wait } = await setup(t, undefined, adapter);
+  const created = await request<DesktopBootstrap>("session:new", {
+    kind: "external",
+    agentId: "files",
+  });
+  const id = created.activeSessionId!;
+  await request("task:send", id, "Edit hello.ts", "build");
+  await wait(() =>
+    events.some((event) => event.payload.sessionId === id && event.payload.state === "complete"),
+  );
+  const current = await request<DesktopBootstrap>("bootstrap");
+  assert.deepEqual(
+    current.taskEvents.filter((event) => event.paths).map((event) => event.paths),
+    [["hello.ts"], ["hello.ts"]],
+  );
+});
+
+test("native task results and review retain file changes after an agent commits them", async (t) => {
+  const { execFileSync } = await import("node:child_process");
+  const { writeFile } = await import("node:fs/promises");
+  const commitAgent = switchingAdapter("commit", async (input) => {
+    await writeFile(join(input.workspace, "hello.txt"), "committed by the fixture agent\n");
+    execFileSync("git", ["add", "hello.txt"], { cwd: input.workspace });
+    execFileSync("git", ["commit", "-m", "Agent change"], {
+      cwd: input.workspace,
+      stdio: "ignore",
+    });
+    input.onText("Updated hello.txt and committed the change.");
+    return "complete";
+  });
+  const { root, request, events, wait } = await setup(t, undefined, commitAgent);
+  const git = (args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+  git(["init", "-b", "main"]);
+  git(["config", "user.name", "Fixture"]);
+  git(["config", "user.email", "fixture@example.test"]);
+  await writeFile(join(root, "hello.txt"), "original\n");
+  git(["add", "hello.txt"]);
+  git(["commit", "-m", "Initial"]);
+  const created = await request<DesktopBootstrap>(
+    "session:new",
+    { kind: "external", agentId: "commit" },
+    root,
+    { kind: "worktree", branch: "kairo/commit-review" },
+  );
+  const id = created.activeSessionId!;
+  await request("task:send", id, "Update and commit hello.txt", "build");
+  await wait(() =>
+    events.some((event) => event.payload.sessionId === id && event.payload.state === "complete"),
+  );
+  const result = await request<DesktopBootstrap>("bootstrap");
+  assert.deepEqual(result.task?.changedFiles, ["hello.txt"]);
+  assert.equal(result.task?.status, "verification_required");
+  assert.deepEqual(await request("workspace:changes", id), []);
+  const review = await request<
+    import("../../../infrastructure/tools/workspace-review.js").WorkspaceReview
+  >("workspace:review", id, "task");
+  assert.deepEqual(
+    review.changes.map((file) => file.path),
+    ["hello.txt"],
   );
 });

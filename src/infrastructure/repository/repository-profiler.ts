@@ -249,6 +249,7 @@ export class RepositoryProfiler {
           ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
           {
             encoding: "utf8",
+            env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
           },
         ),
       ]);

@@ -45,3 +45,37 @@ test("previews preserve complete content above the agent output cap and reject u
   await assert.rejects(files.directory(".."), /outside/);
   await assert.rejects(files.read("."), /regular file/);
 });
+
+test("complete-buffer saves detect external edits, preserve text/permissions and clean temporary files", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-file-save-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const { chmod, readFile, readdir, stat } = await import("node:fs/promises");
+  const files = await WorkspaceFiles.create(root);
+  const path = join(root, "script.sh");
+  await writeFile(path, "\ufeffecho original\r\n");
+  await chmod(path, 0o755);
+  const snapshot = await files.snapshot("script.sh");
+  assert.equal(snapshot.content, "\ufeffecho original\r\n");
+  await writeFile(path, "outside change\n");
+  await assert.rejects(files.save("script.sh", "my draft\n", snapshot.revision), /changed outside/);
+  assert.equal(await readFile(path, "utf8"), "outside change\n");
+  const current = await files.snapshot("script.sh");
+  const saved = await files.save("script.sh", "\ufeffecho changed\r\n", current.revision);
+  assert.equal(await readFile(path, "utf8"), saved.content);
+  assert.equal((await stat(path)).mode & 0o777, 0o755);
+  assert.equal(saved.revision, (await files.snapshot("script.sh")).revision);
+  assert.deepEqual(await readdir(root), ["script.sh"]);
+  await assert.rejects(files.save("script.sh", "draft", undefined), /Reload/);
+  await assert.rejects(files.save("../escape", "draft", saved.revision), /outside/);
+});
+
+test("filename search finds nested files and excludes dependency folders", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-file-search-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "src"));
+  await mkdir(join(root, "node_modules"));
+  await writeFile(join(root, "src", "hello.ts"), "export {};");
+  await writeFile(join(root, "node_modules", "hello.ts"), "ignored");
+  const files = await WorkspaceFiles.create(root);
+  assert.deepEqual(await files.search("HELLO"), { paths: ["src/hello.ts"], limited: false });
+});
