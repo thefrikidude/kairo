@@ -710,7 +710,7 @@ export function DesktopApp(): React.JSX.Element {
               </label>
               <p>
                 Cmd/Ctrl+Shift+N: new session · Cmd/Ctrl+Shift+E: files · Cmd/Ctrl+Shift+D: review ·
-                Cmd/Ctrl+`: workspace shell
+                Cmd/Ctrl+`: new terminal tab
               </p>
             </>
           )}

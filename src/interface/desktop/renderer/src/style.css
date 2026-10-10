@@ -2682,72 +2682,8 @@ button svg {
   flex-basis: 100%;
 }
 
-.terminal-panel {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 auto;
-  max-height: 55vh;
-  min-height: 140px;
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-  overflow: hidden;
-}
-.terminal-panel[hidden],
 .terminal-view[hidden] {
   display: none;
-}
-.terminal-resizer {
-  height: 5px;
-  flex: 0 0 5px;
-  cursor: ns-resize;
-  touch-action: none;
-}
-.terminal-resizer:hover,
-.terminal-resizer:focus-visible {
-  background: var(--focus);
-}
-.terminal-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 12px;
-  flex: 0 0 auto;
-}
-.terminal-toolbar button {
-  color: var(--muted);
-  background: transparent;
-  border: 0;
-  padding: 5px 8px;
-  cursor: pointer;
-}
-.terminal-toolbar button:hover,
-.terminal-toolbar button[aria-selected="true"] {
-  color: var(--text);
-  background: var(--hover);
-  border-radius: 5px;
-}
-.terminal-tabs {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  gap: 8px;
-}
-.terminal-tab {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  font-size: 12px;
-}
-.terminal-directory {
-  flex: 0 0 auto;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--muted);
-  padding: 0 16px 6px;
-  font-size: 11px;
 }
 .terminal-view {
   flex: 1;
@@ -2758,17 +2694,6 @@ button svg {
 .terminal-view .xterm {
   height: 100%;
 }
-.terminal-error {
-  color: var(--negative);
-  font-size: 12px;
-  padding: 6px 16px;
-}
-.terminal-empty {
-  color: var(--muted);
-  padding: 16px;
-  font-size: 12px;
-}
-
 .history-back {
   margin-bottom: 16px;
 }

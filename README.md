@@ -35,7 +35,7 @@ The sidebar groups sessions by project and shows worktree branches. Rename and p
 
 **Review**, in the right sidebar, lists changed paths and loads only the selected diff, with unified and split views. Changes since the workspace's starting commit include commits the agent made; working-tree scope includes staged, unstaged and untracked files. The visible panel refreshes periodically independently of the CLI's output. File lists and diff rows are virtualized.
 
-**+ Terminal**, in the tab bar, opens an additional shell in the current workspace. **+ Agent** opens the agent picker. Shell and agent tabs share the center pane. These additional terminals survive navigation; each agent session already has its own normal shell. Tabs preserve input, ANSI output and live screens when switching. Close terminals from Settings → Workspaces. **Settings → Workspaces** lists open terminals and managed worktrees.
+**+ Terminal**, in the tab bar, opens a plain terminal in the current workspace. **+ Agent** opens the agent picker. Plain terminal and agent tabs share the center pane. These additional terminals survive navigation; each agent session already has its own normal shell. Tabs preserve input, ANSI output and live screens when switching. Close terminals from Settings → Workspaces. **Settings → Workspaces** lists open terminals and managed worktrees.
 
 Worktree removal requires archiving associated sessions and closing terminals. Git refuses removal with staged, unstaged, untracked or ignored files, or unmerged commits. Branches remain available. Deleting a Kairo session never deletes its workspace or the CLI's own history. Worktrees separate files; the selected CLI owns its execution safeguards.
 

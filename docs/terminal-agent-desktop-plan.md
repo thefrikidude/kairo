@@ -65,3 +65,5 @@ The actual Electron fixture workflow and exact-resume restart pass, including th
 The center header now contains tabs for live terminals in the selected project, with **+ Terminal** and **+ Agent** controls. Plain shells and agent sessions share the same full-height terminal surface. Switching tabs retains each xterm view and PTY; Files and Review stay in the right sidebar. Additional shells no longer open in a separate bottom panel. Cmd/Ctrl+backquote opens a new terminal tab.
 
 Validation: typecheck and desktop build pass. The Electron smoke creates a shell from **+ Terminal**, switches back to its agent tab, creates an isolated agent from **+ Agent**, edits/reviews files and verifies native resume after restart. Screenshots were inspected at `/var/folders/3x/rz0dj8y12pz759_q5skzxw380000gn/T/kairo-terminal-evidence-1791651975092`; all owned fixture processes stopped.
+
+The separate Shell panel and its renderer/styles have been removed entirely. The right sidebar contains Files and Review only. Plain terminals are created through **+ Terminal**, using the same tab/view system as agent terminals.

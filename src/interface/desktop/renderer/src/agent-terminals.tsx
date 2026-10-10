@@ -1,5 +1,5 @@
 import React from "react";
-import { TerminalView } from "./terminal-panel.js";
+import { TerminalView } from "./terminal-view.js";
 import type { WorkspaceTerminal } from "../../shared/api.js";
 /** Keep live views mounted across navigation so alternate screens and scrollback remain intact. */
 export default function AgentTerminals({
