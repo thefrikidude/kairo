@@ -86,7 +86,17 @@ try {
     } finally {
       clearTimeout(timer);
     }
-    samples.push(JSON.parse(await readFile(file, "utf8")));
+    const sample = JSON.parse(await readFile(file, "utf8"));
+    for (const owned of sample.processes) {
+      try {
+        process.kill(owned.pid, 0);
+      } catch (error) {
+        if (error.code === "ESRCH") continue;
+        throw error;
+      }
+      throw new Error(`Benchmark process ${owned.pid} survived shutdown.`);
+    }
+    samples.push(sample);
   }
   const median = (values) => {
     const sorted = [...values].sort((a, b) => a - b);
@@ -94,7 +104,9 @@ try {
     return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
   };
   const report = {
-    revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: appRoot, encoding: "utf8" }).trim(),
+    revision:
+      process.env.KAIRO_BENCH_REVISION ||
+      execFileSync("git", ["rev-parse", "HEAD"], { cwd: appRoot, encoding: "utf8" }).trim(),
     machine: { platform: platform(), arch: arch(), cpu: cpus()[0].model, node: process.version },
     fixture: {
       workspaces: 24,

@@ -34,7 +34,7 @@ const button = (text, scope = "document") =>
   );
 async function input(selector, value) {
   await evaluate(
-    `(()=>{const node=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(${selector.includes("code-editor") ? "HTMLTextAreaElement" : "HTMLInputElement"}.prototype,'value').set.call(node,${JSON.stringify(value)});node.dispatchEvent(new Event('input',{bubbles:true}));})()`,
+    `(()=>{const node=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor((node.tagName==='TEXTAREA'?HTMLTextAreaElement:HTMLInputElement).prototype,'value').set.call(node,${JSON.stringify(value)});node.dispatchEvent(new Event('input',{bubbles:true}));})()`,
   );
 }
 async function select(selector, value) {
@@ -122,7 +122,7 @@ async function run() {
     assert.equal(value.activeSessionId, saved.sessionId);
     assert.ok(
       await evaluate(
-        `!!document.querySelector('.pinned-sessions [data-session-id="${saved.sessionId}"]')`,
+        `!!document.querySelector('.pinned-sessions [data-workspace-id="${saved.workspaceId}"]')`,
       ),
     );
     assert.equal(
@@ -198,26 +198,53 @@ async function run() {
   );
   await click('[aria-label="New agent tab"]');
   await waitFor(
-    "document.querySelector('dialog[open]') && !Array.from(document.querySelectorAll('dialog button')).find(b=>b.textContent==='Refresh agents')?.disabled",
+    "document.querySelector('dialog[open] .primary') && !document.querySelector('dialog[open] .primary').disabled",
   );
   assert.equal(await evaluate("document.querySelectorAll('[role=option]').length"), 45);
   await input('[aria-label="Search agents"]', "Codex");
   await button("CodexInstalled · codex");
-  await waitFor("document.querySelector('[aria-label=\"Workspace mode\"] option[value=worktree]')");
-  assert.equal(
-    await evaluate("document.querySelector('[aria-label=\"Workspace mode\"]').value"),
-    "folder",
-  );
-  await select('[aria-label="Workspace mode"]', "worktree");
-  await input('[aria-label="Branch"]', "kairo/smoke-isolated");
-  await button("Open agent terminal", "document.querySelector('dialog')");
+  // Adding an agent is scoped to the selected workspace; creation is separate.
+  await button("Cancel", "document.querySelector('dialog')");
   await waitFor("!document.querySelector('dialog[open]')");
+  await click(".project-setup-button");
+  await waitFor("document.querySelector('[aria-label=\"Setup script\"]')");
+  await input('[aria-label="Setup script"]', "echo PREPARING; sleep 1; touch setup-ready");
+  await input('[aria-label="Copy paths"]', ".env");
+  await button("Save project setup", "document.querySelector('dialog')");
+  await waitFor("!document.querySelector('dialog[open]')");
+  await click(".new-chat");
+  await waitFor("document.querySelector('[aria-label=\"Workspace mode\"]').value==='worktree'");
+  await input('[aria-label="Workspace name"]', "Smoke isolated");
+  await input('[aria-label="Branch override"]', "kairo/smoke-isolated");
+  await select('[aria-label="Workspace agent"]', "codex");
+  await button("Create workspace", "document.querySelector('dialog')");
+  await waitFor("!document.querySelector('dialog[open]')");
+  await waitFor("document.querySelector('.preparation-panel')");
+  await capture("workspace-preparation.png");
+  // Navigation remains available during checkout and setup.
+  await click(`[data-workspace-id="${first.workspaceId}"] .session`);
+  await waitFor(
+    `document.querySelector('.workspace-row.selected')?.dataset.workspaceId===${JSON.stringify(first.workspaceId)}`,
+  );
+  await waitFor(
+    "window.kairo.bootstrap().then(all=>all.operations.some(op=>op.name==='Smoke isolated'&&op.phase==='ready')&&all.sessions.length===2)",
+  );
   value = await state();
-  const second = value.sessions.find((s) => s.id === value.activeSessionId),
-    owner = value.workspaces.find((w) => w.id === second.workspaceId),
-    pty = value.terminals.find((t) => t.sessionId === second.id);
+  const second = value.sessions.find((s) => s.workspaceId !== first.workspaceId),
+    owner = value.workspaces.find((w) => w.id === second.workspaceId);
+  await waitFor(
+    `window.kairo.bootstrap().then(all=>all.terminals.some(t=>t.sessionId===${JSON.stringify(second.id)}))`,
+  );
+  const pty = (await state()).terminals.find((t) => t.sessionId === second.id);
+  await click(`[data-workspace-id="${owner.id}"] .session`);
+  await waitFor(
+    `document.querySelector('.workspace-row.selected')?.dataset.workspaceId===${JSON.stringify(owner.id)}`,
+  );
+  assert.equal(await readFile(join(owner.directory, ".env"), "utf8"), "LOCAL_FIXTURE=1\n");
+  assert.equal(await readFile(join(owner.directory, "setup-ready"), "utf8"), "");
+  assert.equal(await evaluate("document.querySelectorAll('.terminal-tabs [role=tab]').length"), 1);
   assert.notEqual(first.workspaceId, second.workspaceId);
-  assert.equal(value.terminals.length, 3);
+  assert.equal((await state()).terminals.length, 3);
   await assert.rejects(
     evaluate(`window.kairo.fileSnapshot(${JSON.stringify(second.id)},'proof-a.txt')`),
     /unavailable/,
@@ -238,15 +265,14 @@ async function run() {
   await input(".code-editor", "Edited in Kairo\n");
   await button("Save", "document.querySelector('.file-browser')");
   await waitFor("document.querySelector('.file-browser [role=status]')?.textContent==='Saved'");
-  await click(`[data-session-id="${first.id}"] .session`);
+  await click(`[data-workspace-id="${first.workspaceId}"] .session`);
   await waitFor(
-    `document.querySelector('.session-row.selected')?.dataset.sessionId===${JSON.stringify(first.id)}`,
+    `document.querySelector('.workspace-row.selected')?.dataset.workspaceId===${JSON.stringify(first.workspaceId)}`,
   );
-  value = await state();
-  assert.equal(value.terminals.find((t) => t.sessionId === second.id).id, pty.id);
-  await click(`[data-session-id="${second.id}"] .session`);
+  assert.equal((await state()).terminals.find((t) => t.sessionId === second.id).id, pty.id);
+  await click(`[data-workspace-id="${second.workspaceId}"] .session`);
   await waitFor(
-    `document.querySelector('.session-row.selected')?.dataset.sessionId===${JSON.stringify(second.id)}`,
+    `document.querySelector('.workspace-row.selected')?.dataset.workspaceId===${JSON.stringify(second.workspaceId)}`,
   );
   await waitFor(
     `window.kairo.bootstrap().then(all=>!!all.sessions.find(s=>s.id===${JSON.stringify(second.id)})?.nativeSession)`,
@@ -257,37 +283,35 @@ async function run() {
     (await nativeRecord(owner.directory)).id,
   );
   await click('[aria-label="New agent tab"]');
-  await waitFor("document.querySelector('[aria-label=\"Workspace mode\"] option[value=existing]')");
-  assert.equal(
-    await evaluate("document.querySelector('[aria-label=\"Workspace mode\"]').value"),
-    "existing",
+  await waitFor(
+    "document.querySelector('dialog[open] .primary') && !document.querySelector('dialog[open] .primary').disabled",
   );
   assert.equal(
-    await evaluate("document.querySelector('[aria-label=\"Existing worktree\"]').value"),
-    owner.directory,
+    await evaluate("!!document.querySelector('[aria-label=\"Workspace mode\"]')"),
+    false,
   );
   await button("Open agent terminal", "document.querySelector('dialog')");
   await waitFor("!document.querySelector('dialog[open]')");
-  const sharedState = await state();
-  const shared = sharedState.sessions.find((s) => s.id === sharedState.activeSessionId);
+  const sharedState = await state(),
+    shared = sharedState.sessions.find((s) => s.id === sharedState.activeSessionId);
   assert.equal(shared.workspaceId, second.workspaceId);
   assert.equal(shared.nativeSession, undefined);
+  assert.equal(sharedState.workspaces.length, beforeStop.workspaces.length);
   assert.equal(
     sharedState.sessions.find((s) => s.id === second.id).nativeSession.id,
     beforeStop.sessions.find((s) => s.id === second.id).nativeSession.id,
   );
-  assert.equal(sharedState.workspaces.length, beforeStop.workspaces.length);
-  await pointerClick(`[data-session-id="${shared.id}"] button[aria-label^="Archive "]`);
+  await click('[aria-label="Agent tab actions"]');
+  await button("Archive agent tab");
   await waitFor(
     `window.kairo.bootstrap().then(all=>all.archivedSessions.some(s=>s.id===${JSON.stringify(shared.id)}))`,
   );
-  await click(`[data-session-id="${second.id}"] .session`);
-
+  await click(`.terminal-tabs [data-session-id="${second.id}"]`);
   await click(".settings-link");
   await button("Workspaces");
   await waitFor("document.querySelector('.terminal-catalog')");
   await evaluate(
-    `Array.from(document.querySelectorAll('.terminal-catalog article')).find(row => row.textContent.includes(${JSON.stringify(owner.directory)})).querySelector('button').click()`,
+    `Array.from(document.querySelectorAll('.terminal-catalog article')).find(row=>row.textContent.includes(${JSON.stringify(owner.directory)})).querySelector('button').click()`,
   );
   await waitFor(
     `window.kairo.listTerminals().then(all=>!all.some(t=>t.sessionId===${JSON.stringify(second.id)}))`,
@@ -295,45 +319,61 @@ async function run() {
   await button("Back to workspace");
   const record = await nativeRecord(owner.directory);
   await evaluate(
-    `window.kairo.setNativeSession(${JSON.stringify(second.id)}, ${JSON.stringify({ id: record.id })})`,
+    `window.kairo.setNativeSession(${JSON.stringify(second.id)},${JSON.stringify({ id: record.id })})`,
   );
   await button("Open agent terminal");
   await waitFor("window.kairo.listTerminals().then(all=>all.filter(t=>t.sessionId).length===2)");
-  value = await state();
-  assert.notEqual(value.terminals.find((t) => t.sessionId === second.id).id, pty.id);
+  assert.notEqual((await state()).terminals.find((t) => t.sessionId === second.id).id, pty.id);
   await terminalCommand("proof-c.txt", "Resumed conversation\n");
   await waitFor(
     `window.kairo.fileSnapshot(${JSON.stringify(second.id)},'proof-c.txt').then(s=>s.content==='Resumed conversation\\n').catch(()=>false)`,
   );
   assert.equal((await nativeRecord(owner.directory)).resumes, 1);
-  await pointerClick(`[data-session-id="${second.id}"] button[aria-label^="Pin "]`);
+  await pointerClick(`[data-workspace-id="${second.workspaceId}"] button[aria-label^="Pin "]`);
   await waitFor(
-    `document.querySelector('.pinned-sessions [data-session-id="${second.id}"] button[aria-pressed="true"]')`,
+    `document.querySelector('.pinned-sessions [data-workspace-id="${second.workspaceId}"]')`,
   );
-  await pointerClick(`[data-session-id="${second.id}"] button[aria-label^="Unpin "]`);
-  await waitFor(`!document.querySelector('.pinned-sessions [data-session-id="${second.id}"]')`);
-  await pointerClick(`[data-session-id="${second.id}"] button[aria-label^="Pin "]`);
-  await waitFor(`document.querySelector('.pinned-sessions [data-session-id="${second.id}"]')`);
-  await pointerClick(`[data-session-id="${first.id}"] button[aria-label^="Archive "]`);
+  await pointerClick(`[data-workspace-id="${second.workspaceId}"] button[aria-label^="Unpin "]`);
   await waitFor(
-    `window.kairo.bootstrap().then(all=>all.archivedSessions.some(s=>s.id===${JSON.stringify(first.id)}) && !all.terminals.some(t=>t.sessionId===${JSON.stringify(first.id)}))`,
+    `!document.querySelector('.pinned-sessions [data-workspace-id="${second.workspaceId}"]')`,
   );
-  assert.equal(
-    await evaluate(`!!document.querySelector('[data-session-id="${first.id}"]')`),
-    false,
+  await pointerClick(`[data-workspace-id="${second.workspaceId}"] button[aria-label^="Pin "]`);
+  await waitFor(
+    `document.querySelector('.pinned-sessions [data-workspace-id="${second.workspaceId}"]')`,
   );
-  assert.ok((await state()).terminals.some((t) => t.id === shell.id));
+  // Keyboard palettes reuse workspace navigation and file editing.
+  await key("j", ["meta"]);
+  await waitFor("document.querySelector('#palette-title')");
+  await input('[aria-label="Palette search"]', "Smoke isolated");
+  await key("Return");
+  await waitFor("!document.querySelector('dialog[open]')");
+  await key("p", ["meta"]);
+  await waitFor("document.querySelector('#palette-title')");
+  await input('[aria-label="Palette search"]', "proof-b");
+  await waitFor("document.querySelector('.palette-results button')");
+  await capture("file-palette.png");
+  await key("Return");
+  await waitFor("document.querySelector('[aria-label=\"Preview of proof-b.txt\"]')");
+  await pointerClick(`[data-workspace-id="${first.workspaceId}"] button[aria-label^="Archive "]`);
+  await button("Confirm", "document.querySelector('dialog')");
+  await waitFor(
+    `window.kairo.bootstrap().then(all=>all.workspaces.find(w=>w.id===${JSON.stringify(first.workspaceId)})?.archivedAt && !all.terminals.some(t=>t.workspaceId===${JSON.stringify(first.workspaceId)}))`,
+  );
+  assert.equal((await state()).sessions.find((s) => s.id === first.id).archivedAt, undefined);
+  assert.ok(!(await state()).terminals.some((t) => t.id === shell.id));
   await click(".settings-link");
-  await button("Archived sessions");
+  await button("Archived");
   await waitFor(
-    "Array.from(document.querySelectorAll('.workspace-catalog-row')).some(row=>row.textContent.includes('First agent'))",
+    "document.querySelector('.settings-content')?.textContent.includes('Archived workspaces')",
   );
   await capture("pinned-and-archived.png");
-  await evaluate(
-    "Array.from(document.querySelectorAll('.workspace-catalog-row')).find(row=>row.textContent.includes('First agent')).querySelector('button').click()",
-  );
+  await button("Restore workspace", "document.querySelector('.settings-content')");
   await waitFor(
-    `window.kairo.bootstrap().then(all=>all.sessions.some(s=>s.id===${JSON.stringify(first.id)}))`,
+    `window.kairo.bootstrap().then(all=>!all.workspaces.find(w=>w.id===${JSON.stringify(first.workspaceId)})?.archivedAt)`,
+  );
+  assert.equal(
+    (await state()).terminals.filter((t) => t.workspaceId === first.workspaceId).length,
+    0,
   );
   await button("General");
   await select('[aria-label="Theme"]', "light");
@@ -355,10 +395,13 @@ async function run() {
     join(output, "metrics.json"),
     JSON.stringify({
       startupMs,
-      embeddedAgentInput: true,
+      workspaceFirst: true,
+      backgroundPreparation: true,
+      independentCopies: true,
       terminalTabs: true,
+      palettes: true,
       pinUnpinAndPersistence: true,
-      archiveRunningAndRestore: true,
+      archiveWorkspaceAndRestore: true,
       sameTerminalShellJobControl: true,
       isolatedWorktree: true,
       parallelNavigation: true,
@@ -368,7 +411,7 @@ async function run() {
     }),
   );
   assert.equal(failures.length, 0, failures.join("\n"));
-  console.log("Terminal desktop smoke passed");
+  console.log("Workspace desktop smoke passed");
   app.quit();
 }
 void import(pathToFileURL(join(process.cwd(), "out/main/index.js")).href);

@@ -26,6 +26,7 @@ export function WorkspacePalette({
     setError("");
     if (kind !== "file" || !workspace || !query.trim()) {
       setPaths([]);
+      setLoading(false);
       return;
     }
     let disposed = false;

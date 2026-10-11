@@ -15,6 +15,8 @@ const project = join(root, "project"),
   history = join(root, "history");
 for (const path of [project, state, bin, history]) await mkdir(path, { recursive: true });
 await writeFile(join(project, "README.md"), "# Terminal fixture\n");
+await writeFile(join(project, ".gitignore"), ".env\nsetup-ready\n");
+await writeFile(join(project, ".env"), "LOCAL_FIXTURE=1\n");
 const git = (args) =>
   execFileSync("git", args, { cwd: project, stdio: ["ignore", "pipe", "pipe"] });
 git(["init", "-b", "main"]);

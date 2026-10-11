@@ -81,3 +81,7 @@ Opening a project uses its existing checkout. New agent tabs default to that wor
 Shared directories make native conversation metadata ambiguous for matching agents. Previously captured IDs are preserved, but automatic capture is disabled for newly overlapping launches rather than assigning another agent’s conversation. The native CLI picker remains available on recovery. Worktree removal still requires closing all attached terminals and archiving associated sessions.
 
 Validation: 34 tests, typecheck and desktop build pass. The Electron workflow verifies the project-folder default, explicit isolation, the existing-worktree default and a second agent sharing the same workspace, then checks archival and exact resume after restart.
+
+## Workspace-first checkpoint — 11 October 2026
+
+Workspace-first navigation, background preparation, project setup, independent local-file copying, workspace archives, and keyboard palettes are delivered. See [workspace-workflow.md](workspace-workflow.md) for behavior, migration, smoke evidence and the before/after performance comparison. The separate installed-agent conversation/restart audit remains open.

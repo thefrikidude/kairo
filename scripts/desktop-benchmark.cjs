@@ -27,7 +27,7 @@ app.on("browser-window-created", (_event, window) => {
     () =>
       void run().catch((error) => {
         console.error(error);
-        process.exitCode = 1;
+        app.on("quit", () => process.exit(1));
         app.quit();
       }),
   );
@@ -38,18 +38,27 @@ async function run() {
   await waitFor("document.querySelector('.session-row.selected')");
   const startupMs = performance.now() - started;
   await sleep(1_000);
-  const ids = await evaluate(
-    "Array.from(document.querySelectorAll('.session-row')).map(item => item.dataset.sessionId)",
-  );
+  const sessions = await evaluate("window.kairo.bootstrap().then(value => value.sessions)");
   const switchMs = [];
-  for (const id of ids.slice(1, 11)) {
+  for (const session of sessions.slice(1, 11)) {
     switchMs.push(
       await evaluate(`new Promise((done, fail) => {
       const started = performance.now();
-      document.querySelector('[data-session-id="${id}"] .session').click();
+      const sidebar = document.querySelector('[data-session-id="${session.id}"] .session');
+      const workspace = document.querySelector('[data-workspace-id="${session.workspaceId}"] .session');
+      const target = sidebar || workspace;
+      if (!target) return fail(new Error('Missing navigation row'));
+      let clicked = false;
       const frame = () => {
-        if (performance.now() - started > 5000) return fail(new Error('Session switch exceeded five seconds'));
-        if (document.querySelector('.session-row.selected')?.dataset.sessionId === ${JSON.stringify(id)}) return requestAnimationFrame(() => done(performance.now() - started));
+        if (performance.now() - started > 15000) return fail(new Error('Session switch exceeded fifteen seconds'));
+        if (!clicked && !target.disabled) {target.click(); clicked = true;}
+        if (workspace && !sidebar && clicked) {
+          const tab = document.querySelector('.terminal-tabs [data-session-id="${session.id}"]');
+          if (tab?.textContent.includes('stopped') && !tab.disabled) tab.click();
+        }
+        const active = Array.from(document.querySelectorAll('[role=tab]')).find(tab => tab.getAttribute('aria-selected') === 'true');
+        const selected = sidebar ? document.querySelector('.session-row.selected')?.dataset.sessionId === ${JSON.stringify(session.id)} : active?.dataset.sessionId === ${JSON.stringify(session.id)} && !active.textContent.includes('stopped');
+        if (clicked && selected) return requestAnimationFrame(() => done(performance.now()-started));
         requestAnimationFrame(frame);
       }; requestAnimationFrame(frame);
     })`),
