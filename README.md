@@ -2,6 +2,10 @@
 
 Kairo is a local desktop app for coding-agent terminals. Run Codex, Claude, OpenCode, Pi or another installed agent in a normal terminal, switch between tabs, and inspect files and Git changes beside your work.
 
+![Kairo desktop with workspaces, terminal test output, and Git review](docs/assets/kairo-desktop.jpg)
+
+_Demo workspace showing local test output and Git review._
+
 Kairo manages projects, task workspaces and terminal sessions. Each agent CLI owns its models, authentication, conversation and approvals. There is no built-in model engine, API-key settings page or automatic agent delegation.
 
 ## Run locally
