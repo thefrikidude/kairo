@@ -341,3 +341,74 @@ test("automatic native identity is persisted and ambiguous candidates cannot sil
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("workspace archive drains agent and shell terminals, preserves session flags and restores without launching all tabs", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-workspace-runtime-")));
+  const store = await SqliteTerminalSessionStore.open(join(root, "state.sqlite"));
+  const target = store.registerWorkspace({
+    directory: root,
+    repositoryPath: root,
+    kind: "folder",
+    managed: false,
+  });
+  const current = store.create(target.id, "codex");
+  store.setNativeSession(current.id, { id: "native-proof" });
+  const archived = store.create(target.id, "codex");
+  store.archive(archived.id);
+  const runtime = await createTerminalDesktopRuntime(() => {}, {
+    store,
+    agents: {
+      async refresh() {
+        return [
+          {
+            ...terminalAgentCatalog.find((a) => a.id === "codex")!,
+            installed: true,
+            resumable: true,
+          },
+        ];
+      },
+      async launch(_agent, id) {
+        return {
+          executable: process.execPath,
+          args: ["-e", "setInterval(()=>{},1000)"],
+          title: "Fixture",
+          sessionId: id,
+        };
+      },
+    },
+  });
+  let counter = 0;
+  const request = (method: string, ...args: unknown[]) =>
+    runtime.dispatch({ id: ++counter, method, args });
+  try {
+    await runtime.ready;
+    await request("session:open", current.id);
+    const shell = (await request("terminal:create", target.id)) as { id: string; pid: number };
+    await request("workspace:tab", target.id, `terminal:${shell.id}`);
+    await request("workspace:rename", target.id, "New name");
+    await request("workspace:pin", target.id, true);
+    await request("workspace:archive", target.id);
+    let snapshot = (await request("bootstrap")) as TerminalDesktopBootstrap;
+    assert.equal(snapshot.terminals.length, 0);
+    assert.equal(snapshot.activeWorkspaceId, undefined);
+    assert.equal(
+      snapshot.sessions.find((s) => s.id === current.id)?.nativeSession?.id,
+      "native-proof",
+    );
+    assert.ok(snapshot.archivedSessions.find((s) => s.id === archived.id));
+    assert.equal(snapshot.workspaces[0].name, "New name");
+    assert.equal(snapshot.workspaces[0].pinned, true);
+    assert.ok(snapshot.workspaces[0].archivedAt);
+    await assert.rejects(request("session:open", current.id), /Restore/);
+    await assert.rejects(request("terminal:create", target.id), /Restore/);
+    await request("workspace:restore", target.id);
+    snapshot = (await request("workspace:select", target.id)) as TerminalDesktopBootstrap;
+    assert.equal(snapshot.terminals.length, 0);
+    assert.ok(snapshot.archivedSessions.find((s) => s.id === archived.id));
+    await assert.rejects(request("workspace:tab", target.id, "terminal:foreign"), /belonging/);
+    assert.throws(() => process.kill(shell.pid, 0), { code: "ESRCH" });
+  } finally {
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

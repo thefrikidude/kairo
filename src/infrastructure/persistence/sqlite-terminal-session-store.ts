@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+import type { ProjectPreferences, WorkspaceOperation } from "../../domain/task-workspace.js";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import type { TaskWorkspace } from "../../domain/task-workspace.js";
@@ -32,6 +34,29 @@ export class SqliteTerminalSessionStore {
         )
       )
         db.exec("ALTER TABLE terminal_sessions ADD COLUMN last_started_at INTEGER");
+      const columns = new Set(
+        (db.prepare("PRAGMA table_info(task_workspaces)").all() as { name: string }[]).map(
+          (c) => c.name,
+        ),
+      );
+      for (const [column, type] of Object.entries({
+        name: "TEXT",
+        pinned: "INTEGER DEFAULT 0",
+        archived_at: "INTEGER",
+        last_tab: "TEXT",
+        unavailable: "INTEGER DEFAULT 0",
+      }))
+        if (!columns.has(column))
+          db.exec(`ALTER TABLE task_workspaces ADD COLUMN ${column} ${type}`);
+      db.exec(`CREATE TABLE IF NOT EXISTS workspace_projects (repository_path TEXT PRIMARY KEY, preferences_json TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS workspace_operations (id TEXT PRIMARY KEY, operation_json TEXT NOT NULL);`);
+      for (const row of db
+        .prepare("SELECT id, branch, directory FROM task_workspaces WHERE name IS NULL")
+        .all() as { id: string; branch?: string; directory: string }[])
+        db.prepare("UPDATE task_workspaces SET name=? WHERE id=?").run(
+          row.branch || basename(row.directory),
+          row.id,
+        );
       // Explicitly requested reset. Runs once; never deletes terminal sessions or worktrees.
       if (!db.prepare("SELECT 1 FROM desktop_migrations WHERE name=?").get("terminal-desktop-v1")) {
         db.transaction(() => {
@@ -71,7 +96,9 @@ export class SqliteTerminalSessionStore {
     const previous = this.workspaces(true).find((item) => item.directory === input.directory);
     if (previous?.removedAt) throw new Error("This workspace was removed. Choose another folder.");
     const workspace: TaskWorkspace = {
+      ...previous,
       ...input,
+      name: previous?.name ?? input.name ?? input.branch ?? basename(input.directory),
       id: previous?.id ?? `ws-${randomUUID()}`,
       createdAt: previous?.createdAt ?? Date.now(),
       managed: previous?.managed || input.managed,
@@ -92,6 +119,9 @@ export class SqliteTerminalSessionStore {
         workspace.managed ? 1 : 0,
         workspace.createdAt,
       );
+    this.db
+      .prepare("UPDATE task_workspaces SET name=? WHERE id=?")
+      .run(workspace.name, workspace.id);
     return workspace;
   }
   /** Canonicalize legacy aliases without changing physical ownership or native session identity. */
@@ -130,6 +160,11 @@ export class SqliteTerminalSessionStore {
       )
       .all() as Record<string, unknown>[];
     return rows.map((row) => ({
+      name: String(row.name),
+      pinned: Boolean(row.pinned),
+      archivedAt: row.archived_at == null ? undefined : Number(row.archived_at),
+      lastTab: row.last_tab == null ? undefined : String(row.last_tab),
+      unavailable: Boolean(row.unavailable),
       id: String(row.id),
       repositoryPath: String(row.repository_path),
       directory: String(row.directory),
@@ -140,6 +175,71 @@ export class SqliteTerminalSessionStore {
       createdAt: Number(row.created_at),
       removedAt: row.removed_at == null ? undefined : Number(row.removed_at),
     }));
+  }
+  updateWorkspace(
+    id: string,
+    changes: {
+      name?: string;
+      pinned?: boolean;
+      archivedAt?: number | null;
+      lastTab?: string | null;
+      unavailable?: boolean;
+    },
+  ): void {
+    if (!this.workspace(id)) throw new Error("Workspace not found.");
+    if (changes.name !== undefined) this.title(changes.name);
+    const columns = {
+      name: "name",
+      pinned: "pinned",
+      archivedAt: "archived_at",
+      lastTab: "last_tab",
+      unavailable: "unavailable",
+    } as const;
+    this.db.transaction(() => {
+      for (const key of Object.keys(columns) as (keyof typeof columns)[]) {
+        const value = changes[key];
+        if (value !== undefined)
+          this.db
+            .prepare(`UPDATE task_workspaces SET ${columns[key]}=? WHERE id=?`)
+            .run(
+              typeof value === "boolean"
+                ? Number(value)
+                : key === "name"
+                  ? this.title(value)
+                  : value,
+              id,
+            );
+      }
+    })();
+  }
+  preferences(repositoryPath: string): ProjectPreferences {
+    const row = this.db
+      .prepare("SELECT preferences_json FROM workspace_projects WHERE repository_path=?")
+      .get(repositoryPath) as { preferences_json: string } | undefined;
+    return row
+      ? JSON.parse(row.preferences_json)
+      : { repositoryPath, setupScript: "", copyPaths: [] };
+  }
+  savePreferences(value: ProjectPreferences): void {
+    this.db
+      .prepare(
+        "INSERT INTO workspace_projects VALUES (?, ?) ON CONFLICT(repository_path) DO UPDATE SET preferences_json=excluded.preferences_json",
+      )
+      .run(value.repositoryPath, JSON.stringify(value));
+  }
+  operations(): WorkspaceOperation[] {
+    return (
+      this.db
+        .prepare("SELECT operation_json FROM workspace_operations ORDER BY rowid DESC")
+        .all() as { operation_json: string }[]
+    ).map((row) => JSON.parse(row.operation_json));
+  }
+  saveOperation(value: WorkspaceOperation): void {
+    this.db
+      .prepare(
+        "INSERT INTO workspace_operations VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET operation_json=excluded.operation_json",
+      )
+      .run(value.id, JSON.stringify(value));
   }
   markWorkspaceRemoved(id: string): void {
     const result = this.db
@@ -248,7 +348,11 @@ export class SqliteTerminalSessionStore {
       .get() as { value: string } | undefined;
     return row?.value;
   }
-  setActiveWorkspace(id: string): void {
+  setActiveWorkspace(id: string | undefined): void {
+    if (!id) {
+      this.db.prepare("DELETE FROM desktop_state WHERE key='active_workspace'").run();
+      return;
+    }
     const workspace = this.workspace(id);
     if (!workspace || workspace.removedAt) throw new Error("Choose an available workspace.");
     this.db
@@ -271,6 +375,7 @@ export class SqliteTerminalSessionStore {
     const session = this.get(id);
     if (!session || session.archivedAt) throw new Error("Choose an active session.");
     this.setActiveWorkspace(session.workspaceId);
+    this.updateWorkspace(session.workspaceId, { lastTab: `session:${id}` });
     this.db
       .prepare(
         "INSERT INTO desktop_state(key,value) VALUES ('active_session', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

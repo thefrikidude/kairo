@@ -5,6 +5,10 @@ import type {
   SessionStartMode,
 } from "../../../domain/terminal-agent.js";
 import type {
+  ProjectPreferences,
+  WorkspaceCreation,
+  WorkspaceOperation,
+  ProjectRefs,
   TaskWorkspace,
   GitWorktree,
   WorkspaceSelection,
@@ -41,7 +45,9 @@ export type {
   FileSearch,
   WorkspaceEntry,
 };
+export type { ProjectPreferences, WorkspaceCreation, WorkspaceOperation, ProjectRefs };
 export type TerminalDesktopBootstrap = {
+  operations: WorkspaceOperation[];
   agents: TerminalAgentInfo[];
   sessions: TerminalSession[];
   archivedSessions: TerminalSession[];
@@ -53,6 +59,17 @@ export type TerminalDesktopBootstrap = {
   sessionNotices: Record<string, string>;
 };
 export interface TerminalDesktopApi {
+  createWorkspace(input: WorkspaceCreation): Promise<TerminalDesktopBootstrap>;
+  projectPreferences(project: string, input?: ProjectPreferences): Promise<ProjectPreferences>;
+  projectRefs(project: string, refresh?: boolean): Promise<ProjectRefs>;
+  refreshWorkspace(id: string): Promise<TerminalDesktopBootstrap>;
+  renameWorkspace(id: string, name: string): Promise<TerminalDesktopBootstrap>;
+  pinWorkspace(id: string, pinned: boolean): Promise<TerminalDesktopBootstrap>;
+  archiveWorkspace(id: string): Promise<TerminalDesktopBootstrap>;
+  restoreWorkspace(id: string): Promise<TerminalDesktopBootstrap>;
+  rememberWorkspaceTab(id: string, tab: string): Promise<void>;
+  cancelPreparation(id: string): Promise<TerminalDesktopBootstrap>;
+  retryPreparation(id: string): Promise<TerminalDesktopBootstrap>;
   bootstrap(): Promise<TerminalDesktopBootstrap>;
   openWorkspace(): Promise<TerminalDesktopBootstrap | undefined>;
   pickWorkspace(): Promise<string | undefined>;

@@ -3,18 +3,19 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import type { GitWorktree, TaskWorkspace } from "../../domain/task-workspace.js";
+import type { GitWorktree, TaskWorkspace, ProjectRefs } from "../../domain/task-workspace.js";
 import { stateDir } from "../filesystem/platform-paths.js";
 
 const execute = promisify(execFile);
 const git = process.platform === "darwin" ? "/usr/bin/git" : "git";
 type WorkspaceDescription = Omit<TaskWorkspace, "id" | "createdAt" | "removedAt">;
 
-async function command(directory: string, args: string[]): Promise<string> {
+async function command(directory: string, args: string[], signal?: AbortSignal): Promise<string> {
   try {
     return (
       await execute(git, args, {
         cwd: directory,
+        signal,
         encoding: "utf8",
         timeout: 30_000,
         maxBuffer: 8 * 1024 * 1024,
@@ -102,34 +103,96 @@ export class GitWorkspaces {
     }
   }
 
-  async create(requested: string, branch: string, baseRef = "HEAD"): Promise<WorkspaceDescription> {
+  async refs(requested: string, saved?: string, refresh = false): Promise<ProjectRefs> {
+    const project = await this.describe(requested);
+    if (project.kind === "folder") return { git: false, refs: [], defaultRef: "" };
+    if (refresh)
+      await this.serialize(project.repositoryPath, () =>
+        command(project.repositoryPath, ["fetch", "--all", "--prune"]),
+      );
+    const refs = (
+      await command(project.repositoryPath, [
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "refs/heads",
+        "refs/remotes",
+      ])
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    let defaultRef = saved;
+    if (!defaultRef) {
+      try {
+        defaultRef = (
+          await command(project.repositoryPath, [
+            "symbolic-ref",
+            "--short",
+            "refs/remotes/origin/HEAD",
+          ])
+        ).trim();
+      } catch {}
+      defaultRef ||= (await this.describe(project.repositoryPath)).branch || "HEAD";
+    }
+    await command(project.repositoryPath, ["rev-parse", "--verify", `${defaultRef}^{commit}`]);
+    return { git: true, refs: refs.slice(0, 2000), defaultRef };
+  }
+
+  async plan(
+    requested: string,
+    name: string,
+    branch?: string,
+    baseRef?: string,
+  ): Promise<WorkspaceDescription> {
     const project = await this.describe(requested);
     if (project.kind === "folder")
       throw new Error("Initialize Git and create a commit before starting an isolated task.");
-    return this.serialize(project.repositoryPath, async () => {
-      if (typeof branch !== "string" || !branch.trim() || branch.startsWith("-"))
-        throw new Error("Enter a valid branch name.");
-      if (typeof baseRef !== "string" || !baseRef.trim() || baseRef.startsWith("-"))
-        throw new Error("Choose a valid base branch or commit.");
-      await command(project.directory, ["check-ref-format", "--branch", branch]);
-      const baseCommit = (
-        await command(project.directory, ["rev-parse", "--verify", `${baseRef}^{commit}`])
-      ).trim();
-      const key = createHash("sha256").update(project.repositoryPath).digest("hex").slice(0, 20);
-      const parent = join(this.managedRoot, key);
-      await mkdir(parent, { recursive: true });
-      const task = `${branch.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 64)}-${randomUUID().slice(0, 8)}`;
-      const directory = join(await realpath(parent), task, basename(project.repositoryPath));
-      await command(project.directory, ["worktree", "add", "-b", branch, directory, baseCommit]);
-      return {
-        repositoryPath: project.repositoryPath,
-        directory: await realpath(directory),
-        kind: "worktree",
-        branch,
-        baseCommit,
-        managed: true,
-      };
+    if (!branch) {
+      const slug =
+        name
+          .toLowerCase()
+          .normalize("NFKD")
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 60) || "task";
+      branch = `kairo/${slug}-${randomUUID().slice(0, 8)}`;
+    }
+    if (typeof branch !== "string" || !branch.trim() || branch.startsWith("-"))
+      throw new Error("Enter a valid branch name.");
+    const base = baseRef ?? (await this.refs(project.repositoryPath)).defaultRef;
+    if (typeof base !== "string" || !base.trim() || base.startsWith("-"))
+      throw new Error("Choose a valid base branch or commit.");
+    await command(project.repositoryPath, ["check-ref-format", "--branch", branch]);
+    const baseCommit = (
+      await command(project.repositoryPath, ["rev-parse", "--verify", `${base}^{commit}`])
+    ).trim();
+    const key = createHash("sha256").update(project.repositoryPath).digest("hex").slice(0, 20);
+    const task = `${branch.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 64)}-${randomUUID().slice(0, 8)}`;
+    return {
+      repositoryPath: project.repositoryPath,
+      directory: join(this.managedRoot, key, task, basename(project.repositoryPath)),
+      kind: "worktree",
+      branch,
+      baseCommit,
+      managed: true,
+    };
+  }
+
+  async checkout(plan: WorkspaceDescription, signal?: AbortSignal): Promise<WorkspaceDescription> {
+    return this.serialize(plan.repositoryPath, async () => {
+      signal?.throwIfAborted();
+      await mkdir(join(plan.directory, ".."), { recursive: true });
+      await command(
+        plan.repositoryPath,
+        ["worktree", "add", "-b", plan.branch!, plan.directory, plan.baseCommit!],
+        signal,
+      );
+      return { ...plan, directory: await realpath(plan.directory) };
     });
+  }
+
+  async create(requested: string, branch: string, baseRef = "HEAD"): Promise<WorkspaceDescription> {
+    return this.checkout(await this.plan(requested, branch, branch, baseRef));
   }
 
   async existing(requested: string, selected: string): Promise<WorkspaceDescription> {

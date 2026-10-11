@@ -3,6 +3,8 @@ import {
   freshNativeCandidates,
   type NativeSessionLookup,
 } from "../../../infrastructure/agents/native-session-reader.js";
+import { WorkspaceLifecycle } from "./workspace-lifecycle.js";
+import type { WorkspaceCreation } from "../../../domain/task-workspace.js";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { GitWorkspaces } from "../../../infrastructure/repository/git-workspaces.js";
@@ -74,6 +76,29 @@ export async function createTerminalDesktopRuntime(
     if (!closed) emitEvent(event, payload);
   }
   const terminals = options.terminals ?? new WorkspaceTerminals(emit);
+  const archiving = new Set<string>();
+  const lifecycle = new WorkspaceLifecycle(
+    store,
+    git,
+    () => emit("sessions:changed", undefined),
+    async (workspaceId, agentId) => {
+      if (closed) return;
+      const current = store.create(workspaceId, agentId);
+      await start(current.id, "fresh");
+      if (store.activeWorkspaceId() === workspaceId) store.setActiveSession(current.id);
+      emit("sessions:changed", undefined);
+    },
+  );
+  async function refreshWorkspace(id: string): Promise<void> {
+    const value = store.workspace(id);
+    if (!value || value.removedAt) return;
+    try {
+      store.reconcileWorkspace(id, await git.describe(value.directory));
+      store.updateWorkspace(id, { unavailable: false });
+    } catch {
+      store.updateWorkspace(id, { unavailable: true });
+    }
+  }
   function session(id: unknown): TerminalSession {
     if (typeof id !== "string") throw new Error("Choose an agent session.");
     const value = store.get(id);
@@ -84,6 +109,7 @@ export async function createTerminalDesktopRuntime(
     if (typeof id !== "string") throw new Error("Choose a workspace.");
     const value = store.workspace(id);
     if (!value || value.removedAt) throw new Error("This workspace was removed or is unavailable.");
+    if (archiving.has(value.id)) throw new Error("This workspace is being archived.");
     if (removing.has(value.id)) throw new Error("This workspace is being removed.");
     return value;
   }
@@ -94,7 +120,10 @@ export async function createTerminalDesktopRuntime(
   function snapshot(): TerminalDesktopBootstrap {
     const active = store.activeSessionId();
     const activeSessionId =
-      active && store.get(active)?.archivedAt === undefined && store.get(active)
+      active &&
+      store.get(active)?.archivedAt === undefined &&
+      store.get(active) &&
+      !store.workspace(store.get(active)!.workspaceId)?.archivedAt
         ? active
         : undefined;
     return {
@@ -109,6 +138,7 @@ export async function createTerminalDesktopRuntime(
         : store.activeWorkspaceId(),
       sessionErrors: { ...sessionErrors },
       sessionNotices: { ...sessionNotices },
+      operations: store.operations(),
     };
   }
   async function captureNative(): Promise<void> {
@@ -157,6 +187,13 @@ export async function createTerminalDesktopRuntime(
       let current = session(id);
       if (current.archivedAt) throw new Error("Restore this session before opening its terminal.");
       const target = workspace(current.workspaceId);
+      if (
+        target.archivedAt ||
+        target.unavailable ||
+        (lifecycle.busy(target.id) &&
+          store.operations().some((op) => op.workspaceId === target.id && op.phase !== "ready"))
+      )
+        throw new Error("Restore this workspace or finish preparation before starting an agent.");
       const existing = terminals.list().find((terminal) => terminal.sessionId === id);
       if (existing?.state === "running") return;
       if (existing) {
@@ -271,16 +308,13 @@ export async function createTerminalDesktopRuntime(
   }
   const ready = (async () => {
     catalog = await agents.refresh();
+    await lifecycle.reconcile();
     const pending = [...store.workspaces()];
     await Promise.all(
       Array.from({ length: Math.min(4, pending.length) }, async () => {
         let value;
         while ((value = pending.shift())) {
-          try {
-            store.reconcileWorkspace(value.id, await git.describe(value.directory));
-          } catch {
-            /* Retain missing-workspace metadata, including branch history. */
-          }
+          await refreshWorkspace(value.id);
         }
       }),
     );
@@ -291,7 +325,12 @@ export async function createTerminalDesktopRuntime(
       nativeTimer.unref();
     }
     const active = store.activeSessionId();
-    if (active && store.get(active) && !store.get(active)!.archivedAt)
+    if (
+      active &&
+      store.get(active) &&
+      !store.get(active)!.archivedAt &&
+      !store.workspace(store.get(active)!.workspaceId)?.archivedAt
+    )
       await start(active).catch((error) => {
         sessionErrors[active] = errorText(error);
       });
@@ -303,7 +342,9 @@ export async function createTerminalDesktopRuntime(
     if (nativeTimer) clearInterval(nativeTimer);
     closePromise = (async () => {
       await ready.catch(() => {});
+      await lifecycle.close();
       await Promise.allSettled([...mutations, ...starts.values()]);
+      await lifecycle.close();
       try {
         await captureNative();
         await terminals.close();
@@ -334,10 +375,102 @@ export async function createTerminalDesktopRuntime(
       }
       case "workspace:select": {
         const target = workspace(first);
+        if (target.archivedAt) throw new Error("Restore this workspace first.");
+        await refreshWorkspace(target.id);
         store.setActiveSession(undefined);
         store.setActiveWorkspace(target.id);
+        if (target.lastTab?.startsWith("session:")) {
+          const saved = store.get(target.lastTab.slice(8));
+          if (saved && !saved.archivedAt) store.setActiveSession(saved.id);
+        }
         return snapshot();
       }
+      case "workspace:create": {
+        const input = first as WorkspaceCreation;
+        if (input?.agentId) {
+          agentDefinition(input.agentId);
+          if (!(await agents.refresh()).find((agent) => agent.id === input.agentId)?.installed)
+            throw new Error("Install the selected agent first.");
+        }
+        await lifecycle.create(input);
+        return snapshot();
+      }
+      case "workspace:preferences":
+        if (typeof first !== "string") throw new Error("Choose a project.");
+        return lifecycle.preferences(first, second);
+      case "workspace:refs": {
+        if (typeof first !== "string") throw new Error("Choose a project.");
+        const prefs = await lifecycle.preferences(first);
+        return git.refs(first, prefs.baseRef, second === true);
+      }
+      case "workspace:refresh": {
+        await refreshWorkspace(workspace(first).id);
+        return snapshot();
+      }
+      case "workspace:rename":
+        if (typeof second !== "string") throw new Error("Enter a workspace name.");
+        store.updateWorkspace(workspace(first).id, { name: second });
+        return snapshot();
+      case "workspace:pin":
+        if (typeof second !== "boolean") throw new Error("Choose a pin state.");
+        store.updateWorkspace(workspace(first).id, { pinned: second });
+        return snapshot();
+      case "workspace:tab": {
+        const target = workspace(first);
+        if (
+          typeof second !== "string" ||
+          !(
+            (second.startsWith("session:") &&
+              store.get(second.slice(8))?.workspaceId === target.id) ||
+            (second.startsWith("terminal:") &&
+              terminals.list(target.id).some((t) => t.id === second.slice(9)))
+          )
+        )
+          throw new Error("Choose a tab belonging to this workspace.");
+        store.updateWorkspace(target.id, { lastTab: second });
+        if (second.startsWith("terminal:")) {
+          store.setActiveSession(undefined);
+          store.setActiveWorkspace(target.id);
+        }
+        emit("sessions:changed", undefined);
+        return;
+      }
+      case "workspace:archive": {
+        const target = workspace(first);
+        if (lifecycle.busy(target.id))
+          throw new Error("Cancel or finish preparation before archiving.");
+        archiving.add(target.id);
+        try {
+          for (const current of [...store.list(), ...store.list(true)].filter(
+            (s) => s.workspaceId === target.id,
+          ))
+            await stop(current.id);
+          while (pendingTerminalCreates.get(target.id))
+            await new Promise((done) => setTimeout(done, 10));
+          for (const terminal of terminals.list(target.id))
+            await terminals.closeTerminal(terminal.id);
+          store.updateWorkspace(target.id, { archivedAt: Date.now() });
+          if (store.activeWorkspaceId() === target.id) {
+            store.setActiveSession(undefined);
+            store.setActiveWorkspace(undefined);
+          }
+        } finally {
+          archiving.delete(target.id);
+        }
+        return snapshot();
+      }
+      case "workspace:restore":
+        store.updateWorkspace(workspace(first).id, { archivedAt: null });
+        await refreshWorkspace(String(first));
+        return snapshot();
+      case "workspace:cancel":
+        if (typeof first !== "string") throw new Error("Choose a preparation.");
+        lifecycle.cancel(first);
+        return snapshot();
+      case "workspace:retry":
+        if (typeof first !== "string") throw new Error("Choose a preparation.");
+        await lifecycle.retry(first);
+        return snapshot();
       case "session:new": {
         agentDefinition(first);
         if (typeof first !== "string" || typeof second !== "string")
@@ -353,6 +486,10 @@ export async function createTerminalDesktopRuntime(
           description = await git.existing(second, selection.directory);
         else throw new Error("Choose a valid workspace mode.");
         const target = store.registerWorkspace(description);
+        if (target.archivedAt || target.unavailable || lifecycle.busy(target.id))
+          throw new Error(
+            "Restore an available workspace and finish preparation before adding an agent.",
+          );
         const current = store.create(target.id, first);
         store.setActiveSession(current.id);
         await start(current.id, "fresh");
@@ -412,8 +549,9 @@ export async function createTerminalDesktopRuntime(
       }
       case "worktrees:remove": {
         const target = workspace(first);
-        if (store.list().some((current) => current.workspaceId === target.id))
+        if (!target.archivedAt && store.list().some((current) => current.workspaceId === target.id))
           throw new Error("Archive associated sessions before removing this worktree.");
+        if (lifecycle.busy(target.id)) throw new Error("Cancel or finish preparation first.");
         removing.add(target.id);
         try {
           if (
@@ -433,6 +571,8 @@ export async function createTerminalDesktopRuntime(
         return terminals.list(typeof first === "string" ? first : undefined);
       case "terminal:create": {
         const target = workspace(first);
+        if (target.archivedAt || target.unavailable)
+          throw new Error("Restore an available workspace before opening a terminal.");
         pendingTerminalCreates.set(target.id, (pendingTerminalCreates.get(target.id) ?? 0) + 1);
         try {
           return await terminals.create(target.id, target.directory, second === true);

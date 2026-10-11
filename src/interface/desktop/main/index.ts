@@ -158,6 +158,20 @@ function registerIpc(): void {
   handle("worktrees:list", "worktrees:list");
   handle("worktrees:remove", "worktrees:remove");
   handle("workspace:select", "workspace:select");
+  for (const action of [
+    "create",
+    "preferences",
+    "refs",
+    "refresh",
+    "rename",
+    "pin",
+    "archive",
+    "restore",
+    "tab",
+    "cancel",
+    "retry",
+  ])
+    handle(`workspace:${action}`, `workspace:${action}`);
   handle("agents:refresh", "agents:refresh");
   handle("workspace:directory", "workspace:directory");
   handle("workspace:snapshot", "workspace:snapshot");

@@ -11,6 +11,17 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const api: DesktopApi = {
+  createWorkspace: (input) => invoke("workspace:create", input),
+  projectPreferences: (project, input) => invoke("workspace:preferences", project, input),
+  projectRefs: (project, refresh) => invoke("workspace:refs", project, refresh),
+  refreshWorkspace: (id) => invoke("workspace:refresh", id),
+  renameWorkspace: (id, name) => invoke("workspace:rename", id, name),
+  pinWorkspace: (id, pinned) => invoke("workspace:pin", id, pinned),
+  archiveWorkspace: (id) => invoke("workspace:archive", id),
+  restoreWorkspace: (id) => invoke("workspace:restore", id),
+  rememberWorkspaceTab: (id, tab) => invoke("workspace:tab", id, tab),
+  cancelPreparation: (id) => invoke("workspace:cancel", id),
+  retryPreparation: (id) => invoke("workspace:retry", id),
   bootstrap: () => invoke("desktop:bootstrap"),
   openWorkspace: () => invoke("workspace:open"),
   pickWorkspace: () => invoke("workspace:pick"),
