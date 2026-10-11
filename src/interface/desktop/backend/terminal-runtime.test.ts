@@ -422,3 +422,56 @@ test("workspace archive drains agent and shell terminals, preserves session flag
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("navigation bootstrap omits archived history and preparation bodies while detail requests preserve them", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kairo-navigation-details-"));
+  const store = await SqliteTerminalSessionStore.open(join(root, "sessions.sqlite"));
+  const workspace = store.registerWorkspace({
+    repositoryPath: root,
+    directory: root,
+    kind: "folder",
+    managed: false,
+  });
+  const session = store.create(workspace.id, "codex");
+  store.archive(session.id);
+  store.saveOperation({
+    id: "preparation",
+    repositoryPath: root,
+    directory: root,
+    name: "Fixture",
+    phase: "failed",
+    preferences: { repositoryPath: root, setupScript: "fixture", copyPaths: [".env"] },
+    copiedPaths: [".env"],
+    output: "setup output",
+    createdAt: 1,
+  });
+  const runtime = await createTerminalDesktopRuntime(() => {}, {
+    store,
+    agents: {
+      async refresh() {
+        return [];
+      },
+      async launch() {
+        throw new Error("No agent should launch.");
+      },
+    },
+  });
+  const request = (method: string, ...args: unknown[]) => runtime.dispatch({ id: 1, method, args });
+  try {
+    const navigation = (await request("bootstrap", true)) as TerminalDesktopBootstrap;
+    assert.deepEqual(navigation.archivedSessions, []);
+    assert.equal("output" in navigation.operations[0], false);
+    assert.equal("preferences" in navigation.operations[0], false);
+    assert.equal(((await request("sessions:archived")) as { id: string }[])[0].id, session.id);
+    assert.equal(
+      ((await request("workspace:operation", "preparation")) as { output: string }).output,
+      "setup output",
+    );
+    const complete = (await request("bootstrap")) as TerminalDesktopBootstrap;
+    assert.equal(complete.archivedSessions[0].id, session.id);
+    await assert.rejects(request("workspace:operation", "missing"), /not found/i);
+  } finally {
+    await runtime.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

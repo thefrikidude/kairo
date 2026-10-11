@@ -62,7 +62,7 @@ export async function createTerminalDesktopRuntime(
   >();
   const sessionNotices: Record<string, string> = {};
   let capturePromise: Promise<void> | undefined;
-  let nativeTimer: ReturnType<typeof setInterval> | undefined;
+  let nativeTimer: ReturnType<typeof setTimeout> | undefined;
   const git = options.worktrees ?? new GitWorkspaces();
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -118,7 +118,7 @@ export async function createTerminalDesktopRuntime(
     if (typeof id !== "string") throw new Error("Choose a workspace or session.");
     return workspace(store.get(id)?.workspaceId ?? id);
   }
-  function snapshot(): TerminalDesktopBootstrap {
+  function snapshot(navigationOnly = false): TerminalDesktopBootstrap {
     const active = store.activeSessionId();
     const activeSessionId =
       active &&
@@ -130,7 +130,7 @@ export async function createTerminalDesktopRuntime(
     return {
       agents: catalog,
       sessions: store.list(),
-      archivedSessions: store.list(true),
+      archivedSessions: navigationOnly ? [] : store.list(true),
       workspaces: store.workspaces(true),
       terminals: terminals.list(),
       activeSessionId,
@@ -139,14 +139,32 @@ export async function createTerminalDesktopRuntime(
         : store.activeWorkspaceId(),
       sessionErrors: { ...sessionErrors },
       sessionNotices: { ...sessionNotices },
-      operations: store.operations(),
+      operations: store.operations().map((operation) => {
+        if (!navigationOnly) return operation;
+        const { preferences, copiedPaths, output, ...summary } = operation;
+        return summary;
+      }),
     };
   }
-  async function captureNative(): Promise<void> {
+  async function captureNative(runningOnly = false): Promise<void> {
     if (capturePromise) return capturePromise;
     const pending = (async () => {
+      const running = new Set(
+        terminals
+          .list()
+          .filter((terminal) => terminal.state === "running")
+          .map((terminal) => terminal.sessionId),
+      );
+      const reads = new Map<string, ReturnType<NativeSessionReader["list"]>>();
       for (const [id, entry] of captures) {
-        const records = await nativeReader.list(entry.lookup);
+        if (runningOnly && !running.has(id)) continue;
+        const key = JSON.stringify(entry.lookup);
+        let read = reads.get(key);
+        if (!read) {
+          read = nativeReader.list(entry.lookup);
+          reads.set(key, read);
+        }
+        const records = await read;
         if (captures.get(id) !== entry || !store.get(id)) continue;
         const candidates = freshNativeCandidates(
           records,
@@ -320,9 +338,21 @@ export async function createTerminalDesktopRuntime(
       }),
     );
     if (!closed) {
-      nativeTimer = setInterval(() => {
-        void captureNative().catch(() => {});
-      }, 1500);
+      let delay = 1500;
+      const poll = async () => {
+        if (closed) return;
+        if (captures.size) {
+          const before = JSON.stringify([...captures.values()].map((entry) => [...entry.baseline]));
+          await captureNative(true).catch(() => {});
+          const after = JSON.stringify([...captures.values()].map((entry) => [...entry.baseline]));
+          delay = before === after ? Math.min(5000, delay + 500) : 1500;
+        } else delay = 5000;
+        if (!closed) {
+          nativeTimer = setTimeout(poll, delay);
+          nativeTimer.unref();
+        }
+      };
+      nativeTimer = setTimeout(poll, delay);
       nativeTimer.unref();
     }
     const active = store.activeSessionId();
@@ -340,7 +370,7 @@ export async function createTerminalDesktopRuntime(
     if (closePromise) return closePromise;
     closed = true;
     terminals.beginClose();
-    if (nativeTimer) clearInterval(nativeTimer);
+    if (nativeTimer) clearTimeout(nativeTimer);
     closePromise = (async () => {
       await ready.catch(() => {});
       await lifecycle.close();
@@ -361,7 +391,15 @@ export async function createTerminalDesktopRuntime(
     const [first, second, third, fourth] = request.args;
     switch (request.method) {
       case "bootstrap":
-        return snapshot();
+        return snapshot(first === true);
+      case "sessions:archived":
+        return store.list(true);
+      case "workspace:operation": {
+        if (typeof first !== "string") throw new Error("Choose a preparation operation.");
+        const operation = store.operations().find((operation) => operation.id === first);
+        if (!operation) throw new Error("Preparation not found.");
+        return operation;
+      }
       case "agents:homepage":
         return agentDefinition(first).homepage;
       case "agents:refresh":

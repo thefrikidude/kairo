@@ -8,7 +8,14 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: { input: resolve(desktopRoot, "main/index.ts") },
+      minify: "esbuild",
+      rollupOptions: {
+        input: {
+          index: resolve(desktopRoot, "main/index.ts"),
+          backend: resolve(desktopRoot, "backend/protocol.ts"),
+        },
+        output: { entryFileNames: "[name].js" },
+      },
     },
   },
   preload: {
@@ -24,6 +31,7 @@ export default defineConfig({
     root: resolve(desktopRoot, "renderer"),
     plugins: [react()],
     build: {
+      minify: "esbuild",
       rollupOptions: { input: resolve(desktopRoot, "renderer/index.html") },
     },
   },

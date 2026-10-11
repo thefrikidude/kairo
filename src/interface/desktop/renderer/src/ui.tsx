@@ -25,6 +25,8 @@ const storedNumber = (key: string, fallback: number, min: number, max: number) =
 
 export function DesktopApp(): React.JSX.Element {
   const [state, setState] = useState<DesktopBootstrap>();
+  const [archived, setArchived] = useState<DesktopBootstrap["archivedSessions"]>([]);
+  const [preparationOutput, setPreparationOutput] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(() =>
@@ -90,6 +92,39 @@ export function DesktopApp(): React.JSX.Element {
         !!op.workspaceId && op.workspaceId === workspace?.id && (op.phase !== "ready" || op.error),
     );
   useEffect(() => {
+    if (settings !== "archived") return;
+    let disposed = false;
+    void window.kairo
+      .archivedSessions()
+      .then((value) => {
+        if (!disposed) setArchived(value);
+      })
+      .catch((cause) => {
+        if (!disposed) setError(message(cause));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [settings, state]);
+  const previousPreparationId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (previousPreparationId.current !== operation?.id) setPreparationOutput("");
+    previousPreparationId.current = operation?.id;
+    if (!operation) return;
+    let disposed = false;
+    void window.kairo
+      .preparation(operation.id)
+      .then((value) => {
+        if (!disposed) setPreparationOutput(value.output);
+      })
+      .catch((cause) => {
+        if (!disposed) setError(message(cause));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [operation]);
+  useEffect(() => {
     const owner = state?.workspaces.find((w) => w.id === state.activeWorkspaceId);
     const saved = owner?.lastTab?.startsWith("terminal:") ? owner.lastTab.slice(9) : undefined;
     setShellId(saved && state?.terminals.some((t) => t.id === saved) ? saved : undefined);
@@ -152,7 +187,7 @@ export function DesktopApp(): React.JSX.Element {
         setError(message(cause));
         // Failed launches still retain the session and any newly created worktree.
         await window.kairo
-          .bootstrap()
+          .bootstrap(true)
           .then(apply)
           .catch(() => {});
       } finally {
@@ -181,24 +216,37 @@ export function DesktopApp(): React.JSX.Element {
       ),
     );
     const offError = window.kairo.onRuntimeError(({ error }) => setError(error));
-    const offSessions = window.kairo.onSessionsChanged(() => {
-      void window.kairo
-        .bootstrap()
-        .then((value) => {
-          if (!disposed) apply(value);
-        })
-        .catch((cause) => setError(message(cause)));
-    });
-    void window.kairo
-      .bootstrap()
-      .then((value) => {
+    let refreshing = false;
+    let refreshAgain = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = async () => {
+      timer = undefined;
+      if (disposed) return;
+      if (refreshing) {
+        refreshAgain = true;
+        return;
+      }
+      refreshing = true;
+      try {
+        const value = await window.kairo.bootstrap(true);
         if (!disposed) apply(value);
-      })
-      .catch((cause) => {
+      } catch (cause) {
         if (!disposed) setError(message(cause));
-      });
+      } finally {
+        refreshing = false;
+        if (refreshAgain && !disposed) {
+          refreshAgain = false;
+          timer = setTimeout(refresh, 30);
+        }
+      }
+    };
+    const offSessions = window.kairo.onSessionsChanged(() => {
+      if (!timer) timer = setTimeout(refresh, 30);
+    });
+    void refresh();
     return () => {
       disposed = true;
+      clearTimeout(timer);
       offState();
       offClose();
       offError();
@@ -232,7 +280,7 @@ export function DesktopApp(): React.JSX.Element {
       ))
         await window.kairo.pinWorkspace(workspaceId, true);
       localStorage.removeItem("kairo-pinned-sessions");
-      if (ids.length) apply(await window.kairo.bootstrap());
+      if (ids.length) apply(await window.kairo.bootstrap(true));
     })().catch((cause) => setError(message(cause)));
   }, [state, apply]);
   useEffect(() => {
@@ -339,7 +387,7 @@ export function DesktopApp(): React.JSX.Element {
     } catch (cause) {
       setError(message(cause));
       await window.kairo
-        .bootstrap()
+        .bootstrap(true)
         .then(apply)
         .catch(() => {});
     } finally {
@@ -394,7 +442,7 @@ export function DesktopApp(): React.JSX.Element {
       const value = await window.kairo.selectWorkspace(id);
       if (tab?.startsWith("session:")) return window.kairo.openSession(tab.slice(8));
       if (tab?.startsWith("terminal:")) await window.kairo.rememberWorkspaceTab(id, tab);
-      return tab ? window.kairo.bootstrap() : value;
+      return tab ? window.kairo.bootstrap(true) : value;
     });
   };
   const menuHandlers = (label: string, actions: ContextAction[]) => ({
@@ -690,7 +738,7 @@ export function DesktopApp(): React.JSX.Element {
                               run: () =>
                                 void action(async () => {
                                   await window.kairo.closeTerminal(terminal.id);
-                                  return window.kairo.bootstrap();
+                                  return window.kairo.bootstrap(true);
                                 }),
                             },
                           ],
@@ -828,18 +876,18 @@ export function DesktopApp(): React.JSX.Element {
                   </article>
                 ))}
               <h2>Archived sessions</h2>
-              {state?.archivedSessions.map((session) => (
+              {archived.map((session) => (
                 <article className="workspace-catalog-row" key={session.id}>
                   <div>
                     <strong>{session.title}</strong>
                     <code>
-                      {state.workspaces.find((item) => item.id === session.workspaceId)?.directory}
+                      {state?.workspaces.find((item) => item.id === session.workspaceId)?.directory}
                     </code>
                   </div>
                   <button
                     disabled={
                       pending ||
-                      !!state.workspaces.find((item) => item.id === session.workspaceId)?.removedAt
+                      !!state?.workspaces.find((item) => item.id === session.workspaceId)?.removedAt
                     }
                     onClick={() => void action(() => window.kairo.restoreSession(session.id))}
                   >
@@ -859,9 +907,7 @@ export function DesktopApp(): React.JSX.Element {
                   </button>
                 </article>
               ))}
-              {!state?.archivedSessions.length && (
-                <p className="empty-small">No archived sessions</p>
-              )}
+              {!archived.length && <p className="empty-small">No archived sessions</p>}
             </>
           )}
           {settings === "workspaces" && (
@@ -937,7 +983,7 @@ export function DesktopApp(): React.JSX.Element {
                 {operation.name} · {operation.phase}
               </h2>
               {operation.error && <p className="file-error">{operation.error}</p>}
-              {operation.output && <pre>{operation.output}</pre>}
+              {preparationOutput && <pre>{preparationOutput}</pre>}
               <div className="modal-actions">
                 {["checkout", "copy", "setup"].includes(operation.phase) ? (
                   <button

@@ -3,6 +3,8 @@ import { createDesktopRuntime, type DesktopRequest } from "./index.js";
 
 const methods = new Set([
   "bootstrap",
+  "sessions:archived",
+  "workspace:operation",
   "terminal:list",
   "terminal:create",
   "terminal:attach",

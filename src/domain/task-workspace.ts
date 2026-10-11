@@ -59,3 +59,8 @@ export type WorkspaceOperation = {
   createdAt: number;
 };
 export type ProjectRefs = { refs: string[]; defaultRef: string; git: boolean };
+
+export type WorkspaceOperationSummary = Omit<
+  WorkspaceOperation,
+  "preferences" | "copiedPaths" | "output"
+>;

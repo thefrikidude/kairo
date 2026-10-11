@@ -37,8 +37,8 @@ function assertTrusted(event: IpcMainEvent | IpcMainInvokeEvent): void {
 
 function startBackend(): Promise<void> {
   const root = appRoot;
-  const entry = join(root, "src/interface/desktop/backend/protocol.ts");
-  backend = spawn(join(root, "node_modules/.bin/tsx"), [entry], {
+  const entry = join(root, "out/main/backend.js");
+  backend = spawn(process.env.KAIRO_NODE_EXECUTABLE || "node", [entry], {
     cwd: root,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -125,6 +125,8 @@ function registerIpc(): void {
       return request(method, args);
     });
   handle("desktop:bootstrap", "bootstrap");
+  handle("sessions:archived", "sessions:archived");
+  handle("workspace:operation", "workspace:operation");
   handle("terminal:list", "terminal:list");
   handle("terminal:create", "terminal:create");
   handle("terminal:attach", "terminal:attach");

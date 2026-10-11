@@ -8,6 +8,7 @@ import type {
   ProjectPreferences,
   WorkspaceCreation,
   WorkspaceOperation,
+  WorkspaceOperationSummary,
   ProjectRefs,
   TaskWorkspace,
   GitWorktree,
@@ -47,7 +48,7 @@ export type {
 };
 export type { ProjectPreferences, WorkspaceCreation, WorkspaceOperation, ProjectRefs };
 export type TerminalDesktopBootstrap = {
-  operations: WorkspaceOperation[];
+  operations: WorkspaceOperationSummary[];
   agents: TerminalAgentInfo[];
   sessions: TerminalSession[];
   archivedSessions: TerminalSession[];
@@ -70,7 +71,9 @@ export interface TerminalDesktopApi {
   rememberWorkspaceTab(id: string, tab: string): Promise<void>;
   cancelPreparation(id: string): Promise<TerminalDesktopBootstrap>;
   retryPreparation(id: string): Promise<TerminalDesktopBootstrap>;
-  bootstrap(): Promise<TerminalDesktopBootstrap>;
+  bootstrap(navigationOnly?: boolean): Promise<TerminalDesktopBootstrap>;
+  archivedSessions(): Promise<TerminalSession[]>;
+  preparation(id: string): Promise<WorkspaceOperation>;
   openWorkspace(): Promise<TerminalDesktopBootstrap | undefined>;
   pickWorkspace(): Promise<string | undefined>;
   selectWorkspace(id: string): Promise<TerminalDesktopBootstrap>;
