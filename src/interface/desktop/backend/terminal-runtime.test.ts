@@ -407,6 +407,16 @@ test("workspace archive drains agent and shell terminals, preserves session flag
     assert.ok(snapshot.archivedSessions.find((s) => s.id === archived.id));
     await assert.rejects(request("workspace:tab", target.id, "terminal:foreign"), /belonging/);
     assert.throws(() => process.kill(shell.pid, 0), { code: "ESRCH" });
+    const external = join(root, "external-folder");
+    await mkdir(external);
+    const opened = (await request("workspace:open", external)) as TerminalDesktopBootstrap;
+    const externalId = opened.activeWorkspaceId!;
+    await rm(external, { recursive: true });
+    const missing = (await request("workspace:refresh", externalId)) as TerminalDesktopBootstrap;
+    assert.equal(missing.workspaces.find((w) => w.id === externalId)?.unavailable, true);
+    await mkdir(external);
+    const restored = (await request("workspace:refresh", externalId)) as TerminalDesktopBootstrap;
+    assert.equal(restored.workspaces.find((w) => w.id === externalId)?.unavailable, false);
   } finally {
     await runtime.close();
     await rm(root, { recursive: true, force: true });

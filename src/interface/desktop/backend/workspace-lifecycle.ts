@@ -58,7 +58,7 @@ export class WorkspaceLifecycle {
   }
   async preferences(project: string, input?: unknown): Promise<ProjectPreferences> {
     const repositoryPath = (await this.git.describe(project)).repositoryPath;
-    if (input === undefined) return this.store.preferences(repositoryPath);
+    if (input == null) return this.store.preferences(repositoryPath);
     const value = input as Partial<ProjectPreferences>;
     if (
       !value ||
@@ -67,7 +67,7 @@ export class WorkspaceLifecycle {
       !Array.isArray(value.copyPaths) ||
       value.copyPaths.length > 100 ||
       (value.baseRef !== undefined &&
-        (typeof value.baseRef !== "string" || value.baseRef.startsWith("-")))
+        (typeof value.baseRef !== "string" || value.baseRef.trim().startsWith("-")))
     )
       throw new Error("Invalid project preferences.");
     const preferences = {

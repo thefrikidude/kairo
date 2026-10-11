@@ -84,6 +84,7 @@ export async function createTerminalDesktopRuntime(
     async (workspaceId, agentId) => {
       if (closed) return;
       const current = store.create(workspaceId, agentId);
+      store.updateWorkspace(workspaceId, { lastTab: `session:${current.id}` });
       await start(current.id, "fresh");
       if (store.activeWorkspaceId() === workspaceId) store.setActiveSession(current.id);
       emit("sessions:changed", undefined);
@@ -498,6 +499,8 @@ export async function createTerminalDesktopRuntime(
       case "session:open":
       case "session:start": {
         const current = session(first);
+        if (workspace(current.workspaceId).archivedAt)
+          throw new Error("Restore this workspace first.");
         store.setActiveSession(current.id);
         const mode: SessionStartMode = second === "fresh" || second === "picker" ? second : "auto";
         await start(current.id, mode);
