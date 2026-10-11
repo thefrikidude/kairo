@@ -321,29 +321,6 @@ button svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.project-menu-button {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  margin-right: 4px;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 17px;
-  line-height: 1;
-  opacity: 0;
-}
-.project-session-group:hover .project-menu-button,
-.project-menu-button:focus-visible {
-  opacity: 1;
-}
-.project-menu-button:hover {
-  color: var(--text);
-  background: var(--surface);
-}
-.project-menu {
-  top: 30px;
-  right: 4px;
-}
 .project-session-items {
   display: flex;
   flex-direction: column;
@@ -379,30 +356,6 @@ button svg {
 .session-row .session {
   background: transparent;
 }
-.session-menu {
-  position: absolute;
-  z-index: 5;
-  right: 4px;
-  top: 34px;
-  width: 148px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: 0 10px 24px #0004;
-}
-.session-menu button {
-  width: 100%;
-  text-align: left;
-  padding: 7px 9px;
-  border-radius: 5px;
-}
-.session-menu button:hover {
-  background: var(--hover);
-}
-.session-menu .destructive {
-  color: var(--negative);
-}
 .session.selected {
   background: var(--hover);
 }
@@ -410,45 +363,6 @@ button svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.session-row-actions {
-  position: absolute;
-  right: 4px;
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  min-height: 28px;
-}
-.session-action-button {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 26px;
-  border-radius: 5px;
-  color: var(--muted);
-  opacity: 0;
-}
-.session-row:hover .session-action-button,
-.session-action-button:focus-visible,
-.session-action-button.pinned {
-  opacity: 1;
-}
-.session-action-button:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--surface);
-}
-.session-action-button.pinned {
-  color: var(--positive);
-}
-.session-action-button:disabled {
-  cursor: default;
-  opacity: 0.35;
-}
-@media (hover: none) {
-  .session-action-button,
-  .project-menu-button {
-    opacity: 1;
-  }
 }
 .session-spinner {
   width: 11px;
@@ -2159,13 +2073,6 @@ button svg {
   gap: 8px;
   padding-right: 14px;
 }
-.session-row:hover .session,
-.session-row:focus-within .session {
-  padding-right: 84px;
-}
-.session-row:focus-within .session-action-button {
-  opacity: 1;
-}
 .session-status {
   width: 6px;
   height: 6px;
@@ -3055,22 +2962,12 @@ button svg {
   max-height: 35%;
   overflow-y: auto;
 }
-.session-row-actions {
-  z-index: 1;
-}
 
 .workspace-heading {
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.project-setup-button {
-  margin: 4px 12px;
-  font-size: 11px;
-  color: var(--muted);
-  background: transparent;
-  border: 0;
 }
 .workspace-palette {
   width: min(640px, 80vw);
@@ -3146,30 +3043,6 @@ button svg {
 .palette-results small {
   width: 100%;
 }
-.agent-tab-menu {
-  position: relative;
-}
-.agent-tab-menu summary {
-  cursor: pointer;
-  padding: 8px;
-  list-style: none;
-}
-.agent-tab-menu > div {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 5;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  width: 160px;
-}
-.agent-tab-menu > div button {
-  text-align: left;
-}
 @media (max-width: 1100px) {
   .topbar:has(.terminal-tabs) {
     flex-wrap: wrap;
@@ -3184,4 +3057,34 @@ button svg {
   .workspace-heading {
     flex: 1;
   }
+}
+
+.row-context-menu {
+  position: fixed;
+  z-index: 100;
+  width: 190px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 5px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0004;
+}
+.row-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  border-radius: 4px;
+}
+.row-context-menu button:hover:not(:disabled),
+.row-context-menu button:focus-visible {
+  background: var(--hover);
+}
+.row-context-menu button:disabled {
+  color: var(--muted);
+  cursor: default;
 }

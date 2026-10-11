@@ -12,7 +12,7 @@ Implemented 11 October 2026, starting from `d02c59d` (terminal-only desktop).
 - Setup uses `sh -e` in the destination with `KAIRO_SOURCE_DIR` / `KAIRO_WORKSPACE_DIR`, retains the last 32,000 output characters, and stops owned processes on cancellation/shutdown. The ten-minute limit prevents indefinite setup. Servers belong in normal workspace terminal tabs.
 - Workspace names, pins, archive state and remembered tabs persist. Legacy session pins map to workspace pins. Workspace archive closes all attached terminals without changing individual session archive flags or deleting files/branches. Restore does not start all tabs.
 - Removal remains separate and refuses dirty/ignored/unmerged work or live processes. Selection refreshes Git metadata in the background; app focus and explicit refresh also reconcile metadata. Missing directories retain history and are labeled unavailable.
-- Cmd/Ctrl+J jumps to workspaces/tabs; Cmd/Ctrl+P opens files through the existing bounded search/editor. Palette results are capped; terminal shortcuts are intercepted before reaching the CLI. Agent-tab actions live in a small tab menu.
+- Cmd/Ctrl+J jumps to workspaces/tabs; Cmd/Ctrl+P opens files through the existing bounded search/editor. Palette results are capped; terminal shortcuts are intercepted before reaching the CLI. Project, workspace and terminal actions live in right-click menus, also accessible with Shift+F10. Inline action icons and the permanent Project setup button are removed.
 
 ## Validation
 

@@ -10,6 +10,7 @@ import { Icon, KairoLogo, ModalFrame } from "./chrome.js";
 import { navigateTabs } from "./tab-navigation.js";
 import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
 import { WorkspacePalette } from "./workspace-palette.js";
+import { ContextMenu, type ContextAction, type ContextMenuState } from "./context-menu.js";
 import { TerminalCatalog } from "./terminal-catalog.js";
 const AgentTerminals = lazy(() => import("./agent-terminals.js"));
 const FileBrowser = lazy(() => import("./file-browser.js"));
@@ -57,6 +58,8 @@ export function DesktopApp(): React.JSX.Element {
   const [agentQuery, setAgentQuery] = useState("");
   const [detecting, setDetecting] = useState(false);
   const [rename, setRename] = useState<{ id: string; title: string; workspace?: boolean }>();
+  const [rowMenu, setRowMenu] = useState<ContextMenuState>();
+  const closeRowMenu = useCallback(() => setRowMenu(undefined), []);
   const [confirm, setConfirm] = useState<{
     title: string;
     description: string;
@@ -394,6 +397,45 @@ export function DesktopApp(): React.JSX.Element {
       return tab ? window.kairo.bootstrap() : value;
     });
   };
+  const menuHandlers = (label: string, actions: ContextAction[]) => ({
+    onContextMenu: (event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const trigger = event.currentTarget.matches("button")
+        ? event.currentTarget
+        : (event.currentTarget.querySelector<HTMLElement>("button") ?? event.currentTarget);
+      setRowMenu({ x: event.clientX, y: event.clientY, trigger, label, actions });
+    },
+    onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+      if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const trigger = event.target as HTMLElement;
+      const bounds = trigger.getBoundingClientRect();
+      setRowMenu({ x: bounds.left, y: bounds.bottom, trigger, label, actions });
+    },
+  });
+  const projectActions = (path: string): ContextAction[] => [
+    { label: "New workspace", disabled: pending, run: () => setWorkspaceDialog(path) },
+    { label: "Project setup", run: () => setProjectSettings(path) },
+  ];
+  const agentActions = (id: string): ContextAction[] => {
+    const session = state?.sessions.find((session) => session.id === id);
+    return session
+      ? [
+          {
+            label: "Rename agent tab",
+            disabled: pending,
+            run: () => setRename({ id, title: session.title }),
+          },
+          {
+            label: "Archive agent tab",
+            disabled: pending,
+            run: () => void action(() => window.kairo.archiveSession(id)),
+          },
+        ]
+      : [];
+  };
   const renderWorkspace = (item: TaskWorkspace) => {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
@@ -402,6 +444,35 @@ export function DesktopApp(): React.JSX.Element {
         key={item.id}
         data-workspace-id={item.id}
         className={`session-row workspace-row ${workspace?.id === item.id ? "selected" : ""}`}
+        {...menuHandlers(`${label} actions`, [
+          {
+            label: "Rename",
+            disabled: pending,
+            run: () => setRename({ id: item.id, title: label, workspace: true }),
+          },
+          {
+            label: item.pinned ? "Unpin" : "Pin",
+            disabled: pending,
+            run: () => void action(() => window.kairo.pinWorkspace(item.id, !item.pinned)),
+          },
+          {
+            label: "Archive",
+            disabled: pending,
+            run: () => {
+              if (Object.values(buffers[item.id] ?? {}).some((b) => b.draft !== b.saved)) {
+                setError("Save or discard this workspace’s unsaved file edits before archiving.");
+                return;
+              }
+              setConfirm({
+                title: "Archive workspace?",
+                description:
+                  "Close this workspace’s terminals and hide it. Files, branches, and agent session identities are kept.",
+                action: () => window.kairo.archiveWorkspace(item.id).then(apply),
+              });
+            },
+          },
+          ...projectActions(item.repositoryPath),
+        ])}
       >
         <button
           className="session"
@@ -423,41 +494,6 @@ export function DesktopApp(): React.JSX.Element {
             </small>
           </span>
         </button>
-        <div className="session-row-actions">
-          <button
-            className="session-action-button"
-            aria-label={`Rename ${label}`}
-            onClick={() => setRename({ id: item.id, title: label, workspace: true })}
-          >
-            ✎
-          </button>
-          <button
-            className={`session-action-button ${item.pinned ? "pinned" : ""}`}
-            aria-label={`${item.pinned ? "Unpin" : "Pin"} ${label}`}
-            aria-pressed={!!item.pinned}
-            onClick={() => void action(() => window.kairo.pinWorkspace(item.id, !item.pinned))}
-          >
-            <Icon name="pin" />
-          </button>
-          <button
-            className="session-action-button"
-            aria-label={`Archive ${label}`}
-            onClick={() => {
-              if (Object.values(buffers[item.id] ?? {}).some((b) => b.draft !== b.saved)) {
-                setError("Save or discard this workspace’s unsaved file edits before archiving.");
-                return;
-              }
-              setConfirm({
-                title: "Archive workspace?",
-                description:
-                  "Close this workspace’s terminals and hide it. Files, branches, and agent session identities are kept.",
-                action: () => window.kairo.archiveWorkspace(item.id).then(apply),
-              });
-            }}
-          >
-            <Icon name="archive" />
-          </button>
-        </div>
       </div>
     );
   };
@@ -563,7 +599,10 @@ export function DesktopApp(): React.JSX.Element {
         <div className="project-session-list">
           {groups.map((group) => (
             <section className="project-session-group" key={group.path}>
-              <div className="project-heading-row">
+              <div
+                className="project-heading-row"
+                {...menuHandlers(`${name(group.path)} project actions`, projectActions(group.path))}
+              >
                 <button
                   className="project-heading"
                   title={group.path}
@@ -575,13 +614,6 @@ export function DesktopApp(): React.JSX.Element {
                   <Icon name="chevron" />
                   <Icon name="folder" />
                   <span>{name(group.path)}</span>
-                </button>
-                <button
-                  className="project-menu-button"
-                  aria-label={`New workspace in ${name(group.path)}`}
-                  onClick={() => setWorkspaceDialog(group.path)}
-                >
-                  +
                 </button>
               </div>
               <div hidden={collapsed[group.path]}>
@@ -603,12 +635,6 @@ export function DesktopApp(): React.JSX.Element {
                       {op.name} · {op.phase}
                     </button>
                   ))}
-                <button
-                  className="project-setup-button"
-                  onClick={() => setProjectSettings(group.path)}
-                >
-                  Project setup
-                </button>
               </div>
             </section>
           ))}
@@ -653,6 +679,22 @@ export function DesktopApp(): React.JSX.Element {
                     tabIndex={terminal.id === activeTerminalId ? 0 : -1}
                     aria-controls={`terminal-view-${terminal.id}`}
                     title={terminal.directory}
+                    {...menuHandlers(
+                      `${terminal.title} tab actions`,
+                      terminal.sessionId
+                        ? agentActions(terminal.sessionId)
+                        : [
+                            {
+                              label: "Close terminal",
+                              disabled: pending,
+                              run: () =>
+                                void action(async () => {
+                                  await window.kairo.closeTerminal(terminal.id);
+                                  return window.kairo.bootstrap();
+                                }),
+                            },
+                          ],
+                    )}
                     onClick={() => {
                       if (terminal.sessionId) {
                         setShellId(undefined);
@@ -676,6 +718,7 @@ export function DesktopApp(): React.JSX.Element {
                   <button
                     key={session.id}
                     data-session-id={session.id}
+                    {...menuHandlers(`${session.title} tab actions`, agentActions(session.id))}
                     role="tab"
                     aria-selected={session.id === current?.id && !selectedShell}
                     tabIndex={session.id === current?.id ? 0 : -1}
@@ -686,22 +729,6 @@ export function DesktopApp(): React.JSX.Element {
                 ))}
               </div>
               <div className="terminal-tab-actions">
-                {current && !selectedShell && !workspace?.archivedAt && !operationId && (
-                  <details className="agent-tab-menu" key={current.id}>
-                    <summary aria-label="Agent tab actions">⋯</summary>
-                    <div>
-                      <button onClick={() => setRename({ id: current.id, title: current.title })}>
-                        Rename agent tab
-                      </button>
-                      <button
-                        onClick={() => void action(() => window.kairo.archiveSession(current.id))}
-                      >
-                        Archive agent tab
-                      </button>
-                    </div>
-                  </details>
-                )}
-
                 <button
                   aria-label="New terminal tab"
                   disabled={
@@ -1102,6 +1129,13 @@ export function DesktopApp(): React.JSX.Element {
         </span>
         <span>{dirty ? "Unsaved file edits" : ""}</span>
       </footer>
+      {rowMenu && (
+        <ContextMenu
+          key={`${rowMenu.x}:${rowMenu.y}:${rowMenu.label}`}
+          menu={rowMenu}
+          close={closeRowMenu}
+        />
+      )}
       {workspaceDialog !== undefined && state && (
         <WorkspaceDialog
           initialProject={workspaceDialog}
