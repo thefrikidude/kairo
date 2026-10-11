@@ -53,7 +53,11 @@ test("background workspace creation, default refs, failed setup retry, cancellat
     assert.equal((await git.refs(repo)).defaultRef, "origin/main");
     assert.equal((await lifecycle.preferences(repo, null)).repositoryPath, repo);
     assert.equal((await git.refs(repo, "custom")).defaultRef, "custom");
-    await assert.rejects(git.refs(repo, "missing-base"));
+    await assert.rejects(git.refs(repo, "missing-base"), /Correct it in Project setup/);
+    await gitCommand(["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+    await gitCommand(["update-ref", "refs/remotes/upstream/main", "HEAD"]);
+    await gitCommand(["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main"]);
+    assert.equal((await git.refs(repo)).defaultRef, "upstream/main");
     await lifecycle.preferences(repo, {
       setupScript: "echo setup; exit 7",
       copyPaths: [".env"],

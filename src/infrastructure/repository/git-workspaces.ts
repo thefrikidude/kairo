@@ -113,28 +113,46 @@ export class GitWorkspaces {
     const refs = (
       await command(project.repositoryPath, [
         "for-each-ref",
-        "--format=%(refname:short)",
+        "--format=%(refname)",
         "refs/heads",
         "refs/remotes",
       ])
     )
       .trim()
       .split("\n")
-      .filter(Boolean);
+      .filter(Boolean)
+      .map((ref) => ref.replace(/^refs\/(heads|remotes)\//, ""));
     let defaultRef = saved;
-    if (!defaultRef) {
+    if (defaultRef) {
       try {
-        defaultRef = (
-          await command(project.repositoryPath, [
-            "symbolic-ref",
-            "--short",
-            "refs/remotes/origin/HEAD",
-          ])
-        ).trim();
-      } catch {}
+        await command(project.repositoryPath, ["rev-parse", "--verify", `${defaultRef}^{commit}`]);
+      } catch {
+        throw new Error(
+          `Saved base ref “${defaultRef}” is unavailable. Correct it in Project setup.`,
+        );
+      }
+    } else {
+      const remoteHeads = [
+        "origin/HEAD",
+        ...refs.filter((ref) => ref.endsWith("/HEAD") && ref !== "origin/HEAD"),
+      ].slice(0, 4);
+      for (const remoteHead of remoteHeads) {
+        try {
+          const candidate = (
+            await command(project.repositoryPath, [
+              "symbolic-ref",
+              "--short",
+              `refs/remotes/${remoteHead}`,
+            ])
+          ).trim();
+          await command(project.repositoryPath, ["rev-parse", "--verify", `${candidate}^{commit}`]);
+          defaultRef = candidate;
+          break;
+        } catch {}
+      }
       defaultRef ||= (await this.describe(project.repositoryPath)).branch || "HEAD";
+      await command(project.repositoryPath, ["rev-parse", "--verify", `${defaultRef}^{commit}`]);
     }
-    await command(project.repositoryPath, ["rev-parse", "--verify", `${defaultRef}^{commit}`]);
     return { git: true, refs: refs.slice(0, 2000), defaultRef };
   }
 

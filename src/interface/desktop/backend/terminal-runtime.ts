@@ -377,7 +377,11 @@ export async function createTerminalDesktopRuntime(
       case "workspace:select": {
         const target = workspace(first);
         if (target.archivedAt) throw new Error("Restore this workspace first.");
-        await refreshWorkspace(target.id);
+        const refreshing = refreshWorkspace(target.id).then(() =>
+          emit("sessions:changed", undefined),
+        );
+        mutations.add(refreshing);
+        void refreshing.finally(() => mutations.delete(refreshing)).catch(() => {});
         store.setActiveSession(undefined);
         store.setActiveWorkspace(target.id);
         if (target.lastTab?.startsWith("session:")) {
