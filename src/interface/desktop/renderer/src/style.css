@@ -3058,3 +3058,130 @@ button svg {
 .session-row-actions {
   z-index: 1;
 }
+
+.workspace-heading {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-setup-button {
+  margin: 4px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+}
+.workspace-palette {
+  width: min(640px, 80vw);
+}
+.palette-results {
+  max-height: 45vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.palette-results button {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+}
+.palette-results button[aria-selected="true"] {
+  background: var(--hover);
+}
+.palette-results small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.preparation-panel {
+  margin: 20px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: 65vh;
+  overflow: auto;
+}
+.preparation-panel pre {
+  max-height: 35vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.settings-field textarea {
+  resize: vertical;
+  font: inherit;
+  padding: 8px;
+  min-height: 60px;
+}
+
+.settings-field textarea {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.modal-host:has(.workspace-palette) {
+  width: min(640px, calc(100vw - 48px));
+}
+.modal-host .workspace-palette {
+  width: 100%;
+  min-width: 0;
+}
+.workspace-palette > input {
+  width: 100%;
+}
+.palette-results {
+  min-width: 0;
+}
+.palette-results button {
+  min-width: 0;
+  max-width: 100%;
+}
+.palette-results small {
+  width: 100%;
+}
+.agent-tab-menu {
+  position: relative;
+}
+.agent-tab-menu summary {
+  cursor: pointer;
+  padding: 8px;
+  list-style: none;
+}
+.agent-tab-menu > div {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  width: 160px;
+}
+.agent-tab-menu > div button {
+  text-align: left;
+}
+@media (max-width: 1100px) {
+  .topbar:has(.terminal-tabs) {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 80px;
+  }
+  .terminal-tabs {
+    order: 3;
+    flex-basis: 100%;
+    min-height: 34px;
+  }
+  .workspace-heading {
+    flex: 1;
+  }
+}

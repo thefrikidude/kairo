@@ -78,7 +78,8 @@ export const TerminalView = memo(function TerminalView({
         !(
           (event.metaKey || event.ctrlKey) &&
           (event.code === "Backquote" ||
-            (event.shiftKey && ["e", "d", "b"].includes(event.key.toLowerCase())))
+            ["j", "p"].includes(event.key.toLowerCase()) ||
+            (event.shiftKey && ["e", "d", "b", "n"].includes(event.key.toLowerCase())))
         ),
     );
     fit.current = () => {

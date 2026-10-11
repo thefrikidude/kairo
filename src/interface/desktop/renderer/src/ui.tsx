@@ -1,15 +1,15 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DesktopBootstrap,
-  TerminalSession,
-  GitWorktree,
+  TaskWorkspace,
   ReviewScope,
   WorkspaceReview,
-  WorkspaceSelection,
 } from "../../shared/api.js";
 import { retainBuffer, type EditorBuffer } from "./editor-buffer.js";
 import { Icon, KairoLogo, ModalFrame } from "./chrome.js";
 import { navigateTabs } from "./tab-navigation.js";
+import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
+import { WorkspacePalette } from "./workspace-palette.js";
 import { TerminalCatalog } from "./terminal-catalog.js";
 const AgentTerminals = lazy(() => import("./agent-terminals.js"));
 const FileBrowser = lazy(() => import("./file-browser.js"));
@@ -42,33 +42,21 @@ export function DesktopApp(): React.JSX.Element {
   const [creatingShell, setCreatingShell] = useState(false);
   const [settings, setSettings] = useState<"general" | "agents" | "archived" | "workspaces">();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [pinned, setPinned] = useState<string[]>(() => {
-    try {
-      const value: unknown = JSON.parse(localStorage.getItem("kairo-pinned-sessions") ?? "[]");
-      return Array.isArray(value)
-        ? [...new Set(value.filter((id): id is string => typeof id === "string"))]
-        : [];
-    } catch {
-      return [];
-    }
-  });
+  const [workspaceDialog, setWorkspaceDialog] = useState<string>();
+  const [projectSettings, setProjectSettings] = useState<string>();
+  const [palette, setPalette] = useState<"jump" | "file">();
+  const [operationId, setOperationId] = useState<string>();
   const [buffers, setBuffers] = useState<Record<string, Record<string, EditorBuffer>>>({});
   const [overview, setOverview] = useState<WorkspaceReview>();
   const [reviewError, setReviewError] = useState("");
   const [scope, setScope] = useState<ReviewScope>("task");
   const [revision, setRevision] = useState(0);
-  const [target, setTarget] = useState<{ path: string; nonce: number }>();
+  const [target, setTarget] = useState<{ path: string; nonce: number; workspaceId: string }>();
   const [newOpen, setNewOpen] = useState(false);
   const [agentId, setAgentId] = useState(localStorage.getItem("kairo-last-agent") ?? "codex");
   const [agentQuery, setAgentQuery] = useState("");
   const [detecting, setDetecting] = useState(false);
-  const [project, setProject] = useState("");
-  const [mode, setMode] = useState<"folder" | "worktree" | "existing">("folder");
-  const [branch, setBranch] = useState("");
-  const [base, setBase] = useState("HEAD");
-  const [trees, setTrees] = useState<GitWorktree[]>([]);
-  const [existing, setExisting] = useState("");
-  const [rename, setRename] = useState<{ id: string; title: string }>();
+  const [rename, setRename] = useState<{ id: string; title: string; workspace?: boolean }>();
   const [confirm, setConfirm] = useState<{
     title: string;
     description: string;
@@ -82,22 +70,37 @@ export function DesktopApp(): React.JSX.Element {
     (item) =>
       item.id === (selectedShell?.workspaceId ?? current?.workspaceId ?? state.activeWorkspaceId),
   );
-  const workspaceRef = useRef(workspace);
-  workspaceRef.current = workspace;
   const accessId = selectedShell ? workspace?.id : (current?.id ?? workspace?.id);
   const currentTerminal = current
     ? state?.terminals.find((terminal) => terminal.sessionId === current.id)
     : undefined;
   const activeTerminalId = selectedShell?.id ?? currentTerminal?.id;
-  const projectTabs =
-    state?.terminals.filter(
-      (t) =>
-        state.workspaces.find((w) => w.id === t.workspaceId)?.repositoryPath ===
-        workspace?.repositoryPath,
+  const projectTabs = state?.terminals.filter((t) => t.workspaceId === workspace?.id) ?? [];
+  const stoppedSessions =
+    state?.sessions.filter(
+      (s) => s.workspaceId === workspace?.id && !projectTabs.some((t) => t.sessionId === s.id),
     ) ?? [];
+  const operation =
+    state?.operations.find((op) => op.id === operationId) ??
+    state?.operations.find(
+      (op) =>
+        !!op.workspaceId && op.workspaceId === workspace?.id && (op.phase !== "ready" || op.error),
+    );
   useEffect(() => {
-    setShellId(undefined);
+    const owner = state?.workspaces.find((w) => w.id === state.activeWorkspaceId);
+    const saved = owner?.lastTab?.startsWith("terminal:") ? owner.lastTab.slice(9) : undefined;
+    setShellId(saved && state?.terminals.some((t) => t.id === saved) ? saved : undefined);
   }, [state?.activeSessionId, state?.activeWorkspaceId]);
+  useEffect(() => {
+    if (!workspace?.id) return;
+    const refresh = () =>
+      void window.kairo
+        .refreshWorkspace(workspace.id)
+        .then(apply)
+        .catch((cause) => setError(message(cause)));
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [workspace?.id]);
   const newShell = async () => {
     if (!workspace || creatingShell) return;
     setCreatingShell(true);
@@ -110,6 +113,7 @@ export function DesktopApp(): React.JSX.Element {
           : all,
       );
       setShellId(terminal.id);
+      await window.kairo.rememberWorkspaceTab(workspace.id, `terminal:${terminal.id}`);
       setSettings(undefined);
     } catch (error) {
       setError(message(error));
@@ -123,18 +127,17 @@ export function DesktopApp(): React.JSX.Element {
   const apply = useCallback((value: DesktopBootstrap) => setState(value), []);
   const onError = useCallback((value: string) => setError(value), []);
   const groups = useMemo(() => {
-    const map = new Map<string, TerminalSession[]>();
-    for (const item of state?.workspaces ?? [])
-      if (!item.removedAt) map.set(item.repositoryPath, []);
-    for (const session of state?.sessions ?? []) {
-      const owner = state?.workspaces.find((item) => item.id === session.workspaceId);
-      if (!owner) continue;
-      const items = map.get(owner.repositoryPath) ?? [];
-      items.push(session);
-      map.set(owner.repositoryPath, items);
+    const map = new Map<string, TaskWorkspace[]>();
+    for (const item of state?.workspaces ?? []) {
+      if (item.removedAt || item.archivedAt) continue;
+      map.set(item.repositoryPath, [...(map.get(item.repositoryPath) ?? []), item]);
     }
-    return [...map].map(([path, sessions]) => ({ path, sessions }));
-  }, [state?.workspaces, state?.sessions]);
+    for (const op of state?.operations ?? [])
+      if (!op.workspaceId && op.phase !== "ready") {
+        if (!map.has(op.repositoryPath)) map.set(op.repositoryPath, []);
+      }
+    return [...map].map(([path, workspaces]) => ({ path, workspaces }));
+  }, [state?.workspaces, state?.operations]);
   const action = useCallback(
     async (operation: () => Promise<DesktopBootstrap | undefined>) => {
       setPending(true);
@@ -209,9 +212,26 @@ export function DesktopApp(): React.JSX.Element {
   useEffect(() => {
     localStorage.setItem("kairo-context-width", String(contextWidth));
   }, [contextWidth]);
+  const migratedPins = useRef(false);
   useEffect(() => {
-    localStorage.setItem("kairo-pinned-sessions", JSON.stringify(pinned));
-  }, [pinned]);
+    if (!state || migratedPins.current) return;
+    migratedPins.current = true;
+    void (async () => {
+      let ids: string[] = [];
+      try {
+        ids = JSON.parse(localStorage.getItem("kairo-pinned-sessions") ?? "[]");
+      } catch {}
+      if (!Array.isArray(ids)) return;
+      for (const workspaceId of new Set(
+        state.sessions
+          .filter((session) => ids.includes(session.id))
+          .map((session) => session.workspaceId),
+      ))
+        await window.kairo.pinWorkspace(workspaceId, true);
+      localStorage.removeItem("kairo-pinned-sessions");
+      if (ids.length) apply(await window.kairo.bootstrap());
+    })().catch((cause) => setError(message(cause)));
+  }, [state, apply]);
   useEffect(() => {
     window.kairo.setUnsavedChanges(dirty);
   }, [dirty]);
@@ -231,47 +251,12 @@ export function DesktopApp(): React.JSX.Element {
       setDetecting(false);
     }
   }, []);
-  const beginSession = useCallback(
-    (path?: string) => {
-      const active = workspaceRef.current;
-      const selected = active && (!path || path === active.repositoryPath) ? active : undefined;
-      setProject(path ?? selected?.repositoryPath ?? "");
-      setBranch(`kairo/task-${Date.now().toString(36)}`);
-      setBase("HEAD");
-      setAgentQuery("");
-      setMode(selected?.kind === "worktree" ? "existing" : "folder");
-      setExisting(selected?.directory ?? "");
-      setError("");
-      setNewOpen(true);
-      void refreshAgents();
-    },
-    [refreshAgents],
-  );
-  useEffect(() => {
-    if (!newOpen || !project) {
-      setTrees([]);
-      return;
-    }
-    let disposed = false;
-    void window.kairo
-      .listWorktrees(project)
-      .then((items) => {
-        if (disposed) return;
-        setTrees(items);
-        setExisting((value) =>
-          items.some((item) => item.directory === value) ? value : (items[0]?.directory ?? ""),
-        );
-      })
-      .catch(() => {
-        if (!disposed) {
-          setTrees([]);
-          setMode("folder");
-        }
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [newOpen, project]);
+  const beginSession = useCallback(() => {
+    setAgentQuery("");
+    setError("");
+    setNewOpen(true);
+    void refreshAgents();
+  }, [refreshAgents]);
   useEffect(() => {
     if (!contextOpen || !accessId || workspace?.removedAt || settings) return;
     let disposed = false,
@@ -309,7 +294,11 @@ export function DesktopApp(): React.JSX.Element {
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (document.querySelector("dialog[open]")) return;
-      if ((event.metaKey || event.ctrlKey) && event.code === "Backquote") {
+      const modifier = navigator.userAgent.includes("Mac") ? event.metaKey : event.ctrlKey;
+      if (modifier && ["j", "p"].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        setPalette(event.key.toLowerCase() === "j" ? "jump" : "file");
+      } else if (modifier && event.code === "Backquote") {
         event.preventDefault();
         void newShell();
       } else if (
@@ -320,7 +309,7 @@ export function DesktopApp(): React.JSX.Element {
         event.preventDefault();
         const key = event.key.toLowerCase();
         if (key === "b") setSidebarOpen((value) => !value);
-        else if (key === "n") beginSession();
+        else if (key === "n") setWorkspaceDialog(workspace?.repositoryPath ?? "");
         else {
           setContextTab(key === "e" ? "files" : "changes");
           setContextOpen(true);
@@ -337,16 +326,11 @@ export function DesktopApp(): React.JSX.Element {
     return () => window.removeEventListener("keydown", keydown);
   }, [beginSession, settings, contextOpen, workspace?.id, creatingShell]);
   const create = async () => {
-    const selection: WorkspaceSelection =
-      mode === "worktree"
-        ? { kind: mode, branch, baseRef: base }
-        : mode === "existing"
-          ? { kind: mode, directory: existing }
-          : { kind: "folder" };
     setPending(true);
     setError("");
     try {
-      apply(await window.kairo.newSession(agentId, project, selection));
+      if (!workspace) throw new Error("Select a workspace first.");
+      apply(await window.kairo.newSession(agentId, workspace.directory));
       localStorage.setItem("kairo-last-agent", agentId);
       setNewOpen(false);
     } catch (cause) {
@@ -400,66 +384,76 @@ export function DesktopApp(): React.JSX.Element {
       />
     );
   };
-  const renderSession = (session: TerminalSession) => {
-    const owner = state?.workspaces.find((item) => item.id === session.workspaceId);
-    const terminal = state?.terminals.find((item) => item.sessionId === session.id);
+  const chooseWorkspace = async (id: string, tab?: string) => {
+    setOperationId(undefined);
+    setSettings(undefined);
+    await action(async () => {
+      const value = await window.kairo.selectWorkspace(id);
+      if (tab?.startsWith("session:")) return window.kairo.openSession(tab.slice(8));
+      if (tab?.startsWith("terminal:")) await window.kairo.rememberWorkspaceTab(id, tab);
+      return tab ? window.kairo.bootstrap() : value;
+    });
+  };
+  const renderWorkspace = (item: TaskWorkspace) => {
+    const op = state?.operations.find((op) => op.workspaceId === item.id);
+    const label = item.name ?? item.branch ?? name(item.directory);
     return (
       <div
-        key={session.id}
-        data-session-id={session.id}
-        className={`session-row ${current?.id === session.id ? "selected" : ""}`}
+        key={item.id}
+        data-workspace-id={item.id}
+        className={`session-row workspace-row ${workspace?.id === item.id ? "selected" : ""}`}
       >
         <button
           className="session"
-          aria-current={current?.id === session.id ? "page" : undefined}
+          aria-current={workspace?.id === item.id ? "page" : undefined}
           disabled={pending}
-          onClick={() => {
-            setSettings(undefined);
-            setShellId(undefined);
-            void action(() => window.kairo.openSession(session.id));
-          }}
+          onClick={() => void chooseWorkspace(item.id)}
         >
           <span
-            className={`session-status status-${terminal?.state === "running" ? "complete" : terminal?.state === "exited" && terminal.exitCode ? "error" : "idle"}`}
-            title={terminal?.state === "running" ? "Terminal open" : "Terminal stopped"}
+            className={`session-status status-${item.unavailable ? "error" : state?.terminals.some((t) => t.workspaceId === item.id && t.state === "running") ? "complete" : "idle"}`}
           />
           <span className="session-labels">
-            <span className="session-title">{session.title}</span>
+            <span className="session-title">{label}</span>
             <small className="session-workspace-label">
-              {owner?.branch ?? state?.agents.find((agent) => agent.id === session.agentId)?.name}
+              {item.unavailable
+                ? "Unavailable"
+                : op && op.phase !== "ready"
+                  ? op.phase
+                  : (item.branch ?? item.kind)}
             </small>
           </span>
         </button>
         <div className="session-row-actions">
           <button
             className="session-action-button"
-            aria-label={`Rename ${session.title}`}
-            onClick={() => setRename({ id: session.id, title: session.title })}
+            aria-label={`Rename ${label}`}
+            onClick={() => setRename({ id: item.id, title: label, workspace: true })}
           >
             ✎
           </button>
           <button
-            className={`session-action-button ${pinned.includes(session.id) ? "pinned" : ""}`}
-            aria-label={`${pinned.includes(session.id) ? "Unpin" : "Pin"} ${session.title}`}
-            title={pinned.includes(session.id) ? "Unpin session" : "Pin session"}
-            disabled={pending}
-            aria-pressed={pinned.includes(session.id)}
-            onClick={() =>
-              setPinned((all) =>
-                all.includes(session.id)
-                  ? all.filter((id) => id !== session.id)
-                  : [...all, session.id],
-              )
-            }
+            className={`session-action-button ${item.pinned ? "pinned" : ""}`}
+            aria-label={`${item.pinned ? "Unpin" : "Pin"} ${label}`}
+            aria-pressed={!!item.pinned}
+            onClick={() => void action(() => window.kairo.pinWorkspace(item.id, !item.pinned))}
           >
             <Icon name="pin" />
           </button>
           <button
             className="session-action-button"
-            aria-label={`Archive ${session.title}`}
-            disabled={pending}
-            title={terminal ? "Archive session and close its terminal" : "Archive session"}
-            onClick={() => void action(() => window.kairo.archiveSession(session.id))}
+            aria-label={`Archive ${label}`}
+            onClick={() => {
+              if (Object.values(buffers[item.id] ?? {}).some((b) => b.draft !== b.saved)) {
+                setError("Save or discard this workspace’s unsaved file edits before archiving.");
+                return;
+              }
+              setConfirm({
+                title: "Archive workspace?",
+                description:
+                  "Close this workspace’s terminals and hide it. Files, branches, and agent session identities are kept.",
+                action: () => window.kairo.archiveWorkspace(item.id).then(apply),
+              });
+            }}
           >
             <Icon name="archive" />
           </button>
@@ -536,13 +530,16 @@ export function DesktopApp(): React.JSX.Element {
         } as React.CSSProperties
       }
     >
-      <aside className="sidebar" aria-label="Agent sessions" hidden={!sidebarOpen}>
+      <aside className="sidebar" aria-label="Workspaces" hidden={!sidebarOpen}>
         <div className="brand">
           <KairoLogo className="brand-mark" />
           <span>Kairo</span>
         </div>
-        <button className="new-chat" onClick={() => beginSession()}>
-          <Icon name="plus" /> New agent session
+        <button
+          className="new-chat"
+          onClick={() => setWorkspaceDialog(workspace?.repositoryPath ?? "")}
+        >
+          <Icon name="plus" /> New workspace
         </button>
         <button
           className="open-project-button"
@@ -551,15 +548,17 @@ export function DesktopApp(): React.JSX.Element {
         >
           <Icon name="folder" /> Open project
         </button>
-        {state?.sessions.some((session) => pinned.includes(session.id)) && (
-          <section className="pinned-sessions" aria-label="Pinned sessions">
+        {state?.workspaces.some((w) => w.pinned && !w.archivedAt && !w.removedAt) && (
+          <section className="pinned-sessions" aria-label="Pinned workspaces">
             <div className="section-label sidebar-section-title">Pinned</div>
-            {pinned
-              .map((id) => state.sessions.find((session) => session.id === id))
-              .filter((session): session is TerminalSession => !!session)
-              .map(renderSession)}
+            {state.workspaces
+              .filter((w) => w.pinned && !w.archivedAt && !w.removedAt)
+              .map(renderWorkspace)}
           </section>
         )}
+        <button className="open-project-button" onClick={() => setPalette("jump")}>
+          Jump to workspace
+        </button>
         <div className="section-label sidebar-section-title">Projects</div>
         <div className="project-session-list">
           {groups.map((group) => (
@@ -579,30 +578,37 @@ export function DesktopApp(): React.JSX.Element {
                 </button>
                 <button
                   className="project-menu-button"
-                  aria-label={`New session in ${name(group.path)}`}
-                  onClick={() => beginSession(group.path)}
+                  aria-label={`New workspace in ${name(group.path)}`}
+                  onClick={() => setWorkspaceDialog(group.path)}
                 >
                   +
                 </button>
               </div>
               <div hidden={collapsed[group.path]}>
-                {[...group.sessions]
-                  .sort((a, b) => Number(pinned.includes(b.id)) - Number(pinned.includes(a.id)))
-                  .filter((session) => !pinned.includes(session.id))
-                  .map(renderSession)}
-                {!group.sessions.length && (
-                  <button
-                    className="empty-session-list"
-                    onClick={() => {
-                      const owner = state?.workspaces.find(
-                        (item) => !item.removedAt && item.repositoryPath === group.path,
-                      );
-                      if (owner) void action(() => window.kairo.selectWorkspace(owner.id));
-                    }}
-                  >
-                    Select project
-                  </button>
-                )}
+                {group.workspaces.filter((item) => !item.pinned).map(renderWorkspace)}
+                {state?.operations
+                  .filter(
+                    (op) =>
+                      op.repositoryPath === group.path && !op.workspaceId && op.phase !== "ready",
+                  )
+                  .map((op) => (
+                    <button
+                      key={op.id}
+                      className="empty-session-list"
+                      onClick={() => {
+                        setOperationId(op.id);
+                        setSettings(undefined);
+                      }}
+                    >
+                      {op.name} · {op.phase}
+                    </button>
+                  ))}
+                <button
+                  className="project-setup-button"
+                  onClick={() => setProjectSettings(group.path)}
+                >
+                  Project setup
+                </button>
               </div>
             </section>
           ))}
@@ -629,6 +635,9 @@ export function DesktopApp(): React.JSX.Element {
             </>
           ) : (
             <>
+              <strong className="workspace-heading">
+                {operationId ? operation?.name : (workspace?.name ?? "Kairo")}
+              </strong>
               <div
                 className="terminal-tabs"
                 role="tablist"
@@ -638,6 +647,7 @@ export function DesktopApp(): React.JSX.Element {
                 {projectTabs.map((terminal) => (
                   <button
                     key={terminal.id}
+                    data-session-id={terminal.sessionId}
                     role="tab"
                     aria-selected={terminal.id === activeTerminalId}
                     tabIndex={terminal.id === activeTerminalId ? 0 : -1}
@@ -647,7 +657,13 @@ export function DesktopApp(): React.JSX.Element {
                       if (terminal.sessionId) {
                         setShellId(undefined);
                         void action(() => window.kairo.openSession(terminal.sessionId!));
-                      } else setShellId(terminal.id);
+                      } else {
+                        setShellId(terminal.id);
+                        void window.kairo.rememberWorkspaceTab(
+                          terminal.workspaceId,
+                          `terminal:${terminal.id}`,
+                        );
+                      }
                     }}
                   >
                     {terminal.sessionId
@@ -656,18 +672,54 @@ export function DesktopApp(): React.JSX.Element {
                       : `Terminal ${projectTabs.filter((t) => !t.sessionId).findIndex((t) => t.id === terminal.id) + 1}`}
                   </button>
                 ))}
+                {stoppedSessions.map((session) => (
+                  <button
+                    key={session.id}
+                    data-session-id={session.id}
+                    role="tab"
+                    aria-selected={session.id === current?.id && !selectedShell}
+                    tabIndex={session.id === current?.id ? 0 : -1}
+                    onClick={() => void action(() => window.kairo.openSession(session.id))}
+                  >
+                    {session.title} · stopped
+                  </button>
+                ))}
               </div>
               <div className="terminal-tab-actions">
+                {current && !selectedShell && !workspace?.archivedAt && !operationId && (
+                  <details className="agent-tab-menu" key={current.id}>
+                    <summary aria-label="Agent tab actions">⋯</summary>
+                    <div>
+                      <button onClick={() => setRename({ id: current.id, title: current.title })}>
+                        Rename agent tab
+                      </button>
+                      <button
+                        onClick={() => void action(() => window.kairo.archiveSession(current.id))}
+                      >
+                        Archive agent tab
+                      </button>
+                    </div>
+                  </details>
+                )}
+
                 <button
                   aria-label="New terminal tab"
-                  disabled={!workspace || !!workspace.removedAt || creatingShell}
+                  disabled={
+                    !workspace ||
+                    !!workspace.removedAt ||
+                    !!workspace.archivedAt ||
+                    !!workspace.unavailable ||
+                    creatingShell
+                  }
                   onClick={() => void newShell()}
                 >
                   + Terminal
                 </button>
                 <button
                   aria-label="New agent tab"
-                  disabled={pending}
+                  disabled={
+                    pending || !workspace || !!workspace.archivedAt || !!workspace.unavailable
+                  }
                   onClick={() => beginSession()}
                 >
                   + Agent
@@ -695,7 +747,7 @@ export function DesktopApp(): React.JSX.Element {
                   if (tab === "agents") void refreshAgents();
                 }}
               >
-                {tab === "archived" ? "Archived sessions" : tab[0].toUpperCase() + tab.slice(1)}
+                {tab === "archived" ? "Archived" : tab[0].toUpperCase() + tab.slice(1)}
               </button>
             ))}
           </div>
@@ -734,6 +786,20 @@ export function DesktopApp(): React.JSX.Element {
           )}
           {settings === "archived" && (
             <>
+              <h2>Archived workspaces</h2>
+              {state?.workspaces
+                .filter((w) => w.archivedAt && !w.removedAt)
+                .map((w) => (
+                  <article key={w.id} className="workspace-catalog-row">
+                    <div>
+                      <strong>{w.name}</strong>
+                      <code>{w.directory}</code>
+                    </div>
+                    <button onClick={() => void action(() => window.kairo.restoreWorkspace(w.id))}>
+                      Restore workspace
+                    </button>
+                  </article>
+                ))}
               <h2>Archived sessions</h2>
               {state?.archivedSessions.map((session) => (
                 <article className="workspace-catalog-row" key={session.id}>
@@ -779,7 +845,7 @@ export function DesktopApp(): React.JSX.Element {
                 .map((item) => (
                   <article className="workspace-catalog-row" key={item.id}>
                     <div>
-                      <strong>{item.branch ?? name(item.directory)}</strong>
+                      <strong>{item.name ?? item.branch ?? name(item.directory)}</strong>
                       <small>{item.kind}</small>
                       <code>{item.directory}</code>
                     </div>
@@ -787,7 +853,13 @@ export function DesktopApp(): React.JSX.Element {
                       disabled={pending}
                       onClick={() => {
                         setSettings(undefined);
-                        void action(() => window.kairo.selectWorkspace(item.id));
+                        void action(() =>
+                          item.archivedAt
+                            ? window.kairo
+                                .restoreWorkspace(item.id)
+                                .then(() => window.kairo.selectWorkspace(item.id))
+                            : window.kairo.selectWorkspace(item.id),
+                        );
                       }}
                     >
                       Open
@@ -797,7 +869,8 @@ export function DesktopApp(): React.JSX.Element {
                         className="danger-outline-button"
                         disabled={
                           pending ||
-                          state.sessions.some((session) => session.workspaceId === item.id) ||
+                          (!item.archivedAt &&
+                            state.sessions.some((session) => session.workspaceId === item.id)) ||
                           Object.values(buffers[item.id] ?? {}).some(
                             (buffer) => buffer.draft !== buffer.saved,
                           )
@@ -825,11 +898,49 @@ export function DesktopApp(): React.JSX.Element {
           <Suspense fallback={<p className="empty-small">Loading terminal…</p>}>
             <AgentTerminals
               terminals={state?.terminals ?? []}
-              activeTerminalId={settings ? undefined : activeTerminalId}
+              activeTerminalId={
+                settings || workspace?.archivedAt || operationId ? undefined : activeTerminalId
+              }
               onError={onError}
             />
           </Suspense>
-          {!activeTerminalId && (
+          {operation && !workspace?.archivedAt && (
+            <div className="preparation-panel" role="status">
+              <h2>
+                {operation.name} · {operation.phase}
+              </h2>
+              {operation.error && <p className="file-error">{operation.error}</p>}
+              {operation.output && <pre>{operation.output}</pre>}
+              <div className="modal-actions">
+                {["checkout", "copy", "setup"].includes(operation.phase) ? (
+                  <button
+                    onClick={() => void action(() => window.kairo.cancelPreparation(operation.id))}
+                  >
+                    Cancel preparation
+                  </button>
+                ) : (
+                  operation.phase !== "ready" && (
+                    <button
+                      onClick={() => void action(() => window.kairo.retryPreparation(operation.id))}
+                    >
+                      Retry preparation
+                    </button>
+                  )
+                )}
+                {operation.workspaceId && (
+                  <button
+                    onClick={() => {
+                      setOperationId(undefined);
+                      void chooseWorkspace(operation.workspaceId!);
+                    }}
+                  >
+                    Open workspace
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {!activeTerminalId && !operationId && (
             <div className="welcome">
               <KairoLogo className="welcome-logo" />
               <h1>
@@ -846,7 +957,12 @@ export function DesktopApp(): React.JSX.Element {
               </p>
               <button
                 className="primary"
-                disabled={pending}
+                disabled={
+                  pending ||
+                  !!workspace?.archivedAt ||
+                  !!workspace?.unavailable ||
+                  (!!operation && ["checkout", "copy", "setup"].includes(operation.phase))
+                }
                 onClick={() =>
                   current
                     ? void action(() => window.kairo.startSession(current.id))
@@ -953,7 +1069,7 @@ export function DesktopApp(): React.JSX.Element {
                 buffers={buffers[workspace.id] ?? EMPTY_BUFFERS}
                 changes={overview?.changes ?? []}
                 revision={revision}
-                target={target}
+                target={target?.workspaceId === workspace.id ? target : undefined}
                 onBuffer={(path, buffer) =>
                   setBuffers((all) => retainBuffer(all, workspace.id, path, buffer))
                 }
@@ -970,7 +1086,7 @@ export function DesktopApp(): React.JSX.Element {
                 revision={revision}
                 onScope={setScope}
                 onOpenFile={(path) => {
-                  setTarget({ path, nonce: Date.now() });
+                  if (workspace) setTarget({ path, nonce: Date.now(), workspaceId: workspace.id });
                   setContextTab("files");
                 }}
               />
@@ -986,6 +1102,37 @@ export function DesktopApp(): React.JSX.Element {
         </span>
         <span>{dirty ? "Unsaved file edits" : ""}</span>
       </footer>
+      {workspaceDialog !== undefined && state && (
+        <WorkspaceDialog
+          initialProject={workspaceDialog}
+          state={state}
+          apply={(value) => {
+            apply(value);
+            const op = value.operations.find(
+              (op) => !state.operations.some((old) => old.id === op.id),
+            );
+            if (op) setOperationId(op.id);
+          }}
+          close={() => setWorkspaceDialog(undefined)}
+        />
+      )}
+      {projectSettings && (
+        <ProjectSettings project={projectSettings} close={() => setProjectSettings(undefined)} />
+      )}
+      {palette && state && (
+        <WorkspacePalette
+          kind={palette}
+          state={state}
+          workspace={workspace}
+          close={() => setPalette(undefined)}
+          select={(id, tab) => void chooseWorkspace(id, tab)}
+          file={(path) => {
+            setContextTab("files");
+            setContextOpen(true);
+            if (workspace) setTarget({ path, nonce: Date.now(), workspaceId: workspace.id });
+          }}
+        />
+      )}
       {newOpen && (
         <ModalFrame
           labelledBy="new-session-title"
@@ -994,82 +1141,11 @@ export function DesktopApp(): React.JSX.Element {
         >
           <div className="new-session-dialog">
             <h2 id="new-session-title">New agent session</h2>
-            <label className="settings-field">
-              Project folder
-              <div className="folder-picker">
-                <input
-                  aria-label="Project folder"
-                  value={project}
-                  onChange={(event) => setProject(event.target.value)}
-                />
-                <button
-                  disabled={pending}
-                  onClick={() =>
-                    void window.kairo.pickWorkspace().then((value) => {
-                      if (value) setProject(value);
-                    })
-                  }
-                >
-                  Browse…
-                </button>
-              </div>
-            </label>
+            <p className="empty-small">
+              New agent tab in {workspace?.name}. Files and Git state are shared with this
+              workspace’s other tabs.
+            </p>
             {agentPicker}
-            <label className="settings-field">
-              Workspace
-              <select
-                aria-label="Workspace mode"
-                value={mode}
-                onChange={(event) => setMode(event.target.value as typeof mode)}
-              >
-                <option value="folder">Project folder (shared)</option>
-                {trees.length > 0 && (
-                  <>
-                    <option value="worktree">New isolated worktree</option>
-                    <option value="existing">Existing workspace (shared)</option>
-                  </>
-                )}
-              </select>
-            </label>
-            {mode === "worktree" && (
-              <>
-                <label className="settings-field">
-                  Branch
-                  <input
-                    aria-label="Branch"
-                    value={branch}
-                    onChange={(event) => setBranch(event.target.value)}
-                  />
-                </label>
-                <label className="settings-field">
-                  Starting branch or commit
-                  <input
-                    aria-label="Base reference"
-                    value={base}
-                    onChange={(event) => setBase(event.target.value)}
-                  />
-                </label>
-                <p className="empty-small">
-                  Starts from committed code. Uncommitted edits and dependencies are not copied.
-                </p>
-              </>
-            )}
-            {mode === "existing" && (
-              <label className="settings-field">
-                Existing worktree
-                <select
-                  aria-label="Existing worktree"
-                  value={existing}
-                  onChange={(event) => setExisting(event.target.value)}
-                >
-                  {trees.map((tree) => (
-                    <option value={tree.directory} key={tree.directory}>
-                      {tree.branch ?? "Detached"} · {tree.directory}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
             {error && (
               <p className="file-error" role="alert">
                 {error}
@@ -1084,7 +1160,7 @@ export function DesktopApp(): React.JSX.Element {
                 disabled={
                   pending ||
                   detecting ||
-                  !project ||
+                  !workspace ||
                   !state?.agents.find((agent) => agent.id === agentId)?.installed
                 }
                 onClick={() => void create()}
@@ -1105,12 +1181,14 @@ export function DesktopApp(): React.JSX.Element {
             className="new-session-dialog"
             onSubmit={(event) => {
               event.preventDefault();
-              void action(() => window.kairo.renameSession(rename.id, rename.title)).then(() =>
-                setRename(undefined),
-              );
+              void action(() =>
+                rename.workspace
+                  ? window.kairo.renameWorkspace(rename.id, rename.title)
+                  : window.kairo.renameSession(rename.id, rename.title),
+              ).then(() => setRename(undefined));
             }}
           >
-            <h2 id="rename-title">Rename session</h2>
+            <h2 id="rename-title">Rename {rename.workspace ? "workspace" : "session"}</h2>
             <input
               autoFocus
               aria-label="Session name"
