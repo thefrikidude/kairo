@@ -1,3 +1,4 @@
+import { observeTerminalTheme, subscribeTerminalOutput } from "./terminal-resources.js";
 import React, { memo, useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -15,6 +16,9 @@ export const TerminalView = memo(function TerminalView({
   onError(error: string): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const observeResize = useRef<(active: boolean) => void>(() => {});
   const fit = useRef<() => void>(() => {});
   const terminal = useRef<Terminal | undefined>(undefined);
   useEffect(() => {
@@ -23,7 +27,7 @@ export const TerminalView = memo(function TerminalView({
       fontSize: 12,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       scrollback: 1_000,
-      screenReaderMode: true,
+      screenReaderMode: visibleRef.current,
       allowProposedApi: false,
     });
     const addon = new FitAddon();
@@ -51,7 +55,7 @@ export const TerminalView = memo(function TerminalView({
       sequence = packet.sequence;
       write(packet.data, packet.sequence);
     };
-    const unsubscribe = window.kairo.onTerminalData(receive);
+    const unsubscribe = subscribeTerminalOutput(info.id, receive);
     void window.kairo
       .attachTerminal(info.id)
       .then((snapshot) => {
@@ -83,10 +87,14 @@ export const TerminalView = memo(function TerminalView({
         ),
     );
     fit.current = () => {
-      if (element.clientWidth && element.clientHeight) addon.fit();
+      if (visibleRef.current && element.clientWidth && element.clientHeight) addon.fit();
     };
     const observer = new ResizeObserver(() => fit.current());
-    observer.observe(element);
+    observeResize.current = (active) => {
+      observer.disconnect();
+      if (active) observer.observe(element);
+    };
+    observeResize.current(visibleRef.current);
     const updateTheme = () => {
       const colors = getComputedStyle(element);
       term.options.theme = {
@@ -97,17 +105,12 @@ export const TerminalView = memo(function TerminalView({
       };
     };
     updateTheme();
-    const themes = new MutationObserver(updateTheme);
-    themes.observe(document.documentElement, {
-      attributes: true,
-      subtree: true,
-      attributeFilter: ["data-theme"],
-    });
+    const stopTheme = observeTerminalTheme(updateTheme);
     return () => {
       disposed = true;
       unsubscribe();
       observer.disconnect();
-      themes.disconnect();
+      stopTheme();
       input.dispose();
       resize.dispose();
       void window.kairo.detachTerminal(info.id).catch(() => {});
@@ -119,6 +122,8 @@ export const TerminalView = memo(function TerminalView({
     if (terminal.current) terminal.current.options.disableStdin = info.state !== "running";
   }, [info.state]);
   useEffect(() => {
+    observeResize.current(visible);
+    if (terminal.current) terminal.current.options.screenReaderMode = visible;
     if (visible) {
       fit.current();
       if (!(

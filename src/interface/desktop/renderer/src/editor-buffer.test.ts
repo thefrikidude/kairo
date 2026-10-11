@@ -28,3 +28,20 @@ test("buffer caching bounds clean copies while retaining every unsaved file", as
   assert.equal(Object.keys(buffers["current-workspace"]).length, 20);
   assert.equal(buffers["old-workspace"]["unsaved.ts"].draft, "unsaved");
 });
+
+test("clean buffer cache obeys its byte budget and never evicts dirty buffers", async () => {
+  const { retainBuffer } = await import("./editor-buffer.js");
+  const large = "x".repeat(1024 * 1024);
+  let buffers: import("./editor-buffer.js").EditorBuffers = {};
+  buffers = retainBuffer(buffers, "dirty", "unsaved", {
+    ...editorBuffer({ content: large, revision: "old" }),
+    draft: large + "edit",
+  });
+  for (let index = 0; index < 4; index++)
+    buffers = retainBuffer(buffers, "clean", String(index), {
+      ...editorBuffer({ content: large, revision: String(index) }),
+      loadedAt: index,
+    });
+  assert.deepEqual(Object.keys(buffers.clean), ["2", "3"]);
+  assert.equal(buffers.dirty.unsaved.draft, large + "edit");
+});
