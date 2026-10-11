@@ -1,0 +1,243 @@
+{
+  "revision": "786111b",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M2",
+    "node": "v24.21.0"
+  },
+  "fixture": {
+    "workspaces": 24,
+    "files": 100,
+    "terminalSessions": 24,
+    "initiallyLiveTerminals": 0,
+    "samples": 5,
+    "switchesPerSample": 0
+  },
+  "median": {
+    "startupMs": 682.406667,
+    "switchMs": null,
+    "rssKB": 439472,
+    "stages": {
+      "idle": {
+        "hostRssKB": 453808,
+        "totalRssKB": 453808
+      }
+    },
+    "switchP95Ms": null
+  },
+  "samples": [
+    {
+      "startupMs": 1003.523625,
+      "switchMs": [],
+      "stages": [
+        {
+          "stage": "idle",
+          "hostRssKB": 437520,
+          "totalRssKB": 437520,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 1,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 429856,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 149280
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 77808
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 41328
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 101888
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 1,
+        "Electron Helper (Renderer)": 1
+      }
+    },
+    {
+      "startupMs": 682.406667,
+      "switchMs": [],
+      "stages": [
+        {
+          "stage": "idle",
+          "hostRssKB": 439072,
+          "totalRssKB": 439072,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 1,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 439472,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 160000
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 79072
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 41984
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 99744
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 1,
+        "Electron Helper (Renderer)": 1
+      }
+    },
+    {
+      "startupMs": 677.635,
+      "switchMs": [],
+      "stages": [
+        {
+          "stage": "idle",
+          "hostRssKB": 453808,
+          "totalRssKB": 453808,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 1,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 442432,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 155120
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 82016
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 42368
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 102800
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 1,
+        "Electron Helper (Renderer)": 1
+      }
+    },
+    {
+      "startupMs": 708.3228750000001,
+      "switchMs": [],
+      "stages": [
+        {
+          "stage": "idle",
+          "hostRssKB": 461392,
+          "totalRssKB": 461392,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 1,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 433392,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 154336
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 77472
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 41552
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 101184
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 1,
+        "Electron Helper (Renderer)": 1
+      }
+    },
+    {
+      "startupMs": 667.382917,
+      "switchMs": [],
+      "stages": [
+        {
+          "stage": "idle",
+          "hostRssKB": 454016,
+          "totalRssKB": 454016,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 1,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 452208,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 154624
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 86112
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 42208
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 112384
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 1,
+        "Electron Helper (Renderer)": 1
+      }
+    }
+  ],
+  "memoryMetric": "Summed process RSS in KiB; shared pages can be counted repeatedly",
+  "processAttribution": "Electron process family, excluding terminal shell PIDs and their descendants for host RSS"
+}

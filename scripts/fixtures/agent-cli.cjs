@@ -35,6 +35,14 @@ console.log("\x1b[32mCLI_READY\x1b[0m NATIVE_ID:" + id);
 require("node:readline")
   .createInterface({ input: process.stdin })
   .on("line", (line) => {
+    if (line === "__TUI__") {
+      process.stdout.write("\x1b[?1049h\x1b[2J\x1b[HALTERNATE_SCREEN_FIXTURE");
+      return;
+    }
+    if (line === "__END_TUI__") {
+      process.stdout.write("\x1b[?1049l");
+      return;
+    }
     try {
       const input = JSON.parse(line);
       record.prompts.push(line);

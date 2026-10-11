@@ -37,7 +37,7 @@ for (let index = 0; index < 24; index += 1) {
     await worktrees.create(project, `kairo/benchmark-${index}`),
   );
   const session = store.create(workspace.id, "codex");
-  if (index === 0) store.setActiveSession(session.id);
+  if (index === 0 && !process.env.KAIRO_BENCH_EMPTY) store.setActiveSession(session.id);
   store.rename(session.id, `Benchmark session ${index + 1}`);
 }
 store.close();
@@ -87,7 +87,12 @@ try {
       clearTimeout(timer);
     }
     const sample = JSON.parse(await readFile(file, "utf8"));
-    for (const owned of sample.processes) {
+    for (const owned of new Map(
+      [...sample.processes, ...sample.stages.flatMap((stage) => stage.processes)].map((row) => [
+        row.pid,
+        row,
+      ]),
+    ).values()) {
       try {
         process.kill(owned.pid, 0);
       } catch (error) {
@@ -112,11 +117,34 @@ try {
       workspaces: 24,
       files: 100,
       terminalSessions: 24,
-      initiallyLiveTerminals: 1,
+      initiallyLiveTerminals: process.env.KAIRO_BENCH_EMPTY ? 0 : 1,
       samples: count,
-      switchesPerSample: 10,
+      switchesPerSample: process.env.KAIRO_BENCH_EMPTY ? 0 : 10,
     },
+    memoryMetric: "Summed process RSS in KiB; shared pages can be counted repeatedly",
+    processAttribution:
+      "Electron process family, excluding terminal shell PIDs and their descendants for host RSS",
     median: {
+      stages: Object.fromEntries(
+        [...new Set(samples.flatMap((sample) => sample.stages.map((stage) => stage.stage)))].map(
+          (name) => {
+            const stages = samples.flatMap((sample) =>
+              sample.stages.filter((stage) => stage.stage === name),
+            );
+            return [
+              name,
+              {
+                hostRssKB: median(stages.map((stage) => stage.hostRssKB)),
+                totalRssKB: median(stages.map((stage) => stage.totalRssKB)),
+              },
+            ];
+          },
+        ),
+      ),
+      switchP95Ms:
+        samples.flatMap((sample) => sample.switchMs).sort((a, b) => a - b)[
+          Math.ceil(samples.flatMap((sample) => sample.switchMs).length * 0.95) - 1
+        ] ?? null,
       startupMs: median(samples.map((sample) => sample.startupMs)),
       switchMs: median(samples.flatMap((sample) => sample.switchMs)),
       rssKB: median(samples.map((sample) => sample.rssKB)),

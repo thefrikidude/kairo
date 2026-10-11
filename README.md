@@ -100,8 +100,8 @@ node scripts/installed-agent-smoke.mjs
 
 It sends small proof tasks to real agents and can consume provider usage. `KAIRO_NATIVE_CODEX_MODEL` and `KAIRO_NATIVE_OPENCODE_MODEL` override the test models without modifying CLI configuration; otherwise the CLIs use their configured models. `KAIRO_NATIVE_OUTPUT` selects the evidence directory. Native CLI trust, model availability and authentication can affect the run; a complete installed-agent workflow/restart pass is still pending verification.
 
-`node scripts/desktop-benchmark.mjs` measures fresh launches and painted session switching with 24 workspace/session records and fixture CLI terminals. `KAIRO_BENCH_RUNS` controls sample count; `KAIRO_BENCH_OUTPUT` selects the report directory. Memory totals include Electron, the Node backend and child processes, and shared pages may be counted repeatedly. Compare compatible terminal-desktop revisions only.
+`node scripts/desktop-benchmark.mjs` measures fresh launches and painted session switching with 24 workspace/session records and fixture CLI terminals. `KAIRO_BENCH_RUNS` controls sample count; `KAIRO_BENCH_OUTPUT` selects the report directory. Stage measurements separate Kairo-owned RSS from shells/agents, and include noisy output and three open/close recovery cycles. `KAIRO_BENCH_EMPTY=1` measures idle startup and memory. Shared pages may be counted repeatedly. Compare compatible terminal-desktop revisions only.
 
 Implementation checkpoints and remaining verification are recorded in [the terminal desktop plan](docs/terminal-agent-desktop-plan.md). Orca-derived catalog metadata is attributed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-The workspace-first delivery and benchmark methodology are recorded in [the workspace workflow checkpoint](docs/workspace-workflow.md).
+The workspace-first delivery and benchmark methodology are recorded in [the workspace workflow checkpoint](docs/workspace-workflow.md). The current TypeScript/Electron optimizations and measured limits are recorded in [the resource checkpoint](docs/lightweight-electron.md).

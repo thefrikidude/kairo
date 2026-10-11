@@ -292,6 +292,44 @@ async function run() {
   await waitFor(
     `window.kairo.bootstrap().then(all=>!!all.sessions.find(s=>s.id===${JSON.stringify(second.id)})?.nativeSession)`,
   );
+  const tuiTerminal = (await state()).terminals.find((t) => t.sessionId === second.id);
+  await evaluate(`window.kairo.writeTerminal(${JSON.stringify(tuiTerminal.id)}, '__TUI__\\r')`);
+  await waitFor(
+    "document.querySelector('.terminal-view:not([hidden])')?.textContent.includes('ALTERNATE_SCREEN_FIXTURE')",
+  );
+  await evaluate(
+    "window.__smokeTuiElement = document.querySelector('.terminal-view:not([hidden])')",
+  );
+  await click(`[data-workspace-id="${first.workspaceId}"] .session`);
+  await waitFor(
+    `document.querySelector('.workspace-row.selected')?.dataset.workspaceId===${JSON.stringify(first.workspaceId)}`,
+  );
+  await click(`[data-workspace-id="${second.workspaceId}"] .session`);
+  await waitFor(
+    `document.querySelector('.workspace-row.selected')?.dataset.workspaceId===${JSON.stringify(second.workspaceId)}`,
+  );
+  await waitFor(
+    "document.querySelector('.terminal-view:not([hidden])')?.textContent.includes('ALTERNATE_SCREEN_FIXTURE')",
+  );
+  assert.equal(
+    await evaluate(
+      "window.__smokeTuiElement === document.querySelector('.terminal-view:not([hidden])')",
+    ),
+    true,
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelectorAll('.terminal-view[hidden] .xterm-accessibility').length",
+    ),
+    0,
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelectorAll('.terminal-view:not([hidden]) .xterm-accessibility').length",
+    ),
+    1,
+  );
+  await evaluate(`window.kairo.writeTerminal(${JSON.stringify(tuiTerminal.id)}, '__END_TUI__\\r')`);
   const beforeStop = await state();
   assert.equal(
     beforeStop.sessions.find((s) => s.id === second.id).nativeSession.id,
@@ -448,6 +486,8 @@ async function run() {
       pinUnpinAndPersistence: true,
       archiveWorkspaceAndRestore: true,
       sameTerminalShellJobControl: true,
+      alternateScreenPreservedAcrossSwitching: true,
+      accessibilityOnlyOnActiveTerminal: true,
       isolatedWorktree: true,
       parallelNavigation: true,
       review: true,

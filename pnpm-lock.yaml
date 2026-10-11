@@ -57,9 +57,6 @@ importers:
       react-dom:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
-      tsx:
-        specifier: ^4.0.0
-        version: 4.23.13
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
@@ -2004,6 +2001,7 @@ snapshots:
       esbuild: 0.28.2
     optionalDependencies:
       fsevents: 2.3.3
+    optional: true
 
   tunnel-agent@0.6.0:
     dependencies:

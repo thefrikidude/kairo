@@ -1,0 +1,628 @@
+{
+  "revision": "0f16fda",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M2",
+    "node": "v24.21.0"
+  },
+  "fixture": {
+    "workspaces": 24,
+    "files": 100,
+    "terminalSessions": 24,
+    "initiallyLiveTerminals": 1,
+    "samples": 5,
+    "switchesPerSample": 10
+  },
+  "memoryMetric": "Summed process RSS in KiB; shared pages can be counted repeatedly",
+  "processAttribution": "Electron process family, excluding terminal shell PIDs and their descendants for host RSS",
+  "median": {
+    "stages": {
+      "one": {
+        "hostRssKB": 515344,
+        "totalRssKB": 556304
+      },
+      "eleven": {
+        "hostRssKB": 564768,
+        "totalRssKB": 1103696
+      },
+      "noisy": {
+        "hostRssKB": 552272,
+        "totalRssKB": 1030560
+      },
+      "closed": {
+        "hostRssKB": 508864,
+        "totalRssKB": 508864
+      },
+      "recovery-1": {
+        "hostRssKB": 495504,
+        "totalRssKB": 495504
+      },
+      "recovery-2": {
+        "hostRssKB": 492928,
+        "totalRssKB": 492928
+      },
+      "recovery-3": {
+        "hostRssKB": 466832,
+        "totalRssKB": 466832
+      }
+    },
+    "switchP95Ms": 100.5,
+    "startupMs": 1185.716333,
+    "switchMs": 98.79999995231628,
+    "rssKB": 467072
+  },
+  "samples": [
+    {
+      "startupMs": 1563.100042,
+      "switchMs": [
+        81.39999985694885, 99.79999995231628, 98.90000009536743, 98.80000019073486,
+        98.89999985694885, 99, 96.5, 99.39999985694885, 99.79999995231628, 97.90000009536743
+      ],
+      "stages": [
+        {
+          "stage": "one",
+          "hostRssKB": 500656,
+          "totalRssKB": 538000,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 3,
+            "Electron Helper (Renderer)": 1,
+            "sh": 1
+          }
+        },
+        {
+          "stage": "eleven",
+          "hostRssKB": 488320,
+          "totalRssKB": 1010208,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 11
+          }
+        },
+        {
+          "stage": "noisy",
+          "hostRssKB": 442480,
+          "totalRssKB": 925920,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 12
+          }
+        },
+        {
+          "stage": "closed",
+          "hostRssKB": 467200,
+          "totalRssKB": 467200,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-1",
+          "hostRssKB": 452336,
+          "totalRssKB": 452336,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-2",
+          "hostRssKB": 455904,
+          "totalRssKB": 455904,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-3",
+          "hostRssKB": 454352,
+          "totalRssKB": 454352,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 454640,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 100080
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 61664
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 30704
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 154656
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 2,
+        "Electron Helper (Renderer)": 1
+      }
+    },
+    {
+      "startupMs": 1027.534541,
+      "switchMs": [
+        71.29999995231628, 100, 98.5, 98.90000009536743, 98.59999990463257, 98.20000004768372,
+        99.90000009536743, 98.39999985694885, 98.39999985694885, 98.70000004768372
+      ],
+      "stages": [
+        {
+          "stage": "one",
+          "hostRssKB": 519424,
+          "totalRssKB": 564272,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 3,
+            "Electron Helper (Renderer)": 1,
+            "sh": 1
+          }
+        },
+        {
+          "stage": "eleven",
+          "hostRssKB": 585840,
+          "totalRssKB": 1133280,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 11
+          }
+        },
+        {
+          "stage": "noisy",
+          "hostRssKB": 557664,
+          "totalRssKB": 1030560,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 12
+          }
+        },
+        {
+          "stage": "closed",
+          "hostRssKB": 508256,
+          "totalRssKB": 508256,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-1",
+          "hostRssKB": 495504,
+          "totalRssKB": 495504,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-2",
+          "hostRssKB": 492928,
+          "totalRssKB": 492928,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-3",
+          "hostRssKB": 466832,
+          "totalRssKB": 466832,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 467072,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 98896
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 63952
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 29744
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 160208
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 2,
+        "Electron Helper (Renderer)": 1
+      }
+    },
+    {
+      "startupMs": 1067.809875,
+      "switchMs": [
+        76.60000014305115, 100.59999990463257, 98, 99.5, 99.40000009536743, 114.09999990463257,
+        99.89999985694885, 99.30000019073486, 98.79999995231628, 97
+      ],
+      "stages": [
+        {
+          "stage": "one",
+          "hostRssKB": 524032,
+          "totalRssKB": 567888,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 3,
+            "Electron Helper (Renderer)": 1,
+            "sh": 1
+          }
+        },
+        {
+          "stage": "eleven",
+          "hostRssKB": 588032,
+          "totalRssKB": 1120176,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 11
+          }
+        },
+        {
+          "stage": "noisy",
+          "hostRssKB": 555376,
+          "totalRssKB": 1052704,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 12
+          }
+        },
+        {
+          "stage": "closed",
+          "hostRssKB": 508864,
+          "totalRssKB": 508864,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-1",
+          "hostRssKB": 518736,
+          "totalRssKB": 518736,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-2",
+          "hostRssKB": 518912,
+          "totalRssKB": 518912,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-3",
+          "hostRssKB": 490256,
+          "totalRssKB": 490256,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 490464,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 126592
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 67520
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 34752
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 144512
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 2,
+        "Electron Helper (Renderer)": 1
+      }
+    },
+    {
+      "startupMs": 1199.069291,
+      "switchMs": [
+        84.5, 99.09999990463257, 97.5, 100.5, 98.5, 98.59999990463257, 98.89999985694885,
+        98.79999995231628, 98.5, 98.79999995231628
+      ],
+      "stages": [
+        {
+          "stage": "one",
+          "hostRssKB": 515344,
+          "totalRssKB": 556304,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 3,
+            "Electron Helper (Renderer)": 1,
+            "sh": 1
+          }
+        },
+        {
+          "stage": "eleven",
+          "hostRssKB": 564768,
+          "totalRssKB": 1103696,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 11
+          }
+        },
+        {
+          "stage": "noisy",
+          "hostRssKB": 552272,
+          "totalRssKB": 1044176,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 12
+          }
+        },
+        {
+          "stage": "closed",
+          "hostRssKB": 568352,
+          "totalRssKB": 568352,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-1",
+          "hostRssKB": 535760,
+          "totalRssKB": 535760,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-2",
+          "hostRssKB": 536912,
+          "totalRssKB": 536912,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-3",
+          "hostRssKB": 539184,
+          "totalRssKB": 539184,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 539280,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 130448
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 74288
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 34400
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 177792
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 2,
+        "Electron Helper (Renderer)": 1
+      }
+    },
+    {
+      "startupMs": 1185.716333,
+      "switchMs": [
+        86.20000004768372, 99.10000014305115, 96.60000014305115, 98.09999990463257,
+        100.10000014305115, 99.10000014305115, 98.70000004768372, 98.89999985694885,
+        98.79999995231628, 98.59999990463257
+      ],
+      "stages": [
+        {
+          "stage": "one",
+          "hostRssKB": 496928,
+          "totalRssKB": 543376,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 3,
+            "Electron Helper (Renderer)": 1,
+            "sh": 1
+          }
+        },
+        {
+          "stage": "eleven",
+          "hostRssKB": 525568,
+          "totalRssKB": 1065280,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 11
+          }
+        },
+        {
+          "stage": "noisy",
+          "hostRssKB": 508992,
+          "totalRssKB": 991408,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 13,
+            "Electron Helper (Renderer)": 1,
+            "sh": 12
+          }
+        },
+        {
+          "stage": "closed",
+          "hostRssKB": 511040,
+          "totalRssKB": 511040,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-1",
+          "hostRssKB": 465600,
+          "totalRssKB": 465600,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-2",
+          "hostRssKB": 431200,
+          "totalRssKB": 431200,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        },
+        {
+          "stage": "recovery-3",
+          "hostRssKB": 436976,
+          "totalRssKB": 436976,
+          "processCounts": {
+            "Electron": 1,
+            "Electron Helper": 2,
+            "node": 2,
+            "Electron Helper (Renderer)": 1
+          }
+        }
+      ],
+      "rssKB": 437344,
+      "electronWorkingSets": [
+        {
+          "type": "Browser",
+          "workingSetKB": 99824
+        },
+        {
+          "type": "GPU",
+          "workingSetKB": 61056
+        },
+        {
+          "type": "Utility",
+          "workingSetKB": 33136
+        },
+        {
+          "type": "Tab",
+          "workingSetKB": 140320
+        }
+      ],
+      "processCounts": {
+        "Electron": 1,
+        "Electron Helper": 2,
+        "node": 2,
+        "Electron Helper (Renderer)": 1
+      }
+    }
+  ]
+}
