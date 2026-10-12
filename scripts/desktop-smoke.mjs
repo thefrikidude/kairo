@@ -12,8 +12,9 @@ await mkdir(output, { recursive: true });
 const project = join(root, "project"),
   state = join(root, "state"),
   bin = join(root, "bin"),
-  history = join(root, "history");
-for (const path of [project, state, bin, history]) await mkdir(path, { recursive: true });
+  history = join(root, "history"),
+  plain = join(root, "plain-folder");
+for (const path of [project, state, bin, history, plain]) await mkdir(path, { recursive: true });
 await writeFile(join(project, "README.md"), "# Terminal fixture\n");
 await writeFile(join(project, ".gitignore"), ".env\nsetup-ready\n");
 await writeFile(join(project, ".env"), "LOCAL_FIXTURE=1\n");
@@ -51,6 +52,7 @@ async function launch(restart) {
         KAIRO_FIXTURE_NATIVE_HOME: join(root, "codex"),
         KAIRO_SMOKE_OUTPUT: output,
         KAIRO_SMOKE_PROJECT: project,
+        KAIRO_SMOKE_PLAIN: plain,
         KAIRO_SMOKE_FIRST: first.id,
         KAIRO_SMOKE_RESTART: restart ? "1" : "0",
       },

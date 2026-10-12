@@ -1,4 +1,4 @@
-const { app } = require("electron");
+const { app, dialog } = require("electron");
 const assert = require("node:assert/strict");
 const { writeFile, readFile, readdir } = require("node:fs/promises");
 const { join } = require("node:path");
@@ -444,6 +444,33 @@ async function run() {
   );
   assert.equal((await state()).sessions.find((s) => s.id === first.id).archivedAt, undefined);
   assert.ok(!(await state()).terminals.some((t) => t.id === shell.id));
+  const savedOpenDialog = dialog.showOpenDialog;
+  try {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [process.env.KAIRO_SMOKE_PROJECT],
+    });
+    await click(".open-project-button");
+    await waitFor("document.querySelector('.welcome h1')?.textContent==='Workspace archived'");
+    assert.equal(
+      await evaluate(
+        "Array.from(document.querySelectorAll('.terminal-tabs [role=tab]')).every(tab=>tab.disabled)",
+      ),
+      true,
+    );
+    await capture("archived-project-reopened.png");
+    await button("Restore workspace", "document.querySelector('.welcome')");
+    await waitFor(
+      `window.kairo.bootstrap().then(all=>!all.workspaces.find(w=>w.id===${JSON.stringify(first.workspaceId)})?.archivedAt)`,
+    );
+    assert.equal(
+      (await state()).terminals.filter((t) => t.workspaceId === first.workspaceId).length,
+      0,
+    );
+    await evaluate(`window.kairo.archiveWorkspace(${JSON.stringify(first.workspaceId)})`);
+  } finally {
+    dialog.showOpenDialog = savedOpenDialog;
+  }
   await click(".settings-link");
   await button("Archived");
   await waitFor(
@@ -464,6 +491,25 @@ async function run() {
   await capture("terminal-review-light.png");
   win.setSize(920, 700);
   await capture("terminal-narrow.png");
+  await click(".new-chat");
+  await waitFor("document.querySelector('[aria-label=\"Workspace project\"]')");
+  await input('[aria-label="Workspace project"]', process.env.KAIRO_SMOKE_PLAIN);
+  await input('[aria-label="Workspace name"]', "Plain folder");
+  await waitFor(
+    "document.querySelector('[aria-label=\"Workspace mode\"]')?.value==='folder' && !document.querySelector('[aria-label=\"Starting ref\"]')",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Workspace mode\"]').options.length"),
+    1,
+  );
+  await capture("plain-folder-creation.png");
+  await button("Create workspace", "document.querySelector('dialog')");
+  await waitFor("!document.querySelector('dialog[open]')");
+  assert.equal((await state()).workspaces.find((w) => w.name === "Plain folder").kind, "folder");
+  await click(`[data-workspace-id="${second.workspaceId}"] .session`);
+  await waitFor(
+    `window.kairo.bootstrap().then(all=>all.activeSessionId===${JSON.stringify(second.id)})`,
+  );
   await writeFile(
     join(output, "saved.json"),
     JSON.stringify({
@@ -485,6 +531,8 @@ async function run() {
       palettes: true,
       pinUnpinAndPersistence: true,
       archiveWorkspaceAndRestore: true,
+      archivedProjectRestoreWithoutLaunch: true,
+      plainFolderCreation: true,
       sameTerminalShellJobControl: true,
       alternateScreenPreservedAcrossSwitching: true,
       accessibilityOnlyOnActiveTerminal: true,

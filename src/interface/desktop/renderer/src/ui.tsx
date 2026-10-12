@@ -722,6 +722,7 @@ export function DesktopApp(): React.JSX.Element {
                   <button
                     key={terminal.id}
                     data-session-id={terminal.sessionId}
+                    disabled={pending || !!workspace?.archivedAt || !!workspace?.unavailable}
                     role="tab"
                     aria-selected={terminal.id === activeTerminalId}
                     tabIndex={terminal.id === activeTerminalId ? 0 : -1}
@@ -766,6 +767,7 @@ export function DesktopApp(): React.JSX.Element {
                   <button
                     key={session.id}
                     data-session-id={session.id}
+                    disabled={pending || !!workspace?.archivedAt || !!workspace?.unavailable}
                     {...menuHandlers(`${session.title} tab actions`, agentActions(session.id))}
                     role="tab"
                     aria-selected={session.id === current?.id && !selectedShell}
@@ -1017,38 +1019,45 @@ export function DesktopApp(): React.JSX.Element {
             <div className="welcome">
               <KairoLogo className="welcome-logo" />
               <h1>
-                {current
-                  ? "Agent terminal stopped"
-                  : workspace
-                    ? "Start an agent session"
-                    : "Open your project"}
+                {workspace?.archivedAt
+                  ? "Workspace archived"
+                  : current
+                    ? "Agent terminal stopped"
+                    : workspace
+                      ? "Start an agent session"
+                      : "Open your project"}
               </h1>
               <p>
-                {current
-                  ? "Your workspace and session association are saved."
-                  : "Choose an installed agent and work in its terminal inside Kairo."}
+                {workspace?.archivedAt
+                  ? "Restore this workspace to open its agent and terminal tabs. Your files and session history are kept."
+                  : current
+                    ? "Your workspace and session association are saved."
+                    : "Choose an installed agent and work in its terminal inside Kairo."}
               </p>
               <button
                 className="primary"
                 disabled={
                   pending ||
-                  !!workspace?.archivedAt ||
                   !!workspace?.unavailable ||
                   (!!operation && ["checkout", "copy", "setup"].includes(operation.phase))
                 }
                 onClick={() =>
-                  current
-                    ? void action(() => window.kairo.startSession(current.id))
-                    : workspace
-                      ? beginSession()
-                      : void action(() => window.kairo.openWorkspace())
+                  workspace?.archivedAt
+                    ? void action(() => window.kairo.restoreWorkspace(workspace.id))
+                    : current
+                      ? void action(() => window.kairo.startSession(current.id))
+                      : workspace
+                        ? beginSession()
+                        : void action(() => window.kairo.openWorkspace())
                 }
               >
-                {current
-                  ? "Open agent terminal"
-                  : workspace
-                    ? "New agent session"
-                    : "Open project folder"}
+                {workspace?.archivedAt
+                  ? "Restore workspace"
+                  : current
+                    ? "Open agent terminal"
+                    : workspace
+                      ? "New agent session"
+                      : "Open project folder"}
               </button>
             </div>
           )}

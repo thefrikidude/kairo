@@ -39,11 +39,11 @@ export function WorkspaceDialog({
     setError("");
     if (!project) return;
     setLoading(true);
-    Promise.all([
-      window.kairo.projectRefs(project),
-      window.kairo.listWorktrees(project).catch(() => []),
-    ])
-      .then(([refs, trees]) => {
+    window.kairo
+      .projectRefs(project)
+      .then(async (refs) => {
+        if (disposed) return;
+        const trees = refs.git ? await window.kairo.listWorktrees(project) : [];
         if (disposed) return;
         setRefs(refs);
         setBase(refs.defaultRef);

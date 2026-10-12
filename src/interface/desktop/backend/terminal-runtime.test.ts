@@ -399,6 +399,10 @@ test("workspace archive drains agent and shell terminals, preserves session flag
     assert.equal(snapshot.workspaces[0].name, "New name");
     assert.equal(snapshot.workspaces[0].pinned, true);
     assert.ok(snapshot.workspaces[0].archivedAt);
+    const reopened = (await request("workspace:open", root)) as TerminalDesktopBootstrap;
+    assert.equal(reopened.activeWorkspaceId, target.id);
+    assert.equal(reopened.activeSessionId, undefined);
+    assert.deepEqual(await request("worktrees:list", root), []);
     await assert.rejects(request("session:open", current.id), /Restore/);
     await assert.rejects(request("terminal:create", target.id), /Restore/);
     await request("workspace:restore", target.id);
@@ -407,6 +411,18 @@ test("workspace archive drains agent and shell terminals, preserves session flag
     assert.ok(snapshot.archivedSessions.find((s) => s.id === archived.id));
     await assert.rejects(request("workspace:tab", target.id, "terminal:foreign"), /belonging/);
     assert.throws(() => process.kill(shell.pid, 0), { code: "ESRCH" });
+    const foreign = store.registerWorkspace({
+      directory: join(root, "foreign"),
+      repositoryPath: root,
+      kind: "folder",
+      managed: false,
+    });
+    const foreignSession = store.create(foreign.id, "codex");
+    store.updateWorkspace(foreign.id, { archivedAt: Date.now() });
+    store.updateWorkspace(target.id, { lastTab: `session:${foreignSession.id}` });
+    const selected = (await request("workspace:select", target.id)) as TerminalDesktopBootstrap;
+    assert.equal(selected.activeWorkspaceId, target.id);
+    assert.equal(selected.activeSessionId, undefined);
     const external = join(root, "external-folder");
     await mkdir(external);
     const opened = (await request("workspace:open", external)) as TerminalDesktopBootstrap;

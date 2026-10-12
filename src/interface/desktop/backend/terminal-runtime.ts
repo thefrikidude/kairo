@@ -424,7 +424,8 @@ export async function createTerminalDesktopRuntime(
         store.setActiveWorkspace(target.id);
         if (target.lastTab?.startsWith("session:")) {
           const saved = store.get(target.lastTab.slice(8));
-          if (saved && !saved.archivedAt) store.setActiveSession(saved.id);
+          if (saved && saved.workspaceId === target.id && !saved.archivedAt)
+            store.setActiveSession(saved.id);
         }
         return snapshot();
       }

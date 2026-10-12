@@ -51,7 +51,7 @@ Creation continues in the background through checkout, copying and setup. Naviga
 
 New managed worktree paths end in the project's folder name, inside a task directory. Existing worktrees keep their locations. Worktrees remain ordinary Git checkouts usable from external tools. Selection, app focus and explicit refresh reconcile branch metadata and label missing directories unavailable without deleting history.
 
-Archive a workspace from its row to close all its terminals and hide it while retaining files, branches, and agent identities. Restore it through **Settings → Archived**; restoration does not launch all its tabs. **Settings → Workspaces** offers separate removal after archiving the workspace or associated sessions and closing terminals. Git refuses removal while staged, unstaged, untracked or ignored files, or unmerged commits remain. Removing a worktree preserves its branch.
+Archive a workspace from its row to close all its terminals and hide it while retaining files, branches, and agent identities. Restore it through **Settings → Archived**, or reopen its project folder and select **Restore workspace**; restoration does not launch all its tabs. Archived workspaces keep their agent tabs disabled until restored. **Settings → Workspaces** offers separate removal after archiving the workspace or associated sessions and closing terminals. Git refuses removal while staged, unstaged, untracked or ignored files, or unmerged commits remain. Removing a worktree preserves its branch.
 
 ## Session management
 

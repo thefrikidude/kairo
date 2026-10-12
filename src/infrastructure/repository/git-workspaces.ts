@@ -75,7 +75,13 @@ export class GitWorkspaces {
   }
 
   async list(directory: string): Promise<GitWorktree[]> {
-    const output = await command(directory, ["worktree", "list", "--porcelain", "-z"]);
+    let output: string;
+    try {
+      output = await command(directory, ["worktree", "list", "--porcelain", "-z"]);
+    } catch (error) {
+      if ((error as Error).message.includes("not a git repository")) return [];
+      throw error;
+    }
     const trees: GitWorktree[] = [];
     let current: GitWorktree | undefined;
     for (const field of output.split("\0")) {

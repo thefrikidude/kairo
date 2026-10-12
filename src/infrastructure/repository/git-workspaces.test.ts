@@ -92,3 +92,12 @@ test("primary checkouts and adopted worktrees record a review baseline", async (
   const created = await worktrees.create(repo, "kairo/adopted");
   assert.equal((await worktrees.existing(repo, created.directory)).baseCommit, created.baseCommit);
 });
+
+test("plain folders have no Git worktrees while missing directories still fail", async (t) => {
+  const { root, worktrees } = await fixture(t);
+  const plain = join(root, "plain folder");
+  await mkdir(plain);
+  assert.equal((await worktrees.describe(plain)).kind, "folder");
+  assert.deepEqual(await worktrees.list(plain), []);
+  await assert.rejects(worktrees.list(join(root, "missing")));
+});
