@@ -12,6 +12,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { backendReadiness } from "./backend-readiness.js";
 
 const appRoot = process.cwd();
 const appIconPath = join(appRoot, "src/interface/desktop/assets/kairo-icon.png");
@@ -56,47 +57,36 @@ function startBackend(): Promise<void> {
     pending.clear();
     if (!backendShutdownComplete) send("runtime:error", { error: error.message });
   });
-  const ready = new Promise<void>((resolveReady, rejectReady) => {
-    const lines = createInterface({ input: backend!.stdout });
-    const timeout = setTimeout(
-      () => rejectReady(new Error("Kairo runtime did not start in time.")),
-      30_000,
-    );
-    lines.on("line", (line) => {
-      let message: Record<string, unknown>;
-      try {
-        message = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        return console.error(`[kairo backend] Invalid protocol message: ${line}`);
-      }
-      if (message.event === "ready") {
-        clearTimeout(timeout);
-        resolveReady();
-        return;
-      }
-      if (message.event === "ready_error") {
-        clearTimeout(timeout);
-        rejectReady(new Error(String(message.payload)));
-        return;
-      }
-      if (typeof message.event === "string") {
-        send(message.event, message.payload);
-        return;
-      }
-      if (typeof message.id !== "number") return;
-      const request = pending.get(message.id);
-      if (!request) return;
-      pending.delete(message.id);
-      if (typeof message.error === "string") request.reject(new Error(message.error));
-      else request.resolve(message.result);
-    });
-    backend!.once("exit", () => {
-      clearTimeout(timeout);
-      rejectReady(new Error("Kairo runtime exited before it was ready."));
-    });
+  const readiness = backendReadiness(backend);
+  const lines = createInterface({ input: backend.stdout });
+  lines.on("line", (line) => {
+    let message: Record<string, unknown>;
+    try {
+      message = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return console.error(`[kairo backend] Invalid protocol message: ${line}`);
+    }
+    if (message.event === "ready") {
+      readiness.succeed();
+      return;
+    }
+    if (message.event === "ready_error") {
+      readiness.fail(new Error(String(message.payload)));
+      return;
+    }
+    if (typeof message.event === "string") {
+      send(message.event, message.payload);
+      return;
+    }
+    if (typeof message.id !== "number") return;
+    const request = pending.get(message.id);
+    if (!request) return;
+    pending.delete(message.id);
+    if (typeof message.error === "string") request.reject(new Error(message.error));
+    else request.resolve(message.result);
   });
-  backendReady = ready;
-  return ready;
+  backendReady = readiness.ready;
+  return readiness.ready;
 }
 
 async function request<T>(method: string, args: unknown[] = []): Promise<T> {
