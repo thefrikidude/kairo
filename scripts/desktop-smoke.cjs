@@ -197,6 +197,22 @@ async function run() {
     `window.kairo.attachTerminal(${JSON.stringify(shell.id)}).then(t=>t.buffer.includes('TAB_READY'))`,
   );
   await capture("terminal-tabs.png");
+  // Jumping between shells in the same workspace must update the visible tab.
+  await click('[aria-label="New terminal tab"]');
+  await waitFor("window.kairo.listTerminals().then(all=>all.filter(t=>!t.sessionId).length===2)");
+  const extraShell = (await state()).terminals.find((t) => !t.sessionId && t.id !== shell.id);
+  await waitFor(
+    `document.querySelector('[aria-controls="terminal-view-${extraShell.id}"]')?.getAttribute('aria-selected')==='true'`,
+  );
+  await key("j", ["meta"]);
+  await waitFor("document.querySelector('#palette-title')");
+  await input('[aria-label="Palette search"]', "Terminal 1");
+  await waitFor("document.querySelector('.palette-results button')");
+  await pointerClick(".palette-results button");
+  await waitFor(
+    `document.querySelector('[aria-controls="terminal-view-${shell.id}"]')?.getAttribute('aria-selected')==='true'`,
+  );
+  await evaluate(`window.kairo.closeTerminal(${JSON.stringify(extraShell.id)})`);
   await click(`[aria-controls="terminal-view-${firstPty.id}"]`);
   await waitFor(
     `document.querySelector('[aria-controls="terminal-view-${firstPty.id}"]')?.getAttribute('aria-selected')==='true'`,

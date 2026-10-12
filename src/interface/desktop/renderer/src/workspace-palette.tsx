@@ -79,9 +79,9 @@ export function WorkspacePalette({
                 })),
               ...state.terminals
                 .filter((t) => t.workspaceId === w.id && !t.sessionId)
-                .map((t) => ({
+                .map((t, index) => ({
                   id: t.id,
-                  label: "Terminal",
+                  label: `Terminal ${index + 1}`,
                   detail: details,
                   open: () => select(w.id, `terminal:${t.id}`),
                 })),

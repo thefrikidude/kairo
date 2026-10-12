@@ -8,6 +8,7 @@ import type {
 import { retainBuffer, type EditorBuffer } from "./editor-buffer.js";
 import { Icon, KairoLogo, ModalFrame } from "./chrome.js";
 import { navigateTabs } from "./tab-navigation.js";
+import { rememberedShell, openWorkspaceShell } from "./workspace-selection.js";
 import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
 import { WorkspacePalette } from "./workspace-palette.js";
 import { ContextMenu, type ContextAction, type ContextMenuState } from "./context-menu.js";
@@ -69,8 +70,11 @@ export function DesktopApp(): React.JSX.Element {
   }>();
   const stateRef = useRef(state);
   stateRef.current = state;
+  const selectionVersion = useRef(0);
   const current = state?.sessions.find((session) => session.id === state.activeSessionId);
-  const selectedShell = state?.terminals.find((t) => t.id === shellId && !t.sessionId);
+  const selectedShell = state?.terminals.find(
+    (t) => t.id === shellId && !t.sessionId && t.workspaceId === state.activeWorkspaceId,
+  );
   const workspace = state?.workspaces.find(
     (item) =>
       item.id === (selectedShell?.workspaceId ?? current?.workspaceId ?? state.activeWorkspaceId),
@@ -124,11 +128,14 @@ export function DesktopApp(): React.JSX.Element {
       disposed = true;
     };
   }, [operation]);
+  const savedShellId = rememberedShell(
+    state?.activeWorkspaceId,
+    state?.workspaces.find((w) => w.id === state.activeWorkspaceId)?.lastTab,
+    state?.terminals,
+  );
   useEffect(() => {
-    const owner = state?.workspaces.find((w) => w.id === state.activeWorkspaceId);
-    const saved = owner?.lastTab?.startsWith("terminal:") ? owner.lastTab.slice(9) : undefined;
-    setShellId(saved && state?.terminals.some((t) => t.id === saved) ? saved : undefined);
-  }, [state?.activeSessionId, state?.activeWorkspaceId]);
+    setShellId(savedShellId);
+  }, [state?.activeSessionId, state?.activeWorkspaceId, savedShellId]);
   useEffect(() => {
     if (!workspace?.id) return;
     const refresh = () =>
@@ -143,16 +150,28 @@ export function DesktopApp(): React.JSX.Element {
     if (!workspace || creatingShell) return;
     setCreatingShell(true);
     setError("");
+    const version = selectionVersion.current;
     try {
-      const terminal = await window.kairo.createTerminal(workspace.id);
-      setState((all) =>
-        all
-          ? { ...all, terminals: [...all.terminals.filter((t) => t.id !== terminal.id), terminal] }
-          : all,
+      await openWorkspaceShell(
+        window.kairo,
+        workspace.id,
+        (terminal) =>
+          setState((all) =>
+            all
+              ? {
+                  ...all,
+                  terminals: [...all.terminals.filter((t) => t.id !== terminal.id), terminal],
+                }
+              : all,
+          ),
+        () =>
+          selectionVersion.current === version &&
+          stateRef.current?.activeWorkspaceId === workspace.id,
+        (terminal) => {
+          setShellId(terminal.id);
+          setSettings(undefined);
+        },
       );
-      setShellId(terminal.id);
-      await window.kairo.rememberWorkspaceTab(workspace.id, `terminal:${terminal.id}`);
-      setSettings(undefined);
     } catch (error) {
       setError(message(error));
     } finally {
@@ -436,6 +455,7 @@ export function DesktopApp(): React.JSX.Element {
     );
   };
   const chooseWorkspace = async (id: string, tab?: string) => {
+    selectionVersion.current++;
     setOperationId(undefined);
     setSettings(undefined);
     await action(async () => {
@@ -745,15 +765,15 @@ export function DesktopApp(): React.JSX.Element {
                           ],
                     )}
                     onClick={() => {
+                      selectionVersion.current++;
                       if (terminal.sessionId) {
                         setShellId(undefined);
                         void action(() => window.kairo.openSession(terminal.sessionId!));
                       } else {
                         setShellId(terminal.id);
-                        void window.kairo.rememberWorkspaceTab(
-                          terminal.workspaceId,
-                          `terminal:${terminal.id}`,
-                        );
+                        void window.kairo
+                          .rememberWorkspaceTab(terminal.workspaceId, `terminal:${terminal.id}`)
+                          .catch((cause) => setError(message(cause)));
                       }
                     }}
                   >
@@ -772,7 +792,10 @@ export function DesktopApp(): React.JSX.Element {
                     role="tab"
                     aria-selected={session.id === current?.id && !selectedShell}
                     tabIndex={session.id === current?.id ? 0 : -1}
-                    onClick={() => void action(() => window.kairo.openSession(session.id))}
+                    onClick={() => {
+                      selectionVersion.current++;
+                      void action(() => window.kairo.openSession(session.id));
+                    }}
                   >
                     {session.title} · stopped
                   </button>
