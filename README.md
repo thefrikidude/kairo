@@ -8,6 +8,12 @@ Kairo is a local desktop app for coding-agent terminals. Run Codex, Claude, Open
 
 Kairo manages projects, task workspaces and terminal sessions. Each agent CLI owns its models, authentication, conversation and approvals. There is no built-in model engine, API-key settings page or automatic agent delegation.
 
+## Built with
+
+Kairo uses **TypeScript, React and Electron**, with a Node.js backend. Vite builds the desktop interface and backend, xterm renders terminals, node-pty runs interactive shells, and better-sqlite3 stores workspace and session metadata. Git operations use the installed Git CLI.
+
+The desktop build compiles the TypeScript backend to JavaScript before launch. Node.js remains a runtime requirement; `KAIRO_NODE_EXECUTABLE` can select its executable.
+
 ## Run locally
 
 Requirements: macOS, Git, Node.js 24.21+ and pnpm. Install an agent CLI to create agent sessions; plain terminals do not require one.
@@ -29,7 +35,7 @@ Kairo currently runs from source. Installers, signing and release distribution a
 ## Terminals and agents
 
 1. Select **Open project** and choose a local folder.
-2. Select **New workspace** for a separate task. Git projects default to an isolated worktree; an agent is optional.
+2. Right-click a project heading and select **New workspace** for a separate task. The dialog opens with that project selected. Git projects default to an isolated worktree; an agent is optional. Plain folders are supported without Git.
 3. Inside a workspace, use **+ Terminal** for a plain shell or **+ Agent** to choose an installed agent. Additional tabs share that workspace's files and Git state.
 4. Select **Open agent terminal** for a stopped session. Kairo runs the CLI in an interactive shell.
 
@@ -109,3 +115,5 @@ It sends small proof tasks to real agents and can consume provider usage. `KAIRO
 Implementation checkpoints and remaining verification are recorded in [the terminal desktop plan](docs/terminal-agent-desktop-plan.md). Orca-derived catalog metadata is attributed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The workspace-first delivery and benchmark methodology are recorded in [the workspace workflow checkpoint](docs/workspace-workflow.md). The current TypeScript/Electron optimizations and measured limits are recorded in [the resource checkpoint](docs/lightweight-electron.md).
+
+The recorded five-run M2/macOS comparison measured a 47.2% reduction in renderer build bytes, with Kairo-owned median RSS decreasing from 479.3 to 443.2 MiB at idle and from 551.5 to 518.9 MiB with eleven terminals. These are fixture measurements on one machine; renderer bytes exclude Electron and backend dependencies. Kairo still ships an Electron interface, and a packaged application size has not been measured. See the resource checkpoint for methodology, startup and switching results, and full reports.
