@@ -32,9 +32,20 @@ if (process.env.KAIRO_FIXTURE_NATIVE_HOME) {
   fs.utimesSync(rollout, new Date(), new Date());
 }
 console.log("\x1b[32mCLI_READY\x1b[0m NATIVE_ID:" + id);
+let asking = false;
 require("node:readline")
   .createInterface({ input: process.stdin })
   .on("line", (line) => {
+    if (asking) {
+      asking = false;
+      console.log("ANSWERED:" + line);
+      return;
+    }
+    if (line === "__ASK__") {
+      asking = true;
+      setTimeout(() => process.stdout.write("Do you want to proceed? [y/N] "), 600);
+      return;
+    }
     if (line === "__TUI__") {
       process.stdout.write("\x1b[?1049h\x1b[2J\x1b[HALTERNATE_SCREEN_FIXTURE");
       return;

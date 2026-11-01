@@ -169,6 +169,26 @@ async function run() {
     ),
     "workspace-tools",
   );
+  const dot = (kind) =>
+    `document.querySelector('[data-workspace-id="${first.workspaceId}"] .session-status.status-${kind}')`;
+  await waitFor(dot("open"));
+  assert.equal(
+    await evaluate(
+      `window.kairo.listTerminals().then(all=>all.every(t=>['working','waiting','idle'].includes(t.activity)))`,
+    ),
+    true,
+  );
+  await evaluate(`window.kairo.writeTerminal(${JSON.stringify(firstPty.id)}, "__ASK__\\r")`);
+  await waitFor(dot("waiting"));
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[data-workspace-id="${first.workspaceId}"] .session-workspace-label').textContent`,
+    ),
+    "Waiting for you",
+  );
+  await capture("agent-waiting.png");
+  await evaluate(`window.kairo.writeTerminal(${JSON.stringify(firstPty.id)}, "n\\r")`);
+  await waitFor(dot("open"));
   await evaluate(`window.kairo.writeTerminal(${JSON.stringify(firstPty.id)}, "\\u001a")`);
   await waitFor(
     `window.kairo.attachTerminal(${JSON.stringify(firstPty.id)}).then(t=>/Stopped|suspended/i.test(t.buffer))`,
@@ -221,11 +241,18 @@ async function run() {
   await waitFor(
     "document.querySelector('dialog[open] .primary') && !document.querySelector('dialog[open] .primary').disabled",
   );
-  await input('[aria-label="Search agents"]', "");
+  assert.equal(
+    await evaluate(
+      "Array.from(document.querySelectorAll('[role=option]')).every(o=>!o.textContent.includes('Not installed')) && document.querySelectorAll('[role=option]').length<45 && !document.querySelector('[aria-label=\"Search agents\"]')",
+    ),
+    true,
+  );
+  await capture("agent-picker.png");
+  await button("Add another agent…", "document.querySelector('dialog')");
   await waitFor("document.querySelectorAll('[role=option]').length===45");
   assert.equal(await evaluate("document.querySelectorAll('[role=option]').length"), 45);
   await input('[aria-label="Search agents"]', "Codex");
-  await button("CodexInstalled · codex");
+  await button("Codexcodex");
   // Adding an agent is scoped to the selected workspace; creation is separate.
   await button("Cancel", "document.querySelector('dialog')");
   await waitFor("!document.querySelector('dialog[open]')");
@@ -237,15 +264,31 @@ async function run() {
   );
   await pointerClick(".project-heading", "right");
   await waitFor("document.querySelector('[role=menu]')");
-  await button("Project setup", "document.querySelector('[role=menu]')");
+  assert.deepEqual(
+    await evaluate(
+      "Array.from(document.querySelectorAll('[role=menu] button')).map(b=>b.textContent)",
+    ),
+    ["New workspace"],
+  );
+  await key("Escape");
+  await waitFor("!document.querySelector('[role=menu]')");
+  await key("j", ["meta"]);
+  await waitFor("document.querySelector('#palette-title')");
+  await input('[aria-label="Palette search"]', "Project setup");
+  await waitFor("document.querySelector('.palette-results button')");
+  await key("Return");
   await waitFor("document.querySelector('[aria-label=\"Setup script\"]')");
   await input('[aria-label="Setup script"]', "echo PREPARING; sleep 1; touch setup-ready");
-  await input('[aria-label="Copy paths"]', ".env");
   await button("Save project setup", "document.querySelector('dialog')");
   await waitFor("!document.querySelector('dialog[open]')");
   await click(".new-chat");
   await waitFor("document.querySelector('[aria-label=\"Workspace mode\"]').value==='worktree'");
+  assert.equal(await evaluate("document.querySelector('dialog .advanced-options').open"), false);
+  await waitFor(
+    "document.querySelector('[aria-label=\"Copy environment files\"]')?.checked===true",
+  );
   await input('[aria-label="Workspace name"]', "Smoke isolated");
+  await capture("new-workspace-dialog.png");
   await input('[aria-label="Branch override"]', "kairo/smoke-isolated");
   await select('[aria-label="Workspace agent"]', "codex");
   await button("Create workspace", "document.querySelector('dialog')");
@@ -292,7 +335,7 @@ async function run() {
   await capture("terminal-review-dark.png");
   assert.equal(
     await evaluate(
-      "Array.from(document.querySelectorAll('.selected-diff-toolbar button')).some(b=>b.textContent==='Open in Cursor') && !document.querySelector('.code-editor')",
+      "Array.from(document.querySelectorAll('.selected-diff-toolbar button')).some(b=>b.textContent==='Open in Cursor') && !document.querySelector('[aria-label=\"Refresh workspace\"]')",
     ),
     true,
   );
@@ -372,21 +415,15 @@ async function run() {
   );
   await pointerClick(`.terminal-tabs [data-session-id="${shared.id}"]`, "right");
   await waitFor("document.querySelector('[role=menu]')");
-  await button("Archive agent tab", "document.querySelector('[role=menu]')");
+  await button("Close", "document.querySelector('[role=menu]')");
   await waitFor(
     `window.kairo.bootstrap().then(all=>all.archivedSessions.some(s=>s.id===${JSON.stringify(shared.id)}))`,
   );
   await click(`.terminal-tabs [data-session-id="${second.id}"]`);
-  await click(".settings-link");
-  await button("Workspaces");
-  await waitFor("document.querySelector('.terminal-catalog')");
-  await evaluate(
-    `Array.from(document.querySelectorAll('.terminal-catalog article')).find(row=>row.textContent.includes(${JSON.stringify(owner.directory)})).querySelector('button').click()`,
-  );
+  await evaluate(`window.kairo.closeTerminal(${JSON.stringify(pty.id)})`);
   await waitFor(
     `window.kairo.listTerminals().then(all=>!all.some(t=>t.sessionId===${JSON.stringify(second.id)}))`,
   );
-  await button("Back to workspace");
   const record = await nativeRecord(owner.directory);
   await evaluate(
     `window.kairo.setNativeSession(${JSON.stringify(second.id)},${JSON.stringify({ id: record.id })})`,
@@ -430,11 +467,17 @@ async function run() {
   await key("F10", ["shift"]);
   await waitFor("document.querySelector('[role=menu]')");
   await key("End");
-  assert.equal(await evaluate("document.activeElement?.textContent"), "Project setup");
+  assert.equal(await evaluate("document.activeElement?.textContent"), "Delete");
   await key("Home");
   assert.equal(await evaluate("document.activeElement?.textContent"), "Rename");
   await key("Escape");
   await waitFor("!document.querySelector('[role=menu]')");
+  await key("j", ["meta"]);
+  await waitFor("document.querySelector('#palette-title')");
+  await input('[aria-label="Palette search"]', "Theme");
+  await waitFor("document.querySelectorAll('.palette-results button').length===3");
+  await key("Escape");
+  await waitFor("!document.querySelector('dialog[open]')");
   // Keyboard palettes reuse workspace navigation and file preview.
   await key("j", ["meta"]);
   await waitFor("document.querySelector('#palette-title')");
@@ -488,12 +531,15 @@ async function run() {
     dialog.showOpenDialog = savedOpenDialog;
   }
   await click(".settings-link");
-  await button("Archived");
   await waitFor(
-    "document.querySelector('.settings-content')?.textContent.includes('Archived workspaces')",
+    "document.querySelector('.settings-content')?.textContent.includes('archived') && !document.querySelector('.settings-tabs')",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Theme\"]').options.length"),
+    3,
   );
   await capture("pinned-and-archived.png");
-  await button("Restore workspace", "document.querySelector('.settings-content')");
+  await button("Restore", "document.querySelector('.settings-content')");
   await waitFor(
     `window.kairo.bootstrap().then(all=>!all.workspaces.find(w=>w.id===${JSON.stringify(first.workspaceId)})?.archivedAt)`,
   );
@@ -501,9 +547,9 @@ async function run() {
     (await state()).terminals.filter((t) => t.workspaceId === first.workspaceId).length,
     0,
   );
-  await button("General");
+  // Restoring from Settings opens the workspace, leaving the settings page.
+  await waitFor("!document.querySelector('.settings-content:not([hidden])')");
   await select('[aria-label="Theme"]', "light");
-  await button("Back to workspace");
   await capture("terminal-review-light.png");
   win.setSize(920, 700);
   await capture("terminal-narrow.png");
@@ -555,6 +601,8 @@ async function run() {
       isolatedWorktree: true,
       parallelNavigation: true,
       review: true,
+      agentStatusDots: true,
+      commandPalette: true,
       exactNativeResume: true,
     }),
   );

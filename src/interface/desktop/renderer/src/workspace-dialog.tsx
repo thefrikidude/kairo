@@ -9,6 +9,16 @@ import type {
 import { ModalFrame } from "./chrome.js";
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+const envAskedKey = (project: string) => `kairo-env-copy-asked:${project}`;
+const remembered = (key: string) => {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+};
+
+/** One decision (a task name); everything about branches and worktrees is an advanced detail. */
 export function WorkspaceDialog({
   initialProject,
   state,
@@ -26,26 +36,32 @@ export function WorkspaceDialog({
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
   const [refs, setRefs] = useState<ProjectRefs>();
+  const [prefs, setPrefs] = useState<ProjectPreferences>();
   const [trees, setTrees] = useState<GitWorktree[]>([]);
   const [existing, setExisting] = useState("");
-  const [agent, setAgent] = useState("");
+  const [agent, setAgent] = useState(() => {
+    const last = localStorage.getItem("kairo-last-agent");
+    return state.agents.some((a) => a.id === last && a.installed) ? last! : "";
+  });
+  const [copyEnv, setCopyEnv] = useState(true);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     let disposed = false;
     setRefs(undefined);
+    setPrefs(undefined);
     setTrees([]);
     setError("");
     if (!project) return;
     setLoading(true);
-    window.kairo
-      .projectRefs(project)
-      .then(async (refs) => {
+    Promise.all([window.kairo.projectRefs(project), window.kairo.projectPreferences(project)])
+      .then(async ([refs, prefs]) => {
         if (disposed) return;
         const trees = refs.git ? await window.kairo.listWorktrees(project) : [];
         if (disposed) return;
         setRefs(refs);
+        setPrefs(prefs);
         setBase(refs.defaultRef);
         setTrees(trees);
         setExisting(trees[0]?.directory ?? "");
@@ -61,6 +77,9 @@ export function WorkspaceDialog({
       disposed = true;
     };
   }, [project]);
+  // Offered once per project: ignored .env files are the usual reason a fresh worktree won't run.
+  const missingEnv = refs?.envFiles.filter((file) => !prefs?.copyPaths.includes(file)) ?? [];
+  const askEnv = mode === "worktree" && missingEnv.length > 0 && !remembered(envAskedKey(project));
   const create = async () => {
     setPending(true);
     setError("");
@@ -71,6 +90,16 @@ export function WorkspaceDialog({
           ? { kind: mode, directory: existing }
           : { kind: mode };
     try {
+      if (askEnv) {
+        if (copyEnv && prefs)
+          await window.kairo.projectPreferences(project, {
+            ...prefs,
+            copyPaths: [...prefs.copyPaths, ...missingEnv],
+          });
+        try {
+          localStorage.setItem(envAskedKey(project), "1");
+        } catch {}
+      }
       apply(
         await window.kairo.createWorkspace({
           project,
@@ -79,6 +108,7 @@ export function WorkspaceDialog({
           agentId: agent || undefined,
         }),
       );
+      if (agent) localStorage.setItem("kairo-last-agent", agent);
       close();
     } catch (error) {
       setError(errorText(error));
@@ -96,26 +126,32 @@ export function WorkspaceDialog({
         }}
       >
         <h2 id="workspace-create-title">New workspace</h2>
-        <label className="settings-field">
-          Project folder
-          <div className="folder-picker">
-            <input
-              aria-label="Workspace project"
-              value={project}
-              onChange={(e) => setProject(e.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() =>
-                void window.kairo.pickWorkspace().then((path) => {
-                  if (path) setProject(path);
-                })
-              }
-            >
-              Browse…
-            </button>
-          </div>
-        </label>
+        {initialProject ? (
+          <p className="empty-small" title={project}>
+            {project}
+          </p>
+        ) : (
+          <label className="settings-field">
+            Project folder
+            <div className="folder-picker">
+              <input
+                aria-label="Workspace project"
+                value={project}
+                onChange={(e) => setProject(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  void window.kairo.pickWorkspace().then((path) => {
+                    if (path) setProject(path);
+                  })
+                }
+              >
+                Browse…
+              </button>
+            </div>
+          </label>
+        )}
         <label className="settings-field">
           Task name
           <input
@@ -128,85 +164,7 @@ export function WorkspaceDialog({
           />
         </label>
         <label className="settings-field">
-          Workspace
-          <select
-            aria-label="Workspace mode"
-            value={mode}
-            onChange={(e) => setMode(e.target.value as typeof mode)}
-          >
-            <option value="folder">Project folder (shared)</option>
-            {refs?.git && (
-              <>
-                <option value="worktree">New isolated worktree</option>
-                <option value="existing">Existing worktree</option>
-              </>
-            )}
-          </select>
-        </label>
-        {mode === "worktree" && (
-          <>
-            <label className="settings-field">
-              Starting branch or commit
-              <input
-                aria-label="Starting ref"
-                list="workspace-refs"
-                value={base}
-                onChange={(e) => setBase(e.target.value)}
-              />
-              <datalist id="workspace-refs">
-                {refs?.refs.map((ref) => (
-                  <option key={ref} value={ref} />
-                ))}
-              </datalist>
-            </label>
-            <p className="empty-small">
-              Project default: {refs?.defaultRef || "unavailable"}. Uses committed files.
-            </p>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => {
-                setLoading(true);
-                void window.kairo
-                  .projectRefs(project, true)
-                  .then(setRefs)
-                  .catch((e) => setError(errorText(e)))
-                  .finally(() => setLoading(false));
-              }}
-            >
-              Refresh remote refs
-            </button>
-            <label className="settings-field">
-              Branch override (optional)
-              <input
-                aria-label="Branch override"
-                value={branch}
-                placeholder={`kairo/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "task"}-…`}
-                onChange={(e) => setBranch(e.target.value)}
-              />
-            </label>
-          </>
-        )}
-        {mode === "existing" && (
-          <label className="settings-field">
-            Existing worktree
-            <select
-              aria-label="Existing worktree"
-              value={existing}
-              onChange={(e) => setExisting(e.target.value)}
-            >
-              {trees
-                .filter((t) => !t.prunable)
-                .map((t) => (
-                  <option key={t.directory} value={t.directory}>
-                    {t.branch ?? "Detached"} · {t.directory}
-                  </option>
-                ))}
-            </select>
-          </label>
-        )}
-        <label className="settings-field">
-          Start an agent after preparation (optional)
+          Agent
           <select
             aria-label="Workspace agent"
             value={agent}
@@ -222,6 +180,120 @@ export function WorkspaceDialog({
               ))}
           </select>
         </label>
+        {askEnv && (
+          <label className="inline-check">
+            <input
+              type="checkbox"
+              aria-label="Copy environment files"
+              checked={copyEnv}
+              onChange={(e) => setCopyEnv(e.target.checked)}
+            />
+            Copy {missingEnv.join(", ")} into the new worktree (git-ignored, so it would be missing)
+          </label>
+        )}
+        <details className="advanced-options">
+          <summary>Advanced</summary>
+          {initialProject && (
+            <label className="settings-field">
+              Project folder
+              <div className="folder-picker">
+                <input
+                  aria-label="Workspace project"
+                  value={project}
+                  onChange={(e) => setProject(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    void window.kairo.pickWorkspace().then((path) => {
+                      if (path) setProject(path);
+                    })
+                  }
+                >
+                  Browse…
+                </button>
+              </div>
+            </label>
+          )}
+          <label className="settings-field">
+            Workspace
+            <select
+              aria-label="Workspace mode"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as typeof mode)}
+            >
+              <option value="folder">Project folder (shared)</option>
+              {refs?.git && (
+                <>
+                  <option value="worktree">New isolated worktree</option>
+                  <option value="existing">Existing worktree</option>
+                </>
+              )}
+            </select>
+          </label>
+          {mode === "worktree" && (
+            <>
+              <label className="settings-field">
+                Starting branch or commit
+                <input
+                  aria-label="Starting ref"
+                  list="workspace-refs"
+                  value={base}
+                  onChange={(e) => setBase(e.target.value)}
+                />
+                <datalist id="workspace-refs">
+                  {refs?.refs.map((ref) => (
+                    <option key={ref} value={ref} />
+                  ))}
+                </datalist>
+              </label>
+              <p className="empty-small">
+                Project default: {refs?.defaultRef || "unavailable"}. Uses committed files.
+              </p>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setLoading(true);
+                  void window.kairo
+                    .projectRefs(project, true)
+                    .then(setRefs)
+                    .catch((e) => setError(errorText(e)))
+                    .finally(() => setLoading(false));
+                }}
+              >
+                Fetch latest remote branches
+              </button>
+              <label className="settings-field">
+                Branch name (optional)
+                <input
+                  aria-label="Branch override"
+                  value={branch}
+                  placeholder={`kairo/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "task"}-…`}
+                  onChange={(e) => setBranch(e.target.value)}
+                />
+              </label>
+            </>
+          )}
+          {mode === "existing" && (
+            <label className="settings-field">
+              Existing worktree
+              <select
+                aria-label="Existing worktree"
+                value={existing}
+                onChange={(e) => setExisting(e.target.value)}
+              >
+                {trees
+                  .filter((t) => !t.prunable)
+                  .map((t) => (
+                    <option key={t.directory} value={t.directory}>
+                      {t.branch ?? "Detached"} · {t.directory}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
+        </details>
         {error && (
           <p className="file-error" role="alert">
             {error}

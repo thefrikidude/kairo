@@ -106,7 +106,7 @@ button svg {
   position: relative;
   display: grid;
   grid-template-columns: var(--sidebar-width, 224px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -2400,69 +2400,6 @@ button svg {
 .split-diff-cell code {
   white-space: pre;
 }
-.file-editor-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
-  font-size: 11px;
-}
-.file-editor-actions > span {
-  color: var(--muted);
-  flex: 1;
-}
-.file-editor-actions small {
-  color: var(--warning);
-}
-.file-editor-actions button {
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-.code-editor {
-  flex: 1;
-  min-height: 100px;
-  min-width: 0;
-  resize: none;
-  padding: 16px;
-  border: 0;
-  background: var(--bg);
-  color: var(--text);
-  white-space: pre;
-  overflow: auto;
-  font:
-    12px/1.7 ui-monospace,
-    SFMono-Regular,
-    Consolas,
-    monospace;
-  tab-size: 2;
-}
-.unsaved-files {
-  display: flex;
-  flex-direction: column;
-  padding: 10px 12px;
-  border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--warning);
-}
-.unsaved-files button {
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 3px 0;
-}
-.inline-confirm {
-  padding: 12px;
-  background: var(--warning-bg);
-  flex: none;
-}
-.inline-confirm button {
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  margin-right: 8px;
-}
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-literal {
@@ -2582,12 +2519,6 @@ button svg {
 .tool-file-shortcut:hover {
   text-decoration: underline;
 }
-.file-editor-actions {
-  flex-wrap: wrap;
-}
-.file-editor-actions small {
-  flex-basis: 100%;
-}
 
 .terminal-view[hidden] {
   display: none;
@@ -2705,18 +2636,6 @@ button svg {
   flex: 1;
   padding: 24px;
   overflow: auto;
-}
-.settings-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 24px;
-}
-.settings-tabs button {
-  padding: 8px 14px;
-  border-radius: 6px;
-}
-.settings-tabs button[aria-pressed="true"] {
-  background: var(--hover);
 }
 .agent-picker-heading {
   display: flex;
@@ -2838,17 +2757,6 @@ button svg {
   border-bottom: 1px solid var(--line);
   padding: 8px 12px;
   flex: none;
-}
-.statusbar {
-  grid-column: 1/-1;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 5px 16px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 11px;
-  background: var(--sidebar);
 }
 
 @media (max-width: 1100px) {
@@ -3087,4 +2995,91 @@ button svg {
 .row-context-menu button:disabled {
   color: var(--muted);
   cursor: default;
+}
+
+/* Terminal activity: pulsing = working, amber = waiting for you, ring = open and idle. */
+.session-status.status-open {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--positive);
+  opacity: 1;
+}
+.tab-status {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.tab-status.status-running {
+  background: var(--positive);
+  animation: pulse-status 1.5s ease-in-out infinite;
+}
+.tab-status.status-waiting {
+  background: var(--warning);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab-status.status-running {
+    animation: none;
+  }
+}
+.section-label .open-project-button {
+  width: auto;
+  padding: 4px 6px;
+  color: var(--muted);
+}
+.link-button {
+  align-self: flex-start;
+  padding: 6px 2px;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link-button:hover {
+  color: var(--text);
+}
+.inline-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.inline-check input {
+  margin-top: 2px;
+}
+.advanced-options {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.advanced-options > summary,
+.shortcut-list > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.advanced-options[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.shortcut-list {
+  margin: 20px 0 12px;
+}
+.shortcut-list dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 12px;
+}
+.shortcut-list dt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+}
+.shortcut-list dd {
+  margin: 0;
+  color: var(--muted);
 }

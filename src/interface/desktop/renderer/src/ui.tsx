@@ -9,12 +9,33 @@ import { Icon, KairoLogo, ModalFrame } from "./chrome.js";
 import { navigateTabs } from "./tab-navigation.js";
 import { rememberedShell, openWorkspaceShell } from "./workspace-selection.js";
 import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
-import { WorkspacePalette } from "./workspace-palette.js";
+import { WorkspacePalette, type PaletteCommand } from "./workspace-palette.js";
 import { ContextMenu, type ContextAction, type ContextMenuState } from "./context-menu.js";
-import { TerminalCatalog } from "./terminal-catalog.js";
 const AgentTerminals = lazy(() => import("./agent-terminals.js"));
 const FileBrowser = lazy(() => import("./file-browser.js"));
 const ReviewPanel = lazy(() => import("./review-panel.js"));
+type ThemeChoice = "system" | "dark" | "light";
+const activityLabel = {
+  working: "Working",
+  waiting: "Waiting for you",
+  idle: "Idle",
+  none: "No terminal open",
+} as const;
+const activityClass = {
+  working: "status-running",
+  waiting: "status-waiting",
+  idle: "status-open",
+  none: "",
+} as const;
+const shortcuts: [string, string][] = [
+  ["Cmd/Ctrl+Shift+N", "New workspace"],
+  ["Cmd/Ctrl+J", "Jump to a workspace or tab, or run a command"],
+  ["Cmd/Ctrl+P", "Quick open file"],
+  ["Cmd/Ctrl+`", "New terminal tab"],
+  ["Cmd/Ctrl+Shift+E", "Files"],
+  ["Cmd/Ctrl+Shift+D", "Review"],
+  ["Cmd/Ctrl+Shift+B", "Toggle sidebar"],
+];
 const name = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const storedNumber = (key: string, fallback: number, min: number, max: number) => {
@@ -28,9 +49,14 @@ export function DesktopApp(): React.JSX.Element {
   const [preparationOutput, setPreparationOutput] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
-  const [theme, setTheme] = useState<"dark" | "light">(() =>
-    localStorage.getItem("kairo-theme") === "light" ? "light" : "dark",
+  const [themeChoice, setThemeChoice] = useState<ThemeChoice>(() => {
+    const saved = localStorage.getItem("kairo-theme");
+    return saved === "light" || saved === "system" ? saved : "dark";
+  });
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
+  const theme = themeChoice === "system" ? (systemDark ? "dark" : "light") : themeChoice;
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     storedNumber("kairo-sidebar-width", 224, 176, 420),
@@ -42,7 +68,7 @@ export function DesktopApp(): React.JSX.Element {
   const [contextTab, setContextTab] = useState<"files" | "changes">("changes");
   const [shellId, setShellId] = useState<string>();
   const [creatingShell, setCreatingShell] = useState(false);
-  const [settings, setSettings] = useState<"general" | "agents" | "archived" | "workspaces">();
+  const [settings, setSettings] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [workspaceDialog, setWorkspaceDialog] = useState<string>();
   const [projectSettings, setProjectSettings] = useState<string>();
@@ -56,6 +82,7 @@ export function DesktopApp(): React.JSX.Element {
   const [newOpen, setNewOpen] = useState(false);
   const [agentId, setAgentId] = useState(localStorage.getItem("kairo-last-agent") ?? "codex");
   const [agentQuery, setAgentQuery] = useState("");
+  const [showAllAgents, setShowAllAgents] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [rename, setRename] = useState<{ id: string; title: string; workspace?: boolean }>();
   const [rowMenu, setRowMenu] = useState<ContextMenuState>();
@@ -93,7 +120,7 @@ export function DesktopApp(): React.JSX.Element {
         !!op.workspaceId && op.workspaceId === workspace?.id && (op.phase !== "ready" || op.error),
     );
   useEffect(() => {
-    if (settings !== "archived") return;
+    if (!settings) return;
     let disposed = false;
     void window.kairo
       .archivedSessions()
@@ -166,7 +193,7 @@ export function DesktopApp(): React.JSX.Element {
           stateRef.current?.activeWorkspaceId === workspace.id,
         (terminal) => {
           setShellId(terminal.id);
-          setSettings(undefined);
+          setSettings(false);
         },
       );
     } catch (error) {
@@ -267,9 +294,15 @@ export function DesktopApp(): React.JSX.Element {
     };
   }, [apply]);
   useEffect(() => {
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setSystemDark(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("kairo-theme", theme);
-  }, [theme]);
+    localStorage.setItem("kairo-theme", themeChoice);
+  }, [theme, themeChoice]);
   useEffect(() => {
     localStorage.setItem("kairo-sidebar-width", String(sidebarWidth));
   }, [sidebarWidth]);
@@ -314,10 +347,17 @@ export function DesktopApp(): React.JSX.Element {
   }, []);
   const beginSession = useCallback(() => {
     setAgentQuery("");
+    setShowAllAgents(false);
     setError("");
     setNewOpen(true);
     void refreshAgents();
   }, [refreshAgents]);
+  useEffect(() => {
+    if (!newOpen) return;
+    const refresh = () => void refreshAgents();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [newOpen, refreshAgents]);
   useEffect(() => {
     if (!contextOpen || !accessId || workspace?.removedAt || settings) return;
     let disposed = false,
@@ -379,7 +419,7 @@ export function DesktopApp(): React.JSX.Element {
         event.key === "Escape" &&
         !(event.target instanceof Element && event.target.closest(".terminal-view"))
       ) {
-        if (settings) setSettings(undefined);
+        if (settings) setSettings(false);
         else if (contextOpen) setContextOpen(false);
       }
     };
@@ -448,7 +488,7 @@ export function DesktopApp(): React.JSX.Element {
   const chooseWorkspace = async (id: string, tab?: string) => {
     selectionVersion.current++;
     setOperationId(undefined);
-    setSettings(undefined);
+    setSettings(false);
     await action(async () => {
       const value = await window.kairo.selectWorkspace(id);
       if (tab?.startsWith("session:")) return window.kairo.openSession(tab.slice(8));
@@ -474,21 +514,67 @@ export function DesktopApp(): React.JSX.Element {
       setRowMenu({ x: bounds.left, y: bounds.bottom, trigger, label, actions });
     },
   });
+  const workspaceActivity = (id: string): keyof typeof activityLabel => {
+    const open = state?.terminals.filter((t) => t.workspaceId === id && t.state === "running");
+    if (!open?.length) return "none";
+    if (open.some((t) => t.activity === "waiting")) return "waiting";
+    if (open.some((t) => t.activity === "working")) return "working";
+    return "idle";
+  };
   const projectActions = (path: string): ContextAction[] => [
     { label: "New workspace", disabled: pending, run: () => setWorkspaceDialog(path) },
-    { label: "Project setup", run: () => setProjectSettings(path) },
   ];
+  const deleteWorkspace = (item: TaskWorkspace) =>
+    setConfirm({
+      title: "Delete workspace?",
+      description:
+        "Close its terminals and remove this worktree folder. Git keeps the branch and refuses removal while uncommitted files or unmerged commits remain.",
+      action: async () => {
+        if (!item.archivedAt) apply(await window.kairo.archiveWorkspace(item.id));
+        apply(await window.kairo.removeWorktree(item.id));
+      },
+    });
+  /** Rename, pin, archive and delete are shared by the row menu and the command palette. */
+  const workspaceCommands = (item: TaskWorkspace): ContextAction[] => {
+    const label = item.name ?? item.branch ?? name(item.directory);
+    return [
+      {
+        label: "Rename",
+        disabled: pending,
+        run: () => setRename({ id: item.id, title: label, workspace: true }),
+      },
+      {
+        label: item.pinned ? "Unpin" : "Pin",
+        disabled: pending,
+        run: () => void action(() => window.kairo.pinWorkspace(item.id, !item.pinned)),
+      },
+      {
+        label: "Archive",
+        disabled: pending,
+        run: () =>
+          setConfirm({
+            title: "Archive workspace?",
+            description:
+              "Close this workspace’s terminals and hide it. Files, branches, and agent session identities are kept. Restore it from Settings.",
+            action: () => window.kairo.archiveWorkspace(item.id).then(apply),
+          }),
+      },
+      ...(item.managed
+        ? [{ label: "Delete", disabled: pending, run: () => deleteWorkspace(item) }]
+        : []),
+    ];
+  };
   const agentActions = (id: string): ContextAction[] => {
     const session = state?.sessions.find((session) => session.id === id);
     return session
       ? [
           {
-            label: "Rename agent tab",
+            label: "Rename",
             disabled: pending,
             run: () => setRename({ id, title: session.title }),
           },
           {
-            label: "Archive agent tab",
+            label: "Close",
             disabled: pending,
             run: () => void action(() => window.kairo.archiveSession(id)),
           },
@@ -498,35 +584,13 @@ export function DesktopApp(): React.JSX.Element {
   const renderWorkspace = (item: TaskWorkspace) => {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
+    const activity = workspaceActivity(item.id);
     return (
       <div
         key={item.id}
         data-workspace-id={item.id}
         className={`session-row workspace-row ${workspace?.id === item.id ? "selected" : ""}`}
-        {...menuHandlers(`${label} actions`, [
-          {
-            label: "Rename",
-            disabled: pending,
-            run: () => setRename({ id: item.id, title: label, workspace: true }),
-          },
-          {
-            label: item.pinned ? "Unpin" : "Pin",
-            disabled: pending,
-            run: () => void action(() => window.kairo.pinWorkspace(item.id, !item.pinned)),
-          },
-          {
-            label: "Archive",
-            disabled: pending,
-            run: () =>
-              setConfirm({
-                title: "Archive workspace?",
-                description:
-                  "Close this workspace’s terminals and hide it. Files, branches, and agent session identities are kept.",
-                action: () => window.kairo.archiveWorkspace(item.id).then(apply),
-              }),
-          },
-          ...projectActions(item.repositoryPath),
-        ])}
+        {...menuHandlers(`${label} actions`, workspaceCommands(item))}
       >
         <button
           className="session"
@@ -535,7 +599,8 @@ export function DesktopApp(): React.JSX.Element {
           onClick={() => void chooseWorkspace(item.id)}
         >
           <span
-            className={`session-status status-${item.unavailable ? "error" : state?.terminals.some((t) => t.workspaceId === item.id && t.state === "running") ? "complete" : "idle"}`}
+            className={`session-status ${item.unavailable ? "status-error" : activityClass[activity]}`}
+            title={item.unavailable ? "Unavailable" : activityLabel[activity]}
           />
           <span className="session-labels">
             <span className="session-title">{label}</span>
@@ -544,28 +609,57 @@ export function DesktopApp(): React.JSX.Element {
                 ? "Unavailable"
                 : op && op.phase !== "ready"
                   ? op.phase
-                  : (item.branch ?? item.kind)}
+                  : activity === "waiting"
+                    ? "Waiting for you"
+                    : (item.branch ?? item.kind)}
             </small>
           </span>
         </button>
       </div>
     );
   };
+  const commands: PaletteCommand[] = [
+    ...(workspace && !workspace.removedAt
+      ? [
+          ...workspaceCommands(workspace)
+            .filter((command) => !command.disabled)
+            .map((command) => ({
+              label: `${command.label} workspace`,
+              detail: workspace.name ?? workspace.branch ?? name(workspace.directory),
+              run: command.run,
+            })),
+          {
+            label: "Project setup",
+            detail: `Setup script and files to copy · ${name(workspace.repositoryPath)}`,
+            run: () => setProjectSettings(workspace.repositoryPath),
+          },
+        ]
+      : []),
+    { label: "New workspace", run: () => setWorkspaceDialog(workspace?.repositoryPath ?? "") },
+    { label: "Open project folder", run: () => void action(() => window.kairo.openWorkspace()) },
+    { label: "Settings", run: () => setSettings(true) },
+    { label: "Keyboard shortcuts", run: () => setSettings(true) },
+    ...(["system", "dark", "light"] as const).map((choice) => ({
+      label: `Theme: ${choice[0].toUpperCase()}${choice.slice(1)}`,
+      run: () => setThemeChoice(choice),
+    })),
+  ];
+  const installedAgents = state?.agents.filter((agent) => agent.installed) ?? [];
+  const listAll = showAllAgents || (!detecting && !installedAgents.length);
   const agentPicker = (
     <>
-      <div className="agent-picker-heading">
-        <input
-          aria-label="Search agents"
-          placeholder="Search agents…"
-          value={agentQuery}
-          onChange={(event) => setAgentQuery(event.target.value)}
-        />
-        <button disabled={detecting} onClick={() => void refreshAgents()}>
-          {detecting ? "Detecting…" : "Refresh agents"}
-        </button>
-      </div>
+      {listAll && (
+        <div className="agent-picker-heading">
+          <input
+            aria-label="Search agents"
+            placeholder="Search agents…"
+            value={agentQuery}
+            onChange={(event) => setAgentQuery(event.target.value)}
+          />
+        </div>
+      )}
       <div className="agent-picker-list" role="listbox" aria-label="CLI agents">
-        {(state?.agents ?? [])
+        {(listAll ? (state?.agents ?? []) : installedAgents)
           .filter((agent) =>
             `${agent.name} ${agent.id} ${agent.commands.join(" ")}`
               .toLowerCase()
@@ -583,9 +677,7 @@ export function DesktopApp(): React.JSX.Element {
                 onClick={() => setAgentId(agent.id)}
               >
                 <strong>{agent.name}</strong>
-                <small>
-                  {agent.installed ? "Installed" : "Not installed"} · {agent.commands[0]}
-                </small>
+                <small>{agent.installed ? agent.commands[0] : "Not installed"}</small>
               </button>
               {!agent.installed && (
                 <button
@@ -602,6 +694,17 @@ export function DesktopApp(): React.JSX.Element {
             </div>
           ))}
       </div>
+      {detecting && !installedAgents.length && <p className="empty-small">Looking for agents…</p>}
+      {!detecting && !installedAgents.length && (
+        <p className="empty-small">
+          No agent CLI found. Install one, then come back to Kairo; the list updates on its own.
+        </p>
+      )}
+      {!!installedAgents.length && (
+        <button className="link-button" onClick={() => setShowAllAgents((value) => !value)}>
+          {showAllAgents ? "Show installed agents only" : "Add another agent…"}
+        </button>
+      )}
       {state?.agents.find((agent) => agent.id === agentId)?.unavailableReason && (
         <p className="empty-small">
           {state.agents.find((agent) => agent.id === agentId)!.unavailableReason}
@@ -631,13 +734,6 @@ export function DesktopApp(): React.JSX.Element {
         >
           <Icon name="plus" /> New workspace
         </button>
-        <button
-          className="open-project-button"
-          disabled={pending}
-          onClick={() => void action(() => window.kairo.openWorkspace())}
-        >
-          <Icon name="folder" /> Open project
-        </button>
         {state?.workspaces.some((w) => w.pinned && !w.archivedAt && !w.removedAt) && (
           <section className="pinned-sessions" aria-label="Pinned workspaces">
             <div className="section-label sidebar-section-title">Pinned</div>
@@ -646,10 +742,18 @@ export function DesktopApp(): React.JSX.Element {
               .map(renderWorkspace)}
           </section>
         )}
-        <button className="open-project-button" onClick={() => setPalette("jump")}>
-          Jump to workspace
-        </button>
-        <div className="section-label sidebar-section-title">Projects</div>
+        <div className="section-label sidebar-section-title">
+          <span>Projects</span>
+          <button
+            className="icon-button open-project-button"
+            aria-label="Open project"
+            title="Open project folder"
+            disabled={pending}
+            onClick={() => void action(() => window.kairo.openWorkspace())}
+          >
+            <Icon name="folder" />
+          </button>
+        </div>
         <div className="project-session-list">
           {groups.map((group) => (
             <section className="project-session-group" key={group.path}>
@@ -683,7 +787,7 @@ export function DesktopApp(): React.JSX.Element {
                       className="empty-session-list"
                       onClick={() => {
                         setOperationId(op.id);
-                        setSettings(undefined);
+                        setSettings(false);
                       }}
                     >
                       {op.name} · {op.phase}
@@ -694,7 +798,7 @@ export function DesktopApp(): React.JSX.Element {
           ))}
           {!groups.length && <p className="empty-session-list">Open a project to get started</p>}
         </div>
-        <button className="settings-link" onClick={() => setSettings("general")}>
+        <button className="settings-link" onClick={() => setSettings(true)}>
           <Icon name="settings" /> Settings
         </button>
       </aside>
@@ -711,7 +815,7 @@ export function DesktopApp(): React.JSX.Element {
           {settings ? (
             <>
               <strong>Settings</strong>
-              <button onClick={() => setSettings(undefined)}>Back to workspace</button>
+              <button onClick={() => setSettings(false)}>Back to workspace</button>
             </>
           ) : (
             <>
@@ -763,6 +867,14 @@ export function DesktopApp(): React.JSX.Element {
                       }
                     }}
                   >
+                    {terminal.state === "running" &&
+                      (terminal.activity === "working" || terminal.activity === "waiting") && (
+                        <span
+                          className={`tab-status ${activityClass[terminal.activity]}`}
+                          title={activityLabel[terminal.activity]}
+                          aria-hidden="true"
+                        />
+                      )}
                     {terminal.sessionId
                       ? (state?.sessions.find((s) => s.id === terminal.sessionId)?.title ??
                         terminal.title)
@@ -823,70 +935,61 @@ export function DesktopApp(): React.JSX.Element {
           </div>
         )}
         <section className="settings-content terminal-settings" hidden={!settings}>
-          <div className="settings-tabs">
-            {(["general", "agents", "archived", "workspaces"] as const).map((tab) => (
-              <button
-                key={tab}
-                aria-pressed={settings === tab}
-                onClick={() => {
-                  setSettings(tab);
-                  if (tab === "agents") void refreshAgents();
-                }}
-              >
-                {tab === "archived" ? "Archived" : tab[0].toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </div>
-          {settings === "general" && (
-            <>
-              <h2>General</h2>
-              <p>
-                Agent conversations run inside the selected CLI. Models, authentication and
-                approvals are managed by that agent.
-              </p>
-              <label className="settings-field">
-                Appearance
-                <select
-                  aria-label="Theme"
-                  value={theme}
-                  onChange={(event) => setTheme(event.target.value as "light" | "dark")}
+          <h2>Settings</h2>
+          <label className="settings-field">
+            Appearance
+            <select
+              aria-label="Theme"
+              value={themeChoice}
+              onChange={(event) => setThemeChoice(event.target.value as ThemeChoice)}
+            >
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <h2>Workspaces</h2>
+          {state?.workspaces
+            .filter((item) => !item.removedAt)
+            .map((item) => (
+              <article className="workspace-catalog-row" key={item.id}>
+                <div>
+                  <strong>{item.name ?? item.branch ?? name(item.directory)}</strong>
+                  <small>{item.archivedAt ? `${item.kind} · archived` : item.kind}</small>
+                  <code>{item.directory}</code>
+                </div>
+                <button
+                  disabled={pending}
+                  onClick={() => {
+                    setSettings(false);
+                    void action(() =>
+                      item.archivedAt
+                        ? window.kairo
+                            .restoreWorkspace(item.id)
+                            .then(() => window.kairo.selectWorkspace(item.id))
+                        : window.kairo.selectWorkspace(item.id),
+                    );
+                  }}
                 >
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                </select>
-              </label>
-              <p>
-                Cmd/Ctrl+Shift+N: new session · Cmd/Ctrl+Shift+E: files · Cmd/Ctrl+Shift+D: review ·
-                Cmd/Ctrl+`: new terminal tab
-              </p>
-            </>
+                  {item.archivedAt ? "Restore" : "Open"}
+                </button>
+                {item.managed && (
+                  <button
+                    className="danger-outline-button"
+                    disabled={pending}
+                    onClick={() => deleteWorkspace(item)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </article>
+            ))}
+          {!state?.workspaces.some((item) => !item.removedAt) && (
+            <p className="empty-small">No workspaces yet</p>
           )}
-          {settings === "agents" && (
+          {archived.length > 0 && (
             <>
-              <h2>Installed agents</h2>
-              <p>
-                Install an agent on your system, then refresh. Kairo launches its interactive CLI.
-              </p>
-              {agentPicker}
-            </>
-          )}
-          {settings === "archived" && (
-            <>
-              <h2>Archived workspaces</h2>
-              {state?.workspaces
-                .filter((w) => w.archivedAt && !w.removedAt)
-                .map((w) => (
-                  <article key={w.id} className="workspace-catalog-row">
-                    <div>
-                      <strong>{w.name}</strong>
-                      <code>{w.directory}</code>
-                    </div>
-                    <button onClick={() => void action(() => window.kairo.restoreWorkspace(w.id))}>
-                      Restore workspace
-                    </button>
-                  </article>
-                ))}
-              <h2>Archived sessions</h2>
+              <h2>Closed agent tabs</h2>
               {archived.map((session) => (
                 <article className="workspace-catalog-row" key={session.id}>
                   <div>
@@ -908,7 +1011,7 @@ export function DesktopApp(): React.JSX.Element {
                     className="danger-outline-button"
                     onClick={() =>
                       setConfirm({
-                        title: "Delete session?",
+                        title: "Delete closed tab?",
                         description: `Delete “${session.title}” from Kairo. Its workspace and the agent’s own history are kept.`,
                         action: () => window.kairo.deleteSession(session.id).then(apply),
                       })
@@ -918,62 +1021,23 @@ export function DesktopApp(): React.JSX.Element {
                   </button>
                 </article>
               ))}
-              {!archived.length && <p className="empty-small">No archived sessions</p>}
             </>
           )}
-          {settings === "workspaces" && (
-            <>
-              <h2>Workspaces</h2>
-              {state?.workspaces
-                .filter((item) => !item.removedAt)
-                .map((item) => (
-                  <article className="workspace-catalog-row" key={item.id}>
-                    <div>
-                      <strong>{item.name ?? item.branch ?? name(item.directory)}</strong>
-                      <small>{item.kind}</small>
-                      <code>{item.directory}</code>
-                    </div>
-                    <button
-                      disabled={pending}
-                      onClick={() => {
-                        setSettings(undefined);
-                        void action(() =>
-                          item.archivedAt
-                            ? window.kairo
-                                .restoreWorkspace(item.id)
-                                .then(() => window.kairo.selectWorkspace(item.id))
-                            : window.kairo.selectWorkspace(item.id),
-                        );
-                      }}
-                    >
-                      Open
-                    </button>
-                    {item.managed && (
-                      <button
-                        className="danger-outline-button"
-                        disabled={
-                          pending ||
-                          (!item.archivedAt &&
-                            state.sessions.some((session) => session.workspaceId === item.id))
-                        }
-                        title="Archive sessions and close terminals before removing a worktree"
-                        onClick={() =>
-                          setConfirm({
-                            title: "Remove worktree?",
-                            description:
-                              "Remove this clean worktree folder. Git preserves its branch and refuses removal while uncommitted files or unmerged commits remain.",
-                            action: () => window.kairo.removeWorktree(item.id).then(apply),
-                          })
-                        }
-                      >
-                        Remove worktree
-                      </button>
-                    )}
-                  </article>
-                ))}
-              <TerminalCatalog />
-            </>
-          )}
+          <details className="shortcut-list">
+            <summary>Keyboard shortcuts</summary>
+            <dl>
+              {shortcuts.map(([keys, description]) => (
+                <React.Fragment key={keys}>
+                  <dt>{keys}</dt>
+                  <dd>{description}</dd>
+                </React.Fragment>
+              ))}
+            </dl>
+          </details>
+          <p className="empty-small">
+            Agent conversations run inside the selected CLI. Models, authentication and approvals
+            are managed by that agent.
+          </p>
         </section>
         <div className="agent-workspace" hidden={!!settings}>
           <Suspense fallback={<p className="empty-small">Loading terminal…</p>}>
@@ -1127,21 +1191,6 @@ export function DesktopApp(): React.JSX.Element {
             </div>
             <button
               className="icon-button"
-              aria-label="Refresh workspace"
-              onClick={() => {
-                void window.kairo
-                  .review(accessId, scope)
-                  .then((value) => {
-                    setOverview(value);
-                    setRevision((value) => value + 1);
-                  })
-                  .catch((cause) => setReviewError(message(cause)));
-              }}
-            >
-              <Icon name="refresh" />
-            </button>
-            <button
-              className="icon-button"
               aria-label="Close workspace panel"
               onClick={() => setContextOpen(false)}
             >
@@ -1172,13 +1221,6 @@ export function DesktopApp(): React.JSX.Element {
           </Suspense>
         </aside>
       )}
-      <footer className="statusbar">
-        <span>
-          {workspace
-            ? `${workspace.kind === "worktree" ? "Isolated worktree" : "Local workspace"} · ${state?.terminals.filter((terminal) => terminal.state === "running").length ?? 0} open terminals`
-            : "Local agent desktop"}
-        </span>
-      </footer>
       {rowMenu && (
         <ContextMenu
           key={`${rowMenu.x}:${rowMenu.y}:${rowMenu.label}`}
@@ -1208,6 +1250,7 @@ export function DesktopApp(): React.JSX.Element {
           kind={palette}
           state={state}
           workspace={workspace}
+          commands={commands}
           close={() => setPalette(undefined)}
           select={(id, tab) => void chooseWorkspace(id, tab)}
           file={(path) => {

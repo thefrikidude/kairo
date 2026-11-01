@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import type { DesktopBootstrap, TaskWorkspace } from "../../shared/api.js";
 import { ModalFrame } from "./chrome.js";
+export type PaletteCommand = { label: string; detail?: string; run(): void };
 export function WorkspacePalette({
   kind,
   state,
   workspace,
+  commands = [],
   select,
   file,
   close,
@@ -12,6 +14,7 @@ export function WorkspacePalette({
   kind: "jump" | "file";
   state: DesktopBootstrap;
   workspace?: TaskWorkspace;
+  commands?: PaletteCommand[];
   select(id: string, tab?: string): void;
   file(path: string): void;
   close(): void;
@@ -87,18 +90,26 @@ export function WorkspacePalette({
                 })),
             ];
           })
+          .concat(
+            commands.map((command) => ({
+              id: `command:${command.label}`,
+              label: command.label,
+              detail: command.detail ?? "Command",
+              open: command.run,
+            })),
+          )
           .filter((row) => `${row.label} ${row.detail}`.toLowerCase().includes(query.toLowerCase()))
           .slice(0, 100);
   return (
     <ModalFrame labelledBy="palette-title" blocked={false} onDismiss={close}>
       <div className="new-session-dialog workspace-palette">
         <h2 id="palette-title">
-          {kind === "file" ? "Quick open file" : "Jump to workspace or tab"}
+          {kind === "file" ? "Quick open file" : "Jump to a workspace, tab or command"}
         </h2>
         <input
           autoFocus
           aria-label="Palette search"
-          placeholder={kind === "file" ? "Search filenames…" : "Search projects, workspaces, tabs…"}
+          placeholder={kind === "file" ? "Search filenames…" : "Search workspaces, tabs, commands…"}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
