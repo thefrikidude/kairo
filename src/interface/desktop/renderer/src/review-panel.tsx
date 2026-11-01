@@ -124,7 +124,6 @@ export default memo(function ReviewPanel({
   canReviewTask,
   revision,
   onScope,
-  onOpenFile,
 }: {
   sessionId: string;
   overview?: WorkspaceReview;
@@ -133,7 +132,6 @@ export default memo(function ReviewPanel({
   canReviewTask: boolean;
   revision: number;
   onScope(scope: ReviewScope): void;
-  onOpenFile(path: string): void;
 }): React.JSX.Element {
   const [selected, setSelected] = useState<string>();
   const [patch, setPatch] = useState<{ diff: string; unavailable?: string }>();
@@ -249,7 +247,15 @@ export default memo(function ReviewPanel({
             <button aria-pressed={split} onClick={() => setSplit((value) => !value)}>
               {split ? "Unified" : "Split"}
             </button>
-            <button onClick={() => onOpenFile(selected)}>Open file</button>
+            <button
+              onClick={() =>
+                void window.kairo
+                  .openInCursor(sessionId, selected)
+                  .catch((cause: Error) => setPatchError(cause.message))
+              }
+            >
+              Open in Cursor
+            </button>
           </div>
           {patchError && (
             <p className="file-error" role="alert">

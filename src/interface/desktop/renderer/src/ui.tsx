@@ -5,7 +5,6 @@ import type {
   ReviewScope,
   WorkspaceReview,
 } from "../../shared/api.js";
-import { retainBuffer, type EditorBuffer } from "./editor-buffer.js";
 import { Icon, KairoLogo, ModalFrame } from "./chrome.js";
 import { navigateTabs } from "./tab-navigation.js";
 import { rememberedShell, openWorkspaceShell } from "./workspace-selection.js";
@@ -16,7 +15,6 @@ import { TerminalCatalog } from "./terminal-catalog.js";
 const AgentTerminals = lazy(() => import("./agent-terminals.js"));
 const FileBrowser = lazy(() => import("./file-browser.js"));
 const ReviewPanel = lazy(() => import("./review-panel.js"));
-const EMPTY_BUFFERS: Record<string, EditorBuffer> = {};
 const name = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const storedNumber = (key: string, fallback: number, min: number, max: number) => {
@@ -50,7 +48,6 @@ export function DesktopApp(): React.JSX.Element {
   const [projectSettings, setProjectSettings] = useState<string>();
   const [palette, setPalette] = useState<"jump" | "file">();
   const [operationId, setOperationId] = useState<string>();
-  const [buffers, setBuffers] = useState<Record<string, Record<string, EditorBuffer>>>({});
   const [overview, setOverview] = useState<WorkspaceReview>();
   const [reviewError, setReviewError] = useState("");
   const [scope, setScope] = useState<ReviewScope>("task");
@@ -178,9 +175,6 @@ export function DesktopApp(): React.JSX.Element {
       setCreatingShell(false);
     }
   };
-  const dirty = Object.values(buffers).some((all) =>
-    Object.values(all).some((buffer) => buffer.draft !== buffer.saved),
-  );
   const apply = useCallback((value: DesktopBootstrap) => setState(value), []);
   const onError = useCallback((value: string) => setError(value), []);
   const groups = useMemo(() => {
@@ -302,9 +296,6 @@ export function DesktopApp(): React.JSX.Element {
       if (ids.length) apply(await window.kairo.bootstrap(true));
     })().catch((cause) => setError(message(cause)));
   }, [state, apply]);
-  useEffect(() => {
-    window.kairo.setUnsavedChanges(dirty);
-  }, [dirty]);
   const refreshAgents = useCallback(async () => {
     setDetecting(true);
     try {
@@ -526,18 +517,13 @@ export function DesktopApp(): React.JSX.Element {
           {
             label: "Archive",
             disabled: pending,
-            run: () => {
-              if (Object.values(buffers[item.id] ?? {}).some((b) => b.draft !== b.saved)) {
-                setError("Save or discard this workspace’s unsaved file edits before archiving.");
-                return;
-              }
+            run: () =>
               setConfirm({
                 title: "Archive workspace?",
                 description:
                   "Close this workspace’s terminals and hide it. Files, branches, and agent session identities are kept.",
                 action: () => window.kairo.archiveWorkspace(item.id).then(apply),
-              });
-            },
+              }),
           },
           ...projectActions(item.repositoryPath),
         ])}
@@ -968,10 +954,7 @@ export function DesktopApp(): React.JSX.Element {
                         disabled={
                           pending ||
                           (!item.archivedAt &&
-                            state.sessions.some((session) => session.workspaceId === item.id)) ||
-                          Object.values(buffers[item.id] ?? {}).some(
-                            (buffer) => buffer.draft !== buffer.saved,
-                          )
+                            state.sessions.some((session) => session.workspaceId === item.id))
                         }
                         title="Archive sessions and close terminals before removing a worktree"
                         onClick={() =>
@@ -1170,15 +1153,9 @@ export function DesktopApp(): React.JSX.Element {
               <FileBrowser
                 key={workspace.id}
                 sessionId={accessId}
-                busy={false}
-                buffers={buffers[workspace.id] ?? EMPTY_BUFFERS}
                 changes={overview?.changes ?? []}
                 revision={revision}
                 target={target?.workspaceId === workspace.id ? target : undefined}
-                onBuffer={(path, buffer) =>
-                  setBuffers((all) => retainBuffer(all, workspace.id, path, buffer))
-                }
-                onSaved={() => setRevision((value) => value + 1)}
               />
             ) : (
               <ReviewPanel
@@ -1190,10 +1167,6 @@ export function DesktopApp(): React.JSX.Element {
                 canReviewTask={!!workspace.baseCommit}
                 revision={revision}
                 onScope={setScope}
-                onOpenFile={(path) => {
-                  if (workspace) setTarget({ path, nonce: Date.now(), workspaceId: workspace.id });
-                  setContextTab("files");
-                }}
               />
             )}
           </Suspense>
@@ -1205,7 +1178,6 @@ export function DesktopApp(): React.JSX.Element {
             ? `${workspace.kind === "worktree" ? "Isolated worktree" : "Local workspace"} · ${state?.terminals.filter((terminal) => terminal.state === "running").length ?? 0} open terminals`
             : "Local agent desktop"}
         </span>
-        <span>{dirty ? "Unsaved file edits" : ""}</span>
       </footer>
       {rowMenu && (
         <ContextMenu

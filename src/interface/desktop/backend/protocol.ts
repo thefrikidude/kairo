@@ -45,7 +45,6 @@ const methods = new Set([
   "workspace:directory",
   "workspace:snapshot",
   "workspace:search",
-  "workspace:write",
   "workspace:review",
   "workspace:diff",
   "workspace:cursor-path",

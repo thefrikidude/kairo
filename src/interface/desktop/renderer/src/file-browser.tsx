@@ -3,47 +3,32 @@ import type { WorkspaceEntry, FileSearch } from "../../shared/api.js";
 import type { WorkspaceChange } from "../../../../infrastructure/tools/workspace-review.js";
 import { VirtualRows } from "./virtual-rows.js";
 import { CodePreview } from "./code-preview.js";
-import { bufferContent, editorBuffer, type EditorBuffer } from "./editor-buffer.js";
 
-/** Lazy tree, explicit filename search and small editor buffers owned above session navigation. */
+/** Lazy tree, explicit filename search and a read-only preview; editing happens in the user's editor. */
 export default memo(function FileBrowser({
   sessionId,
-  busy,
-  buffers,
   target,
   changes,
   revision,
-  onBuffer,
-  onSaved,
 }: {
   sessionId: string;
-  busy: boolean;
-  buffers: Record<string, EditorBuffer>;
   target?: { path: string; nonce: number };
   changes: WorkspaceChange[];
   revision: number;
-  onBuffer(path: string, buffer: EditorBuffer): void;
-  onSaved(): void;
 }): React.JSX.Element {
   const [directories, setDirectories] = useState<Record<string, WorkspaceEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["."]));
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<FileSearch>();
   const [selected, setSelected] = useState<string>();
-  const [editing, setEditing] = useState(false);
+  const [content, setContent] = useState<string>();
   const [reading, setReading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [reloadPrompt, setReloadPrompt] = useState(false);
   const readRevision = useRef(0);
   const directoriesRef = useRef(directories);
   directoriesRef.current = directories;
   const treeRevision = useRef(-1);
-  const buffersRef = useRef(buffers);
-  buffersRef.current = buffers;
-  const buffer = selected ? buffers[selected] : undefined;
-  const dirty = !!buffer && buffer.draft !== buffer.saved;
 
   useEffect(() => {
     let disposed = false;
@@ -99,21 +84,22 @@ export default memo(function FileBrowser({
     [],
   );
 
-  const preview = async (path: string, force = false, preserveEditing = false) => {
+  const preview = async (path: string, background = false) => {
     const current = ++readRevision.current;
     setSelected(path);
-    if (!preserveEditing) setEditing(false);
     setError("");
-    if (!force && buffersRef.current[path]?.draft !== buffersRef.current[path]?.saved) {
-      setReading(false);
-      return;
+    if (!background) {
+      setContent(undefined);
+      setReading(true);
     }
-    setReading(true);
     try {
       const value = await window.kairo.fileSnapshot(sessionId, path);
-      if (current === readRevision.current) onBuffer(path, editorBuffer(value));
+      if (current === readRevision.current) setContent(value.content);
     } catch (cause) {
-      if (current === readRevision.current) setError((cause as Error).message);
+      if (current === readRevision.current) {
+        setContent(undefined);
+        setError((cause as Error).message);
+      }
     } finally {
       if (current === readRevision.current) setReading(false);
     }
@@ -122,28 +108,8 @@ export default memo(function FileBrowser({
     if (target?.path) void preview(target.path);
   }, [target?.nonce]);
   useEffect(() => {
-    if (selected && !dirty && !saving) void preview(selected, false, true);
+    if (selected) void preview(selected, true);
   }, [revision]);
-
-  const save = async () => {
-    if (!selected || !buffer || !dirty || saving || busy) return;
-    setSaving(true);
-    setError("");
-    try {
-      const result = await window.kairo.saveFile(
-        sessionId,
-        selected,
-        bufferContent(buffer),
-        buffer.revision,
-      );
-      onBuffer(selected, editorBuffer(result));
-      onSaved();
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const treeRows: { entry: WorkspaceEntry; depth: number }[] = [];
   const collect = (path: string, depth = 0) => {
@@ -169,61 +135,23 @@ export default memo(function FileBrowser({
               onClick={() => {
                 readRevision.current += 1;
                 setSelected(undefined);
+                setContent(undefined);
                 setError("");
               }}
               aria-label="Back to files"
             >
               ← Files
             </button>
-            <strong title={selected}>
-              {selected}
-              {dirty ? " ●" : ""}
-            </strong>
+            <strong title={selected}>{selected}</strong>
             <button
-              aria-label="Reload file preview"
-              disabled={reading || saving}
-              onClick={() => (dirty ? setReloadPrompt(true) : void preview(selected, true))}
+              onClick={() =>
+                void window.kairo
+                  .openInCursor(sessionId, selected)
+                  .catch((cause: Error) => setError(cause.message))
+              }
             >
-              ↻
+              Open in Cursor
             </button>
-            {error && (
-              <button
-                onClick={() =>
-                  void window.kairo
-                    .openInCursor(sessionId, selected)
-                    .catch((cause: Error) => setError(cause.message))
-                }
-              >
-                Open in Cursor
-              </button>
-            )}
-          </div>
-          <div className="file-editor-actions">
-            <button
-              disabled={!buffer || reading || saving}
-              onClick={() => setEditing((value) => !value)}
-            >
-              {editing ? "Preview" : "Edit"}
-            </button>
-            <span role="status">
-              {dirty
-                ? "Unsaved changes"
-                : reading
-                  ? "Loading…"
-                  : buffer
-                    ? "Saved"
-                    : "Preview unavailable"}
-            </span>
-            {editing && (
-              <button
-                className="primary"
-                disabled={!dirty || reading || saving || busy}
-                onClick={() => void save()}
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
-            )}
-            {busy && <small>Save after the agent stops</small>}
           </div>
           {reading && (
             <p className="empty-small" role="status">
@@ -235,41 +163,16 @@ export default memo(function FileBrowser({
               {error}
             </p>
           )}
-          {buffer &&
-            !reading &&
-            (editing ? (
-              <textarea
-                className="code-editor"
-                aria-label={`Edit ${selected}`}
-                spellCheck={false}
-                autoFocus
-                value={buffer.draft}
-                disabled={saving}
-                onChange={(event) => onBuffer(selected, { ...buffer, draft: event.target.value })}
-                onKeyDown={(event) => {
-                  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-                    event.preventDefault();
-                    void save();
-                  }
-                }}
-              />
-            ) : (
-              <div
-                className="file-preview-scroll"
-                tabIndex={0}
-                aria-label={`Preview of ${selected}`}
-              >
-                <CodePreview content={buffer.draft} path={selected} />
-              </div>
-            ))}
+          {content !== undefined && !reading && (
+            <div className="file-preview-scroll" tabIndex={0} aria-label={`Preview of ${selected}`}>
+              <CodePreview content={content} path={selected} />
+            </div>
+          )}
         </>
       ) : (
         <>
           <div className="file-preview-toolbar">
             <strong>Project files</strong>
-            <button aria-label="Refresh files" disabled={loading} onClick={onSaved}>
-              ↻
-            </button>
           </div>
           <input
             className="file-search"
@@ -320,9 +223,6 @@ export default memo(function FileBrowser({
                   {entry.kind === "directory" ? (expanded.has(entry.path) ? "▾" : "▸") : "·"}
                 </span>
                 <span>{entry.name}</span>
-                {buffers[entry.path]?.draft !== buffers[entry.path]?.saved && (
-                  <small title="Unsaved edits">●</small>
-                )}
                 {changes.find((change) => change.path === entry.path) && (
                   <small className="git-file-status">
                     {changes.find((change) => change.path === entry.path)?.status.trim()}
@@ -342,40 +242,8 @@ export default memo(function FileBrowser({
           {!query.trim() && !loading && !directories["."]?.length && !error && (
             <p className="empty-small">This folder is empty</p>
           )}
-          {Object.entries(buffers).some(([, value]) => value.draft !== value.saved) && (
-            <div className="unsaved-files">
-              <small>Unsaved files</small>
-              {Object.entries(buffers)
-                .filter(([, value]) => value.draft !== value.saved)
-                .map(([path]) => (
-                  <button
-                    key={path}
-                    onClick={() => {
-                      void preview(path);
-                      setEditing(true);
-                    }}
-                  >
-                    ● {path}
-                  </button>
-                ))}
-            </div>
-          )}
           <p className="file-browser-note">Dependencies and Git metadata are hidden.</p>
         </>
-      )}
-      {reloadPrompt && (
-        <div className="inline-confirm" role="alertdialog" aria-label="Discard unsaved edits?">
-          <p>Reloading will discard your unsaved edits to this file.</p>
-          <button onClick={() => setReloadPrompt(false)}>Keep editing</button>
-          <button
-            onClick={() => {
-              setReloadPrompt(false);
-              if (selected) void preview(selected, true);
-            }}
-          >
-            Discard and reload
-          </button>
-        </div>
       )}
     </section>
   );

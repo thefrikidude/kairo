@@ -290,12 +290,12 @@ async function run() {
   );
   await waitFor("document.querySelector('.diff-scroll')?.textContent.includes('Isolated agent')");
   await capture("terminal-review-dark.png");
-  await button("Open file");
-  await waitFor("document.querySelector('[aria-label=\"Preview of proof-b.txt\"]')");
-  await button("Edit");
-  await input(".code-editor", "Edited in Kairo\n");
-  await button("Save", "document.querySelector('.file-browser')");
-  await waitFor("document.querySelector('.file-browser [role=status]')?.textContent==='Saved'");
+  assert.equal(
+    await evaluate(
+      "Array.from(document.querySelectorAll('.selected-diff-toolbar button')).some(b=>b.textContent==='Open in Cursor') && !document.querySelector('.code-editor')",
+    ),
+    true,
+  );
   await click(`[data-workspace-id="${first.workspaceId}"] .session`);
   await waitFor(
     `document.querySelector('.workspace-row.selected')?.dataset.workspaceId===${JSON.stringify(first.workspaceId)}`,
@@ -435,7 +435,7 @@ async function run() {
   assert.equal(await evaluate("document.activeElement?.textContent"), "Rename");
   await key("Escape");
   await waitFor("!document.querySelector('[role=menu]')");
-  // Keyboard palettes reuse workspace navigation and file editing.
+  // Keyboard palettes reuse workspace navigation and file preview.
   await key("j", ["meta"]);
   await waitFor("document.querySelector('#palette-title')");
   await input('[aria-label="Palette search"]', "Smoke isolated");
@@ -555,7 +555,6 @@ async function run() {
       isolatedWorktree: true,
       parallelNavigation: true,
       review: true,
-      editing: true,
       exactNativeResume: true,
     }),
   );

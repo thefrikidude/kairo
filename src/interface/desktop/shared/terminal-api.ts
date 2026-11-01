@@ -111,11 +111,9 @@ export interface TerminalDesktopApi {
   onTerminalClosed(listener: (event: { id: string; workspaceId: string }) => void): () => void;
   onRuntimeError(listener: (event: { error: string }) => void): () => void;
   onSessionsChanged(listener: () => void): () => void;
-  setUnsavedChanges(dirty: boolean): void;
   directory(id: string, path?: string): Promise<WorkspaceEntry[]>;
   fileSnapshot(id: string, path: string): Promise<FileSnapshot>;
   searchFiles(id: string, query: string): Promise<FileSearch>;
-  saveFile(id: string, path: string, content: string, revision: string): Promise<FileSnapshot>;
   review(id: string, scope?: ReviewScope): Promise<WorkspaceReview>;
   diff(
     id: string,

@@ -1,10 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { open, readdir, realpath, rename, unlink } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { open, readdir, realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
-export type FileSnapshot = { content: string; revision: string };
+export type FileSnapshot = { content: string };
 export type FileSearch = { paths: string[]; limited: boolean };
 export type WorkspaceEntry = { path: string; name: string; kind: "directory" | "file" };
 const hiddenDirectories = new Set([".git", "node_modules", ".next", ".cache", "coverage"]);
@@ -57,7 +56,7 @@ export class WorkspaceFiles {
       );
   }
 
-  /** Returns a complete text buffer, or refuses it; never returns silently truncated content. */
+  /** Returns a complete text file, or refuses it; never returns silently truncated content. */
   async snapshot(input: unknown): Promise<FileSnapshot> {
     const handle = await open(await this.path(input), "r");
     try {
@@ -80,7 +79,6 @@ export class WorkspaceFiles {
       try {
         return {
           content: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content),
-          revision: createHash("sha256").update(content).digest("hex"),
         };
       } catch {
         throw new Error("This file is not UTF-8 text. Open it in your editor.");
@@ -95,50 +93,6 @@ export class WorkspaceFiles {
 
   async resolveFile(input: unknown): Promise<string> {
     return this.path(input);
-  }
-
-  /** Complete-buffer revision check, then atomic replacement; reject external edits rather than overwrite them. */
-  async save(input: unknown, content: unknown, expectedRevision: unknown): Promise<FileSnapshot> {
-    if (
-      typeof content !== "string" ||
-      content.includes("\0") ||
-      Buffer.byteLength(content, "utf8") > previewLimit
-    )
-      throw new Error("Edits must be UTF-8 text no larger than 1 MB.");
-    if (typeof expectedRevision !== "string" || !/^[a-f0-9]{64}$/.test(expectedRevision))
-      throw new Error("Reload this file before saving.");
-    const target = await this.path(input);
-    const original = await this.snapshot(input);
-    if (original.revision !== expectedRevision)
-      throw new Error(
-        "This file changed outside the editor. Your edits are kept. Reload or copy your edits before trying again.",
-      );
-    const handle = await open(target, "r");
-    const metadata = await handle.stat().finally(() => handle.close());
-    if (metadata.nlink > 1)
-      throw new Error("This file has multiple hard links. Edit it in your external editor.");
-    const temporary = resolve(dirname(target), `.kairo-edit-${randomUUID()}.tmp`);
-    try {
-      const output = await open(temporary, "wx", metadata.mode & 0o777);
-      try {
-        await output.writeFile(content, "utf8");
-        await output.chmod(metadata.mode & 0o777);
-        await output.sync();
-      } finally {
-        await output.close();
-      }
-      if (
-        (await this.path(input)) !== target ||
-        (await this.snapshot(input)).revision !== expectedRevision
-      )
-        throw new Error(
-          "This file changed while saving. Your edits are kept; reload or copy them before trying again.",
-        );
-      await rename(temporary, target);
-      return { content, revision: createHash("sha256").update(content, "utf8").digest("hex") };
-    } finally {
-      await unlink(temporary).catch(() => {});
-    }
   }
 
   /** Filename search runs on explicit queries only, with a Git fast path and bounded folder fallback. */

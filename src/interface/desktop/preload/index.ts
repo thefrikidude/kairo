@@ -54,7 +54,6 @@ const api: DesktopApi = {
   directory: (id, path) => invoke("workspace:directory", id, path),
   fileSnapshot: (id, path) => invoke("workspace:snapshot", id, path),
   searchFiles: (id, query) => invoke("workspace:search", id, query),
-  saveFile: (id, path, content, revision) => invoke("workspace:write", id, path, content, revision),
   review: (id, scope) => invoke("workspace:review", id, scope),
   diff: (id, path, scope) => invoke("workspace:diff", id, path, scope),
   openInCursor: (id, path) => invoke("workspace:open-cursor", id, path),
@@ -63,7 +62,6 @@ const api: DesktopApi = {
   onTerminalClosed: (listener) => subscribe("terminal:closed", listener),
   onRuntimeError: (listener) => subscribe("runtime:error", listener),
   onSessionsChanged: (listener) => subscribe("sessions:changed", listener),
-  setUnsavedChanges: (dirty) => ipcRenderer.send("workspace:unsaved", dirty),
 };
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {

@@ -388,7 +388,7 @@ export async function createTerminalDesktopRuntime(
     return closePromise;
   }
   async function handle(request: TerminalDesktopRequest): Promise<unknown> {
-    const [first, second, third, fourth] = request.args;
+    const [first, second, third] = request.args;
     switch (request.method) {
       case "bootstrap":
         return snapshot(first === true);
@@ -657,12 +657,6 @@ export async function createTerminalDesktopRuntime(
         return (await WorkspaceFiles.create(associatedWorkspace(first).directory)).snapshot(second);
       case "workspace:search":
         return (await WorkspaceFiles.create(associatedWorkspace(first).directory)).search(second);
-      case "workspace:write":
-        return (await WorkspaceFiles.create(associatedWorkspace(first).directory)).save(
-          second,
-          third,
-          fourth,
-        );
       case "workspace:review": {
         const target = associatedWorkspace(first);
         const scope = second === "task" ? "task" : "working";

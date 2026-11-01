@@ -18,7 +18,6 @@ const appRoot = process.cwd();
 const appIconPath = join(appRoot, "src/interface/desktop/assets/kairo-icon.png");
 let mainWindow: BrowserWindow | undefined;
 let backend: ChildProcessWithoutNullStreams | undefined;
-let unsavedChanges = false;
 let backendReady: Promise<void>;
 let nextRequestId = 0;
 const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
@@ -105,10 +104,6 @@ async function request<T>(method: string, args: unknown[] = []): Promise<T> {
 }
 
 function registerIpc(): void {
-  ipcMain.on("workspace:unsaved", (event, dirty: unknown) => {
-    assertTrusted(event);
-    if (typeof dirty === "boolean") unsavedChanges = dirty;
-  });
   const handle = (channel: string, method: string) =>
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       assertTrusted(event);
@@ -168,7 +163,6 @@ function registerIpc(): void {
   handle("workspace:directory", "workspace:directory");
   handle("workspace:snapshot", "workspace:snapshot");
   handle("workspace:search", "workspace:search");
-  handle("workspace:write", "workspace:write");
   handle("workspace:review", "workspace:review");
   handle("workspace:diff", "workspace:diff");
   ipcMain.handle("agents:homepage", async (event, agentId: unknown) => {
@@ -191,22 +185,6 @@ function registerIpc(): void {
   });
 }
 
-function confirmUnsavedChanges(): boolean {
-  if (!unsavedChanges || !mainWindow || mainWindow.isDestroyed()) return true;
-  const choice = dialog.showMessageBoxSync(mainWindow, {
-    type: "warning",
-    title: "Unsaved file edits",
-    message: "You have unsaved file edits.",
-    detail: "Save or copy them before quitting, or discard them to close Kairo.",
-    buttons: ["Keep editing", "Discard and quit"],
-    defaultId: 0,
-    cancelId: 0,
-  });
-  if (choice !== 1) return false;
-  unsavedChanges = false;
-  return true;
-}
-
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -221,9 +199,6 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: true,
     },
-  });
-  mainWindow.on("close", (event) => {
-    if (!confirmUnsavedChanges()) event.preventDefault();
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   const devUrl = process.env.ELECTRON_RENDERER_URL;
@@ -265,10 +240,6 @@ app.on("window-all-closed", () => {
 let backendShutdownComplete = false;
 let backendShutdownStarted = false;
 app.on("before-quit", (event) => {
-  if (!backendShutdownStarted && !confirmUnsavedChanges()) {
-    event.preventDefault();
-    return;
-  }
   if (backendShutdownComplete || !backend) return;
   event.preventDefault();
   if (backendShutdownStarted) return;
