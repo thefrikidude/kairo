@@ -111,7 +111,7 @@ export class GitWorkspaces {
 
   async refs(requested: string, saved?: string, refresh = false): Promise<ProjectRefs> {
     const project = await this.describe(requested);
-    if (project.kind === "folder") return { git: false, refs: [], defaultRef: "" };
+    if (project.kind === "folder") return { git: false, refs: [], defaultRef: "", envFiles: [] };
     if (refresh)
       await this.serialize(project.repositoryPath, () =>
         command(project.repositoryPath, ["fetch", "--all", "--prune"]),
@@ -159,7 +159,30 @@ export class GitWorkspaces {
       defaultRef ||= (await this.describe(project.repositoryPath)).branch || "HEAD";
       await command(project.repositoryPath, ["rev-parse", "--verify", `${defaultRef}^{commit}`]);
     }
-    return { git: true, refs: refs.slice(0, 2000), defaultRef };
+    return {
+      git: true,
+      refs: refs.slice(0, 2000),
+      defaultRef,
+      envFiles: await this.ignoredEnvFiles(project.repositoryPath),
+    };
+  }
+
+  /** Only ignored files qualify: tracked ones already arrive with the worktree. */
+  private async ignoredEnvFiles(repositoryPath: string): Promise<string[]> {
+    try {
+      const output = await command(repositoryPath, [
+        "ls-files",
+        "-z",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--",
+        ":(glob).env*",
+      ]);
+      return output.split("\0").filter(Boolean).sort().slice(0, 20);
+    } catch {
+      return [];
+    }
   }
 
   async plan(

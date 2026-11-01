@@ -58,7 +58,13 @@ export type WorkspaceOperation = {
   error?: string;
   createdAt: number;
 };
-export type ProjectRefs = { refs: string[]; defaultRef: string; git: boolean };
+export type ProjectRefs = {
+  refs: string[];
+  defaultRef: string;
+  git: boolean;
+  /** Ignored top-level `.env*` files a new worktree would otherwise be missing. */
+  envFiles: string[];
+};
 
 export type WorkspaceOperationSummary = Omit<
   WorkspaceOperation,
