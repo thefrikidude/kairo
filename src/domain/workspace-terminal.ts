@@ -1,3 +1,8 @@
+/**
+ * Best-effort view of what a terminal is doing, inferred from its output: `working` while output
+ * is flowing, `waiting` when it went quiet on an approval-style prompt, otherwise `idle`.
+ */
+export type TerminalActivity = "working" | "waiting" | "idle";
 /** A live PTY belongs to a workspace; agent PTYs also identify their durable session. */
 export type WorkspaceTerminal = {
   id: string;
@@ -7,6 +12,7 @@ export type WorkspaceTerminal = {
   title: string;
   pid: number;
   state: "running" | "exited";
+  activity: TerminalActivity;
   columns: number;
   rows: number;
   exitCode?: number;

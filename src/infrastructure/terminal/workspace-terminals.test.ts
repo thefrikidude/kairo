@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { access, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkspaceTerminals } from "./workspace-terminals.js";
+import { WorkspaceTerminals, asksForInput } from "./workspace-terminals.js";
 import { terminalProcesses } from "./terminal-processes.js";
 import type { TerminalData } from "../../domain/workspace-terminal.js";
 
@@ -240,4 +240,43 @@ test("shell prompts show the full current directory and follow cd", async (t) =>
   const parent = root.slice(0, root.lastIndexOf("/"));
   service.input(terminal.id, "cd ..\r");
   await waitUntil(() => service.attach(terminal.id).buffer.includes(`${parent} % `));
+});
+
+test("activity follows output, flags approval prompts and ignores keystroke echo", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-activity-")));
+  const service = new WorkspaceTerminals(() => {}, {
+    shell: "/bin/zsh",
+    args: ["-f"],
+    env: { PS1: "KAIRO_READY> " },
+    quietMs: 300,
+  });
+  t.after(async () => {
+    await service.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const terminal = await service.create("activity", root);
+  const activity = () => service.list("activity")[0].activity;
+  await waitUntil(() => service.attach(terminal.id).buffer.includes("KAIRO_READY>"));
+  // Shell startup output and typed characters are not "work".
+  await new Promise((done) => setTimeout(done, 1_700));
+  assert.equal(activity(), "idle");
+  service.input(terminal.id, "sleep 0.7; printf 'Proceed? [y/N] '; sleep 30\r");
+  await new Promise((done) => setTimeout(done, 250));
+  assert.equal(activity(), "idle", "echo of the typed command is not activity");
+  await waitUntil(() => activity() === "working");
+  await waitUntil(() => activity() === "waiting");
+  service.input(terminal.id, "\x03");
+  assert.equal(activity(), "working", "answering a prompt hands control back");
+  await waitUntil(() => activity() === "idle");
+});
+
+test("approval prompts are recognised from the visible tail, not scrollback", () => {
+  assert.equal(
+    asksForInput("Edit file?\n\u001b[1mDo you want to proceed?\u001b[0m\n❯ 1. Yes\n  2. No"),
+    true,
+  );
+  assert.equal(asksForInput("Overwrite existing file? (y/n) "), true);
+  assert.equal(asksForInput("Compiling…\n42 tests passed\n"), false);
+  assert.equal(asksForInput("Do you want to proceed?\n" + "line\n".repeat(10)), false);
+  assert.equal(asksForInput(""), false);
 });

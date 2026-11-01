@@ -10,6 +10,7 @@ const shell: WorkspaceTerminal = {
   title: "Shell",
   pid: 1,
   state: "running",
+  activity: "idle",
   columns: 80,
   rows: 24,
 };

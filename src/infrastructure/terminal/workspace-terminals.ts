@@ -30,11 +30,36 @@ type Record = {
   resolveExit(): void;
   disposers: { dispose(): void }[];
   paused: boolean;
+  startedAt: number;
+  lastInputAt: number;
+  /** Output since the last keystroke; an answered prompt must not count as still waiting. */
+  sinceInput: string;
+  activityTimer?: ReturnType<typeof setTimeout>;
   cleanupFailed: boolean;
   remainingProcesses: TerminalProcess[];
 };
 const scrollbackLimit = 128_000;
 const flowLimit = 128_000;
+// Output this soon after a keystroke is the terminal echoing it, not an agent working.
+const echoWindowMs = 400;
+// A fresh plain shell prints its prompt and profile output; that is not work either.
+const shellStartupMs = 1_500;
+const defaultQuietMs = 2_000;
+const waitingPrompt =
+  /(\[y\/n\]|\(y\/n\)|\[y\/N\]|\[Y\/n\]|\(Y\/n\)|\byes\/no\b|do you want to (proceed|continue|allow|make|create|run)|\ballow (this|once|always)|press (enter|any key)|waiting for (your )?(input|approval|confirmation)|\bapprove\b|\bcontinue\?)/i;
+// eslint-disable-next-line no-control-regex
+const ansi = /\x1b(?:\[[0-?]*[ -\/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g;
+
+/** True when the visible tail of the output looks like the program is asking the user to decide. */
+export function asksForInput(buffer: string): boolean {
+  const lines = buffer
+    .slice(-2_000)
+    .replace(ansi, "")
+    .split(/\r?\n|\r/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return waitingPrompt.test(lines.slice(-4).join("\n"));
+}
 
 /** Quote literal argv for an interactive Unix shell, never interpret agent arguments as code. */
 function startupCommand(launch: TerminalLaunch): string {
@@ -55,7 +80,12 @@ export class WorkspaceTerminals {
   private pendingCreates = new Set<Promise<WorkspaceTerminal>>();
   constructor(
     private readonly emit: (event: string, payload: unknown) => void,
-    private readonly options: { shell?: string; args?: string[]; env?: NodeJS.ProcessEnv } = {},
+    private readonly options: {
+      shell?: string;
+      args?: string[];
+      env?: NodeJS.ProcessEnv;
+      quietMs?: number;
+    } = {},
   ) {}
   beginClose(): void {
     this.closed = true;
@@ -156,6 +186,7 @@ export class WorkspaceTerminals {
         sessionId: launch?.sessionId,
         pid: pty.pid,
         state: "running",
+        activity: "idle",
         columns: 80,
         rows: 24,
       },
@@ -171,6 +202,9 @@ export class WorkspaceTerminals {
       resolveExit,
       disposers: [],
       paused: false,
+      startedAt: Date.now(),
+      lastInputAt: 0,
+      sinceInput: "",
       cleanupFailed: false,
       remainingProcesses: [],
     };
@@ -178,6 +212,8 @@ export class WorkspaceTerminals {
     record.disposers.push(
       pty.onData((data) => {
         record.buffer = (record.buffer + data).slice(-scrollbackLimit);
+        record.sinceInput = (record.sinceInput + data).slice(-2_000);
+        this.noteOutput(record);
         if (record.subscribed) {
           record.queued += data;
           if (record.queued.length >= 64_000) this.flush(record);
@@ -186,6 +222,8 @@ export class WorkspaceTerminals {
       }),
       pty.onExit(({ exitCode }) => {
         this.flush(record);
+        clearTimeout(record.activityTimer);
+        record.info.activity = "idle";
         record.info.state = "exited";
         record.info.exitCode = exitCode;
         record.resolveExit();
@@ -206,6 +244,25 @@ export class WorkspaceTerminals {
     if (prompt || command) pty.write(`${prompt}${command ?? ""}\r`);
     this.emit("terminal:state", { ...record.info });
     return { ...record.info };
+  }
+  private noteOutput(record: Record): void {
+    const now = Date.now();
+    if (now - record.lastInputAt < echoWindowMs) return;
+    if (!record.info.sessionId && now - record.startedAt < shellStartupMs) return;
+    this.setActivity(record, "working");
+    this.settleWhenQuiet(record);
+  }
+  private settleWhenQuiet(record: Record): void {
+    clearTimeout(record.activityTimer);
+    record.activityTimer = setTimeout(() => {
+      if (record.info.state !== "running") return;
+      this.setActivity(record, asksForInput(record.sinceInput) ? "waiting" : "idle");
+    }, this.options.quietMs ?? defaultQuietMs);
+  }
+  private setActivity(record: Record, activity: WorkspaceTerminal["activity"]): void {
+    if (record.info.activity === activity) return;
+    record.info.activity = activity;
+    this.emit("terminal:state", { ...record.info });
   }
   private get(id: string): Record {
     const record = this.records.get(id);
@@ -284,6 +341,13 @@ export class WorkspaceTerminals {
       throw new Error("This terminal has exited. Open a new terminal.");
     if (typeof data !== "string" || data.length > 32_000)
       throw new Error("Terminal input must contain at most 32,000 characters.");
+    record.lastInputAt = Date.now();
+    record.sinceInput = "";
+    // Answering a prompt hands control back to the program, so stop showing "waiting".
+    if (record.info.activity === "waiting") {
+      this.setActivity(record, "working");
+      this.settleWhenQuiet(record);
+    }
     record.pty.write(data);
   }
   resize(id: string, columns: unknown, rows: unknown): void {
@@ -312,6 +376,7 @@ export class WorkspaceTerminals {
     if (record.closing) return record.closing;
     const closing = (async () => {
       this.detach(id);
+      clearTimeout(record.activityTimer);
       try {
         if (record.remainingProcesses.length) {
           const current = await terminalProcesses();
