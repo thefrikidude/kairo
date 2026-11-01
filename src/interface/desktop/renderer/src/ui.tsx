@@ -14,6 +14,7 @@ import { ContextMenu, type ContextAction, type ContextMenuState } from "./contex
 const AgentTerminals = lazy(() => import("./agent-terminals.js"));
 const FileBrowser = lazy(() => import("./file-browser.js"));
 const ReviewPanel = lazy(() => import("./review-panel.js"));
+const MapPanel = lazy(() => import("./map-panel.js"));
 type ThemeChoice = "system" | "dark" | "light";
 const activityLabel = {
   working: "Working",
@@ -65,7 +66,8 @@ export function DesktopApp(): React.JSX.Element {
     storedNumber("kairo-context-width", 420, 300, 800),
   );
   const [contextOpen, setContextOpen] = useState(false);
-  const [contextTab, setContextTab] = useState<"files" | "changes">("changes");
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [contextTab, setContextTab] = useState<"files" | "changes" | "map">("changes");
   const [shellId, setShellId] = useState<string>();
   const [creatingShell, setCreatingShell] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -420,12 +422,13 @@ export function DesktopApp(): React.JSX.Element {
         !(event.target instanceof Element && event.target.closest(".terminal-view"))
       ) {
         if (settings) setSettings(false);
+        else if (mapExpanded) setMapExpanded(false);
         else if (contextOpen) setContextOpen(false);
       }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [beginSession, settings, contextOpen, workspace?.id, creatingShell]);
+  }, [beginSession, settings, contextOpen, mapExpanded, workspace?.id, creatingShell]);
   const create = async () => {
     setPending(true);
     setError("");
@@ -1168,8 +1171,12 @@ export function DesktopApp(): React.JSX.Element {
       )}
 
       {contextOpen && !settings && accessId && workspace && (
-        <aside className="workbench" id="workspace-panel" aria-label="Workspace files and review">
-          {resizeHandle("context")}
+        <aside
+          className={`workbench${mapExpanded && contextTab === "map" ? " is-expanded" : ""}`}
+          id="workspace-panel"
+          aria-label="Workspace files and review"
+        >
+          {!(mapExpanded && contextTab === "map") && resizeHandle("context")}
           <header className="workbench-header">
             <div
               className="context-tab-list"
@@ -1177,15 +1184,18 @@ export function DesktopApp(): React.JSX.Element {
               aria-label="Workspace tabs"
               onKeyDown={navigateTabs}
             >
-              {(["files", "changes"] as const).map((tab) => (
+              {(["files", "changes", "map"] as const).map((tab) => (
                 <button
                   key={tab}
                   role="tab"
                   tabIndex={contextTab === tab ? 0 : -1}
                   aria-selected={contextTab === tab}
-                  onClick={() => setContextTab(tab)}
+                  onClick={() => {
+                    setContextTab(tab);
+                    setMapExpanded(false);
+                  }}
                 >
-                  {tab === "files" ? "Files" : "Review"}
+                  {tab === "files" ? "Files" : tab === "changes" ? "Review" : "Map"}
                 </button>
               ))}
             </div>
@@ -1205,6 +1215,28 @@ export function DesktopApp(): React.JSX.Element {
                 changes={overview?.changes ?? []}
                 revision={revision}
                 target={target?.workspaceId === workspace.id ? target : undefined}
+              />
+            ) : contextTab === "map" ? (
+              <MapPanel
+                key={workspace.id}
+                sessionId={accessId}
+                workspaceId={workspace.id}
+                scope={scope}
+                canReviewTask={!!workspace.baseCommit}
+                onScope={setScope}
+                wide={mapExpanded}
+                expanded={mapExpanded}
+                onToggleExpand={() => setMapExpanded((value) => !value)}
+                onOpenWindow={() => {
+                  setMapExpanded(false);
+                  return window.kairo.openMapWindow({
+                    sessionId: accessId,
+                    workspaceId: workspace.id,
+                    title: workspace.name ?? workspace.branch ?? "Workspace",
+                    scope,
+                    canReviewTask: !!workspace.baseCommit,
+                  });
+                }}
               />
             ) : (
               <ReviewPanel

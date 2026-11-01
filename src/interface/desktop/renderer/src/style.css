@@ -3083,3 +3083,250 @@ button svg {
   margin: 0;
   color: var(--muted);
 }
+
+/* Change map: a treemap of changed files, shaded by churn and review state. */
+.map-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  flex: none;
+}
+.map-toolbar button,
+.map-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.map-toolbar button:hover:not(:disabled),
+.map-actions button:hover {
+  background: var(--hover);
+}
+.map-toolbar button[aria-pressed="true"],
+.map-actions button[aria-pressed="true"] {
+  background: var(--hover);
+  border-color: var(--muted);
+}
+.map-toolbar .map-next {
+  margin-left: auto;
+}
+.map-head {
+  flex: none;
+}
+.map-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.map-panel.is-wide .map-body {
+  flex-direction: row;
+}
+.map-panel.is-wide .map-canvas {
+  flex: 1 1 62%;
+  min-width: 0;
+  min-height: 0;
+}
+.map-panel.is-wide .map-detail {
+  flex: 0 1 38%;
+  min-width: 320px;
+  border-top: 0;
+  border-left: 1px solid var(--line);
+}
+/* Expanded: the workspace panel leaves the grid and covers the whole window. */
+.workbench.is-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border-left: 0;
+}
+.map-count {
+  color: var(--muted);
+}
+.map-count-approved {
+  color: var(--positive);
+}
+.map-count-flagged {
+  color: var(--warning);
+}
+.map-count-live {
+  color: var(--negative);
+}
+.map-canvas {
+  position: relative;
+  flex: 1 1 55%;
+  min-height: 180px;
+  margin: 4px 0;
+  overflow: hidden;
+}
+.map-canvas svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  font-size: 10px;
+}
+.map-canvas text {
+  fill: var(--muted);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+.graph-edge {
+  stroke: var(--line);
+  stroke-width: 1;
+  transition: opacity 0.15s;
+}
+.graph-edge.is-import {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.7;
+}
+.graph-edge.is-lit {
+  stroke: var(--strong);
+  opacity: 1;
+}
+.graph-edge.is-faded,
+.graph-dir.is-faded,
+.graph-file.is-faded {
+  opacity: 0.18;
+}
+.graph-dir circle {
+  fill: var(--bg);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+.graph-file {
+  cursor: pointer;
+  outline: none;
+}
+.graph-dot {
+  fill: color-mix(in srgb, var(--muted) 55%, var(--surface));
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  transition: opacity 0.15s;
+}
+/* Status only recolours the outline; a solid fill is reserved for review state. */
+.graph-file.is-new .graph-dot {
+  stroke: var(--positive);
+}
+.graph-file.is-deleted .graph-dot {
+  stroke: var(--negative);
+}
+.graph-file.is-approved .graph-dot {
+  fill: var(--positive);
+  stroke: var(--positive);
+}
+.graph-file.is-flagged .graph-dot {
+  fill: var(--warning);
+  stroke: var(--warning);
+}
+.graph-file.is-stale .graph-dot {
+  stroke: var(--warning);
+  stroke-dasharray: 3 2;
+}
+.graph-file.is-dim {
+  opacity: 0.35;
+}
+.graph-file:hover .graph-dot,
+.graph-file:focus-visible .graph-dot {
+  stroke: var(--strong);
+}
+.graph-file.is-selected .graph-dot {
+  stroke: var(--strong);
+  stroke-width: 3;
+}
+.graph-file.is-selected {
+  opacity: 1;
+}
+.graph-pulse {
+  fill: none;
+  stroke: var(--negative);
+  stroke-width: 2;
+  animation: graph-pulse 1.6s ease-out infinite;
+}
+@keyframes graph-pulse {
+  from {
+    opacity: 0.9;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-pulse {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+.map-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+  background: color-mix(in srgb, var(--muted) 55%, var(--surface));
+}
+.legend-dot.is-approved {
+  background: var(--positive);
+  border-color: var(--positive);
+}
+.legend-dot.is-flagged {
+  background: var(--warning);
+  border-color: var(--warning);
+}
+.legend-line {
+  width: 14px;
+  border-top: 1.5px dashed var(--muted);
+}
+.map-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 45%;
+  min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+}
+.map-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  flex: none;
+}
+.map-approve[aria-pressed="true"] {
+  color: var(--positive);
+}
+.map-flag[aria-pressed="true"] {
+  color: var(--warning);
+}
+
+.map-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}

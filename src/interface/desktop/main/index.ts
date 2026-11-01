@@ -17,6 +17,8 @@ import { backendReadiness } from "./backend-readiness.js";
 const appRoot = process.cwd();
 const appIconPath = join(appRoot, "src/interface/desktop/assets/kairo-icon.png");
 let mainWindow: BrowserWindow | undefined;
+/** Standalone map windows by workspace; they may only read changes, not drive sessions. */
+const mapWindows = new Map<string, BrowserWindow>();
 let backend: ChildProcessWithoutNullStreams | undefined;
 let backendReady: Promise<void>;
 let nextRequestId = 0;
@@ -26,12 +28,15 @@ function send(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
-function assertTrusted(event: IpcMainEvent | IpcMainInvokeEvent): void {
-  if (
-    !mainWindow ||
-    event.sender !== mainWindow.webContents ||
-    event.senderFrame !== event.sender.mainFrame
-  )
+function assertTrusted(event: IpcMainEvent | IpcMainInvokeEvent, allowMapWindows = false): void {
+  const sender = event.sender;
+  const trusted =
+    (!!mainWindow && sender === mainWindow.webContents) ||
+    (allowMapWindows &&
+      [...mapWindows.values()].some(
+        (window) => !window.isDestroyed() && window.webContents === sender,
+      ));
+  if (!trusted || event.senderFrame !== sender.mainFrame)
     throw new Error("Untrusted desktop IPC sender.");
 }
 
@@ -104,9 +109,9 @@ async function request<T>(method: string, args: unknown[] = []): Promise<T> {
 }
 
 function registerIpc(): void {
-  const handle = (channel: string, method: string) =>
+  const handle = (channel: string, method: string, allowMapWindows = false) =>
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
-      assertTrusted(event);
+      assertTrusted(event, allowMapWindows);
       return request(method, args);
     });
   handle("desktop:bootstrap", "bootstrap");
@@ -164,7 +169,12 @@ function registerIpc(): void {
   handle("workspace:snapshot", "workspace:snapshot");
   handle("workspace:search", "workspace:search");
   handle("workspace:review", "workspace:review");
-  handle("workspace:diff", "workspace:diff");
+  handle("workspace:diff", "workspace:diff", true);
+  handle("workspace:map", "workspace:map", true);
+  ipcMain.handle("map:open-window", (event, input: unknown) => {
+    assertTrusted(event);
+    openMapWindow(parseMapWindowRequest(input));
+  });
   ipcMain.handle("agents:homepage", async (event, agentId: unknown) => {
     assertTrusted(event);
     const url = new URL(await request<string>("agents:homepage", [agentId]));
@@ -172,7 +182,7 @@ function registerIpc(): void {
     await shell.openExternal(url.href);
   });
   ipcMain.handle("workspace:open-cursor", async (event, sessionId: unknown, filePath: unknown) => {
-    assertTrusted(event);
+    assertTrusted(event, true);
     if (process.platform !== "darwin")
       throw new Error("Opening changed files in Cursor is currently supported on macOS.");
     const absolutePath = await request<string>("workspace:cursor-path", [sessionId, filePath]);
@@ -185,6 +195,85 @@ function registerIpc(): void {
   });
 }
 
+const webPreferences = {
+  preload: join(appRoot, "out/preload/index.cjs"),
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+};
+
+/** Windows load only the bundled renderer (or the dev server) and never open or navigate elsewhere. */
+function loadRenderer(window: BrowserWindow, hash = ""): void {
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const devUrl = process.env.ELECTRON_RENDERER_URL;
+  const localUrl = pathToFileURL(join(appRoot, "out/renderer/index.html")).href;
+  window.webContents.on("will-navigate", (event, url) => {
+    const target = new URL(url);
+    target.hash = "";
+    if (devUrl && target.origin === new URL(devUrl).origin) return;
+    if (!devUrl && target.href === localUrl) return;
+    event.preventDefault();
+  });
+  if (devUrl) void window.loadURL(hash ? `${devUrl}#${hash}` : devUrl);
+  else void window.loadFile(join(appRoot, "out/renderer/index.html"), hash ? { hash } : undefined);
+}
+
+type MapWindowRequest = {
+  sessionId: string;
+  workspaceId: string;
+  title: string;
+  scope: "working" | "task";
+  canReviewTask: boolean;
+};
+
+function parseMapWindowRequest(input: unknown): MapWindowRequest {
+  const value = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const text = (field: unknown, limit: number): string | undefined =>
+    typeof field === "string" && field.length > 0 && field.length <= limit ? field : undefined;
+  const sessionId = text(value.sessionId, 200);
+  const workspaceId = text(value.workspaceId, 200);
+  if (!sessionId || !workspaceId) throw new Error("Choose a workspace to open the map for.");
+  return {
+    sessionId,
+    workspaceId,
+    title: typeof value.title === "string" ? value.title.slice(0, 80) : "Workspace",
+    scope: value.scope === "task" ? "task" : "working",
+    canReviewTask: value.canReviewTask === true,
+  };
+}
+
+function openMapWindow(request: MapWindowRequest): void {
+  const existing = mapWindows.get(request.workspaceId);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return;
+  }
+  const window = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 720,
+    minHeight: 520,
+    title: `Kairo Map · ${request.title}`,
+    icon: appIconPath,
+    webPreferences,
+  });
+  mapWindows.set(request.workspaceId, window);
+  window.on("page-title-updated", (event) => event.preventDefault());
+  window.on("closed", () => {
+    if (mapWindows.get(request.workspaceId) === window) mapWindows.delete(request.workspaceId);
+  });
+  loadRenderer(
+    window,
+    `map?${new URLSearchParams({
+      session: request.sessionId,
+      workspace: request.workspaceId,
+      scope: request.scope,
+      task: request.canReviewTask ? "1" : "0",
+    })}`,
+  );
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -193,25 +282,13 @@ function createWindow(): void {
     minHeight: 640,
     title: "Kairo",
     icon: appIconPath,
-    webPreferences: {
-      preload: join(appRoot, "out/preload/index.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences,
   });
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  const devUrl = process.env.ELECTRON_RENDERER_URL;
-  const localUrl = pathToFileURL(join(appRoot, "out/renderer/index.html")).href;
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (devUrl && new URL(url).origin === new URL(devUrl).origin) return;
-    if (!devUrl && url === localUrl) return;
-    event.preventDefault();
-  });
-  if (devUrl) void mainWindow.loadURL(devUrl);
-  else void mainWindow.loadFile(join(appRoot, "out/renderer/index.html"));
+  loadRenderer(mainWindow);
   mainWindow.on("closed", () => {
     mainWindow = undefined;
+    // Map windows borrow the main window's backend access, so they close with it.
+    for (const window of mapWindows.values()) if (!window.isDestroyed()) window.close();
   });
 }
 

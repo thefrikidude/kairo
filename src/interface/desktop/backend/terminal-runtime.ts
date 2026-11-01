@@ -23,6 +23,7 @@ import {
   changedFileReview,
   type ReviewScope,
 } from "../../../infrastructure/tools/workspace-review.js";
+import { workspaceMap } from "../../../infrastructure/tools/workspace-map.js";
 import type {
   TerminalSession,
   TerminalAgentInfo,
@@ -661,6 +662,14 @@ export async function createTerminalDesktopRuntime(
         const target = associatedWorkspace(first);
         const scope = second === "task" ? "task" : "working";
         return workspaceReview(target.directory, scope, target.baseCommit);
+      }
+      case "workspace:map": {
+        const target = associatedWorkspace(first);
+        return workspaceMap(
+          target.directory,
+          second === "task" ? "task" : "working",
+          target.baseCommit,
+        );
       }
       case "workspace:diff": {
         const target = associatedWorkspace(first);

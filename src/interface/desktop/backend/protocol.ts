@@ -47,6 +47,7 @@ const methods = new Set([
   "workspace:search",
   "workspace:review",
   "workspace:diff",
+  "workspace:map",
   "workspace:cursor-path",
   "shutdown",
 ]);

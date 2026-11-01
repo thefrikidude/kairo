@@ -18,7 +18,7 @@ export type WorkspaceReview = {
 };
 export type ChangedFileReview = { path: string; diff: string; unavailable?: string };
 
-async function gitOutput(
+export async function gitOutput(
   workspace: string,
   args: string[],
   allowDifference = false,

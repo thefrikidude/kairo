@@ -6,13 +6,13 @@ import type {
   WorkspaceReview,
 } from "../../../../infrastructure/tools/workspace-review.js";
 
-type Line = {
+export type Line = {
   kind: "add" | "remove" | "context" | "hunk" | "meta";
   text: string;
   oldLine?: number;
   newLine?: number;
 };
-function rows(diff: string): Line[] {
+export function rows(diff: string): Line[] {
   return parseDiff(diff).flatMap((file) =>
     file.chunks.flatMap((chunk): Line[] => [
       { kind: "hunk", text: chunk.content },
@@ -33,7 +33,7 @@ function rows(diff: string): Line[] {
     ]),
   );
 }
-function Unified({ lines }: { lines: Line[] }): React.JSX.Element {
+export function Unified({ lines }: { lines: Line[] }): React.JSX.Element {
   return (
     <VirtualRows
       rows={lines}
