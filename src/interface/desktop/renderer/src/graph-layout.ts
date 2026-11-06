@@ -69,7 +69,9 @@ export function buildGraph(files: GraphInput[], links: GraphLink[]): Graph {
 }
 
 /** Folder membership pulls tight; imports are longer so related files cluster without collapsing. */
-const restLength = { tree: 48, import: 84 };
+const restLength = { tree: 62, import: 96 };
+/** No vertex may move further than this per step, so one bad force cannot throw the layout away. */
+const maxSpeed = 40;
 
 /**
  * Deterministic force layout. Passing the previous positions keeps the picture stable while the
@@ -105,6 +107,13 @@ export function layoutGraph(
     b: index.get(edge.target)!,
     length: restLength[edge.kind],
   }));
+  // A folder with hundreds of files would otherwise get hundreds of springs' worth of stiffness
+  // and diverge, so each spring is weakened by the busier end and moves the lighter end more.
+  const degree = new Uint32Array(count);
+  for (const { a, b } of pairs) {
+    degree[a] += 1;
+    degree[b] += 1;
+  }
   for (let step = 0; step < iterations; step += 1) {
     const alpha = Math.max(0.03, 1 - step / iterations);
     for (let i = 0; i < count; i += 1)
@@ -128,20 +137,68 @@ export function layoutGraph(
       const dx = x[b] - x[a];
       const dy = y[b] - y[a];
       const distance = Math.sqrt(dx * dx + dy * dy) || 1;
-      const pull = ((distance - length) / distance) * 0.12;
-      vx[a] += dx * pull;
-      vy[a] += dy * pull;
-      vx[b] -= dx * pull;
-      vy[b] -= dy * pull;
+      const pull = ((distance - length) / distance) * (0.3 / Math.min(degree[a], degree[b]));
+      const share = degree[a] + degree[b];
+      vx[a] += dx * pull * (degree[b] / share);
+      vy[a] += dy * pull * (degree[b] / share);
+      vx[b] -= dx * pull * (degree[a] / share);
+      vy[b] -= dy * pull * (degree[a] / share);
     }
     for (let i = 0; i < count; i += 1) {
       vx[i] = (vx[i] - x[i] * 0.012) * 0.62;
       vy[i] = (vy[i] - y[i] * 0.012) * 0.62;
+      const speed = Math.hypot(vx[i], vy[i]);
+      if (speed > maxSpeed) {
+        vx[i] = (vx[i] / speed) * maxSpeed;
+        vy[i] = (vy[i] / speed) * maxSpeed;
+      }
       x[i] += vx[i];
       y[i] += vy[i];
     }
   }
-  return new Map(graph.vertices.map((vertex, at) => [vertex.id, { x: x[at], y: y[at] }]));
+  const finite = x.every(Number.isFinite) && y.every(Number.isFinite);
+  // Never hand non-finite coordinates to the renderer; a spiral is a readable fallback.
+  return new Map(
+    graph.vertices.map((vertex, at) => {
+      if (finite) return [vertex.id, { x: x[at], y: y[at] }];
+      const angle = at * 2.399963;
+      const radius = 28 * Math.sqrt(at + 1);
+      return [vertex.id, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }];
+    }),
+  );
+}
+
+/**
+ * Fits a graph to a canvas of the given pixel size without changing text size: a small graph has
+ * its nodes spread apart (at most `maxSpread` times) to use the room, and only a graph that is
+ * still too big is shrunk. Coordinates should be multiplied by `spread` before drawing.
+ */
+export function fitGraph(
+  bounds: { x: number; y: number; width: number; height: number },
+  canvas: { width: number; height: number },
+  maxSpread = 2.5,
+): { spread: number; view: { x: number; y: number; width: number; height: number } } {
+  if (canvas.width <= 0 || canvas.height <= 0) return { spread: 1, view: bounds };
+  const spread = Math.max(
+    1,
+    Math.min(maxSpread, canvas.width / bounds.width, canvas.height / bounds.height),
+  );
+  const zoom = Math.min(
+    1,
+    canvas.width / (bounds.width * spread),
+    canvas.height / (bounds.height * spread),
+  );
+  const width = canvas.width / zoom;
+  const height = canvas.height / zoom;
+  return {
+    spread,
+    view: {
+      x: (bounds.x + bounds.width / 2) * spread - width / 2,
+      y: (bounds.y + bounds.height / 2) * spread - height / 2,
+      width,
+      height,
+    },
+  };
 }
 
 /** A viewBox that frames every vertex; labels are wider than they are tall, so x gets more room. */

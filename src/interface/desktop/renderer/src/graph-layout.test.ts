@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildGraph, layoutGraph } from "./graph-layout.js";
+import { buildGraph, fitGraph, layoutGraph } from "./graph-layout.js";
 
 test("hangs files off folders and elides single-child folder chains", () => {
   const graph = buildGraph(
@@ -55,4 +55,59 @@ test("warm layouts stay near the previous picture", () => {
     const moved = after.get(id)!;
     assert.ok(Math.hypot(point.x - moved.x, point.y - moved.y) < 40);
   }
+});
+
+test("a folder with hundreds of files lays out finite and compact", () => {
+  const files = Array.from({ length: 400 }, (_, index) => ({ path: `bulk/file-${index}.txt` }));
+  const links = Array.from({ length: 60 }, (_, index) => ({
+    from: `bulk/file-${index}.txt`,
+    to: `bulk/file-${index + 1}.txt`,
+  }));
+  const positions = layoutGraph(buildGraph(files, links));
+  assert.equal(positions.size, 402);
+  let farthest = 0;
+  for (const point of positions.values()) {
+    assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
+    farthest = Math.max(farthest, Math.hypot(point.x, point.y));
+  }
+  assert.ok(farthest < 3_000, `layout spread to ${farthest}`);
+});
+
+test("warm layouts with many new files stay finite", () => {
+  const first = buildGraph(
+    Array.from({ length: 5 }, (_, index) => ({ path: `a/${index}.ts` })),
+    [],
+  );
+  const before = layoutGraph(first);
+  const second = buildGraph(
+    Array.from({ length: 300 }, (_, index) => ({ path: `a/${index}.ts` })),
+    [],
+  );
+  for (const point of layoutGraph(second, before).values())
+    assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
+});
+
+test("a small graph is spread out to use the canvas while text stays 1:1", () => {
+  const { spread, view } = fitGraph(
+    { x: -50, y: -40, width: 100, height: 80 },
+    { width: 1000, height: 800 },
+  );
+  assert.equal(spread, 2.5);
+  assert.equal(view.width, 1000);
+  assert.equal(view.height, 800);
+  assert.ok(Math.abs(view.x + view.width / 2) < 1e-6 && Math.abs(view.y + view.height / 2) < 1e-6);
+});
+
+test("a graph that fills the canvas is not spread, and one that overflows is shrunk", () => {
+  const exact = fitGraph({ x: 0, y: 0, width: 800, height: 600 }, { width: 800, height: 600 });
+  assert.equal(exact.spread, 1);
+  assert.equal(exact.view.width, 800);
+  const big = fitGraph({ x: 0, y: 0, width: 4000, height: 1000 }, { width: 800, height: 600 });
+  assert.equal(big.spread, 1);
+  assert.equal(big.view.width, 4000);
+  assert.ok(big.view.height >= 1000);
+  assert.deepEqual(fitGraph({ x: 0, y: 0, width: 10, height: 10 }, { width: 0, height: 0 }), {
+    spread: 1,
+    view: { x: 0, y: 0, width: 10, height: 10 },
+  });
 });

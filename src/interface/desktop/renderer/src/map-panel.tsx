@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapNode, ReviewScope, WorkspaceMap } from "../../shared/api.js";
 import { rows, Unified } from "./review-panel.js";
-import { buildGraph, frame, layoutGraph, type Point } from "./graph-layout.js";
+import { buildGraph, fitGraph, frame, layoutGraph, type Point } from "./graph-layout.js";
 import {
   churn,
   fingerprint,
@@ -17,6 +17,8 @@ import {
 
 /** Below this many files every label is drawn; beyond it only the ones that matter. */
 const labelAllLimit = 30;
+/** After a burst of writes every file is "just edited"; only the freshest few get the emphasis. */
+const maxLive = 12;
 
 export default memo(function MapPanel({
   sessionId,
@@ -49,6 +51,21 @@ export default memo(function MapPanel({
   const [patch, setPatch] = useState<{ diff: string; unavailable?: string }>();
   const [patchError, setPatchError] = useState("");
   const positions = useRef<Map<string, Point>>(new Map());
+  const canvas = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const hasCanvas = !!map?.nodes.length;
+  useEffect(() => {
+    const element = canvas.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) =>
+      setCanvasSize({
+        width: Math.floor(entry.contentRect.width),
+        height: Math.floor(entry.contentRect.height),
+      }),
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasCanvas]);
 
   useEffect(() => {
     let disposed = false,
@@ -107,6 +124,11 @@ export default memo(function MapPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structure]);
 
+  const fit = useMemo(() => fitGraph(view, canvasSize), [view, canvasSize]);
+  const spaced = (id: string): Point | undefined => {
+    const point = placed.get(id);
+    return point && { x: point.x * fit.spread, y: point.y * fit.spread };
+  };
   const current = selected ? byPath.get(selected) : undefined;
   const currentFingerprint = current ? fingerprint(current) : undefined;
   const focus = selected ? `file:${selected}` : hovered;
@@ -163,6 +185,19 @@ export default memo(function MapPanel({
   );
   const agentNames = (node: MapNode) =>
     (node.sessions ?? []).map((id) => titles.get(id) ?? "Agent");
+  const liveSet = useMemo(
+    () =>
+      new Set(
+        map
+          ? nodes
+              .filter((node) => isLive(node, map.now))
+              .sort((a, b) => b.mtimeMs - a.mtimeMs)
+              .slice(0, maxLive)
+              .map((node) => node.path)
+          : [],
+      ),
+    [map, nodes],
+  );
   const counts = { unreviewed: 0, approved: 0, flagged: 0, live: 0, contested: 0 };
   for (const node of nodes) {
     const state = nodeState(node, marks[node.path]);
@@ -260,9 +295,9 @@ export default memo(function MapPanel({
       </div>
       <div className="map-body">
         {nodes.length > 0 && (
-          <div className="map-canvas">
+          <div className="map-canvas" ref={canvas}>
             <svg
-              viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+              viewBox={`${fit.view.x} ${fit.view.y} ${fit.view.width} ${fit.view.height}`}
               preserveAspectRatio="xMidYMid meet"
               role="group"
               aria-label={`Change graph: ${nodes.length} changed files, ${importCount} import links`}
@@ -270,8 +305,8 @@ export default memo(function MapPanel({
             >
               <g className="graph-edges">
                 {graph.edges.map((edge) => {
-                  const from = placed.get(edge.source);
-                  const to = placed.get(edge.target);
+                  const from = spaced(edge.source);
+                  const to = spaced(edge.target);
                   if (!from || !to) return null;
                   const lit = focus && neighbours.has(edge.source) && neighbours.has(edge.target);
                   return (
@@ -288,7 +323,7 @@ export default memo(function MapPanel({
               </g>
               <g>
                 {graph.vertices.map((vertex) => {
-                  const point = placed.get(vertex.id);
+                  const point = spaced(vertex.id);
                   if (!point) return null;
                   const faded = !!focus && !neighbours.has(vertex.id);
                   if (vertex.kind === "dir")
@@ -305,7 +340,7 @@ export default memo(function MapPanel({
                   const node = byPath.get(vertex.path);
                   if (!node) return null;
                   const state = nodeState(node, marks[node.path]);
-                  const live = !!map && isLive(node, map.now);
+                  const live = liveSet.has(node.path);
                   const dim = onlyPending && state === "approved";
                   const radius = 6 + churn(node) * 11;
                   const chosen = selected === node.path;
