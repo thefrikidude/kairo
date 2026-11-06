@@ -31,6 +31,7 @@ import type {
 import type {
   MapLink,
   MapNode,
+  MapSession,
   WorkspaceMap,
 } from "../../../infrastructure/tools/workspace-map.js";
 
@@ -52,6 +53,7 @@ export type {
   WorkspaceEntry,
   MapLink,
   MapNode,
+  MapSession,
   WorkspaceMap,
 };
 export type { ProjectPreferences, WorkspaceCreation, WorkspaceOperation, ProjectRefs };

@@ -111,6 +111,8 @@ export function DesktopApp(): React.JSX.Element {
     : undefined;
   const activeTerminalId = selectedShell?.id ?? currentTerminal?.id;
   const projectTabs = state?.terminals.filter((t) => t.workspaceId === workspace?.id) ?? [];
+  // Agents running in one checkout share its files, so their edits can collide.
+  const runningAgents = projectTabs.filter((t) => t.sessionId && t.state === "running").length;
   const stoppedSessions =
     state?.sessions.filter(
       (s) => s.workspaceId === workspace?.id && !projectTabs.some((t) => t.sessionId === s.id),
@@ -825,6 +827,15 @@ export function DesktopApp(): React.JSX.Element {
               <strong className="workspace-heading">
                 {operationId ? operation?.name : (workspace?.name ?? "Kairo")}
               </strong>
+              {!operationId && runningAgents > 1 && (
+                <span
+                  className="shared-chip"
+                  role="status"
+                  title="These agents edit the same files. Use a separate workspace to keep their changes apart."
+                >
+                  {runningAgents} agents share these files
+                </span>
+              )}
               <div
                 className="terminal-tabs"
                 role="tablist"
@@ -1304,6 +1315,23 @@ export function DesktopApp(): React.JSX.Element {
               New agent tab in {workspace?.name}. Files and Git state are shared with this
               workspace’s other tabs.
             </p>
+            {runningAgents > 0 && workspace && (
+              <div className="shared-warning" role="note">
+                <p>
+                  {runningAgents === 1 ? "An agent is" : `${runningAgents} agents are`} already
+                  running here. Agents in the same workspace edit the same files, and Kairo cannot
+                  stop one from overwriting the other.
+                </p>
+                <button
+                  onClick={() => {
+                    setNewOpen(false);
+                    setWorkspaceDialog(workspace.repositoryPath);
+                  }}
+                >
+                  Use a separate workspace instead
+                </button>
+              </div>
+            )}
             {agentPicker}
             {error && (
               <p className="file-error" role="alert">

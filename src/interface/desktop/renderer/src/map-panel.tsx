@@ -5,6 +5,7 @@ import { buildGraph, frame, layoutGraph, type Point } from "./graph-layout.js";
 import {
   churn,
   fingerprint,
+  isContested,
   isLive,
   loadMarks,
   marksKey,
@@ -156,20 +157,30 @@ export default memo(function MapPanel({
     [workspaceId],
   );
 
-  const counts = { unreviewed: 0, approved: 0, flagged: 0, live: 0 };
+  const titles = useMemo(
+    () => new Map((map?.sessions ?? []).map((item) => [item.id, item.title])),
+    [map?.sessions],
+  );
+  const agentNames = (node: MapNode) =>
+    (node.sessions ?? []).map((id) => titles.get(id) ?? "Agent");
+  const counts = { unreviewed: 0, approved: 0, flagged: 0, live: 0, contested: 0 };
   for (const node of nodes) {
     const state = nodeState(node, marks[node.path]);
     if (state === "approved") counts.approved += 1;
     else if (state === "flagged") counts.flagged += 1;
     else counts.unreviewed += 1;
     if (map && isLive(node, map.now)) counts.live += 1;
+    if (isContested(node)) counts.contested += 1;
   }
   const lines = useMemo(() => rows(patch?.diff ?? ""), [patch?.diff]);
   const nextPending = () => {
-    const pending = nodes.filter((node) => {
-      const state = nodeState(node, marks[node.path]);
-      return state === "unreviewed" || state === "stale";
-    });
+    // Files two agents touched come first: they are the likeliest to hide a clobbered edit.
+    const pending = nodes
+      .filter((node) => {
+        const state = nodeState(node, marks[node.path]);
+        return state === "unreviewed" || state === "stale";
+      })
+      .sort((a, b) => Number(isContested(b)) - Number(isContested(a)));
     if (!pending.length) return;
     const at = pending.findIndex((node) => node.path === selected);
     setSelected(pending[(at + 1) % pending.length].path);
@@ -199,6 +210,14 @@ export default memo(function MapPanel({
           <span className="map-count map-count-approved">{counts.approved} approved</span>
           <span className="map-count map-count-flagged">{counts.flagged} flagged</span>
           {counts.live > 0 && <span className="map-count map-count-live">{counts.live} live</span>}
+          {counts.contested > 0 && (
+            <span
+              className="map-count map-count-contested"
+              title="Changed while more than one agent was working"
+            >
+              {counts.contested} contested
+            </span>
+          )}
           <button className="map-next" disabled={!counts.unreviewed} onClick={nextPending}>
             Next ›
           </button>
@@ -290,6 +309,7 @@ export default memo(function MapPanel({
                   const dim = onlyPending && state === "approved";
                   const radius = 6 + churn(node) * 11;
                   const chosen = selected === node.path;
+                  const contested = isContested(node);
                   const showLabel =
                     labelEveryFile ||
                     chosen ||
@@ -303,6 +323,7 @@ export default memo(function MapPanel({
                         "graph-file",
                         `is-${state}`,
                         live && "is-live",
+                        contested && "is-contested",
                         dim && "is-dim",
                         faded && "is-faded",
                         node.status.includes("D") && "is-deleted",
@@ -315,7 +336,7 @@ export default memo(function MapPanel({
                       role="button"
                       tabIndex={0}
                       aria-pressed={chosen}
-                      aria-label={`${node.path}, ${node.additions} added, ${node.deletions} removed, ${state}${live ? ", edited just now" : ""}`}
+                      aria-label={`${node.path}, ${node.additions} added, ${node.deletions} removed, ${state}${live ? ", edited just now" : ""}${contested ? `, contested by ${agentNames(node).join(" and ")}` : ""}`}
                       onClick={(event) => {
                         event.stopPropagation();
                         setSelected(node.path);
@@ -331,7 +352,14 @@ export default memo(function MapPanel({
                       onFocus={() => setHovered(vertex.id)}
                       onBlur={() => setHovered(undefined)}
                     >
-                      <title>{`${node.path}\n+${node.additions} −${node.deletions} · ${state}`}</title>
+                      <title>
+                        {`${node.path}\n+${node.additions} −${node.deletions} · ${state}${
+                          node.sessions?.length
+                            ? `\nChanged while working: ${agentNames(node).join(", ")}`
+                            : ""
+                        }`}
+                      </title>
+                      {contested && <circle className="graph-contested" r={radius + 5} />}
                       {live && <circle className="graph-pulse" r={radius + 4} />}
                       <circle className="graph-dot" r={radius} />
                       {showLabel && <text y={radius + 11}>{vertex.label}</text>}
@@ -345,6 +373,7 @@ export default memo(function MapPanel({
               <span className="legend-dot is-approved" /> approved
               <span className="legend-dot is-flagged" /> flagged
               <span className="legend-line" /> imports
+              <span className="legend-ring" /> contested
             </div>
           </div>
         )}
@@ -381,6 +410,18 @@ export default memo(function MapPanel({
                 Open in Cursor
               </button>
             </div>
+            {isContested(current) ? (
+              <p className="map-contested" role="note">
+                Changed while {agentNames(current).join(" and ")} were working. Either could have
+                written it, or one may have overwritten the other. Review the combined result.
+              </p>
+            ) : (
+              current.sessions?.length === 1 && (
+                <p className="diff-notice">
+                  Last changed while {agentNames(current)[0]} was working.
+                </p>
+              )
+            )}
             {nodeState(current, marks[current.path]) === "stale" && (
               <p className="diff-notice">This file changed after you reviewed it.</p>
             )}

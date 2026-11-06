@@ -16,6 +16,11 @@ export function nodeState(node: MapNode, stored?: StoredMark): NodeState {
   return stored.fingerprint === fingerprint(node) ? stored.mark : "stale";
 }
 
+/** Credited to two or more agents: they may have overwritten each other, so look closer. */
+export function isContested(node: MapNode): boolean {
+  return (node.sessions?.length ?? 0) >= 2;
+}
+
 /** Files modified moments ago are the ones an agent is most likely still editing. */
 export function isLive(node: MapNode, now: number): boolean {
   return node.mtimeMs > 0 && now - node.mtimeMs <= liveWindowMs;

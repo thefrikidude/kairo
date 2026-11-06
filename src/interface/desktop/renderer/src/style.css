@@ -3330,3 +3330,62 @@ button svg {
   height: 100vh;
   background: var(--bg);
 }
+
+.map-count-contested {
+  color: var(--warning);
+}
+.graph-contested {
+  fill: none;
+  stroke: var(--warning);
+  stroke-width: 2;
+  stroke-dasharray: 3 2;
+}
+.legend-ring {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--warning);
+}
+.map-contested {
+  margin: 0;
+  padding: 8px 12px;
+  flex: none;
+  color: var(--warning);
+  background: var(--warning-bg);
+  font-size: 12px;
+}
+
+.shared-chip {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--warning);
+  background: var(--warning-bg);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.shared-warning {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--warning);
+  background: var(--warning-bg);
+  font-size: 12px;
+}
+.shared-warning p {
+  margin: 0;
+}
+.shared-warning button {
+  padding: 4px 10px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.shared-warning button:hover {
+  background: var(--hover);
+}

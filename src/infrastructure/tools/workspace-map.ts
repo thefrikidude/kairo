@@ -10,12 +10,17 @@ export type MapNode = {
   /** Last modification time, used to show which files an agent is editing right now. */
   mtimeMs: number;
   binary?: boolean;
+  /** Agent sessions that were working when this file changed; two or more means it is contested. */
+  sessions?: string[];
 };
+export type MapSession = { id: string; title: string; agentId: string };
 /** `from` imports `to`; both are changed files in the same scope. */
 export type MapLink = { from: string; to: string };
 export type WorkspaceMap = {
   nodes: MapNode[];
   links: MapLink[];
+  /** Titles for the sessions referenced by `nodes[].sessions`. */
+  sessions?: MapSession[];
   scope: ReviewScope;
   branch?: string;
   now: number;
