@@ -2160,14 +2160,6 @@ button svg {
   padding: 12px;
   border-bottom: 1px solid var(--line);
 }
-.review-scope select {
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px;
-  min-width: 0;
-}
 .review-scope small {
   color: var(--muted);
   font-size: 11px;
@@ -2494,10 +2486,6 @@ button svg {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
-}
-.modal-actions button {
-  padding: 8px 12px;
-  border-radius: 7px;
 }
 .workbench-header {
   display: flex;

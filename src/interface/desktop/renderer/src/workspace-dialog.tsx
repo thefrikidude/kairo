@@ -7,6 +7,7 @@ import type {
   WorkspaceSelection,
 } from "../../shared/api.js";
 import { ModalFrame } from "./chrome.js";
+import { Button } from "./components/ui/button.js";
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 const envAskedKey = (project: string) => `kairo-env-copy-asked:${project}`;
@@ -300,17 +301,16 @@ export function WorkspaceDialog({
           </p>
         )}
         <div className="modal-actions">
-          <button type="button" disabled={pending} onClick={close}>
+          <Button variant="outline" type="button" disabled={pending} onClick={close}>
             Cancel
-          </button>
-          <button
-            className="primary"
+          </Button>
+          <Button
             disabled={
               pending || loading || !refs || !name.trim() || (mode === "worktree" && !base.trim())
             }
           >
             {pending ? "Creating…" : "Create workspace"}
-          </button>
+          </Button>
         </div>
       </form>
     </ModalFrame>
@@ -415,12 +415,10 @@ export function ProjectSettings({
           </p>
         )}
         <div className="modal-actions">
-          <button type="button" onClick={close} disabled={pending}>
+          <Button variant="outline" type="button" onClick={close} disabled={pending}>
             Cancel
-          </button>
-          <button className="primary" disabled={pending || !prefs}>
-            Save project setup
-          </button>
+          </Button>
+          <Button disabled={pending || !prefs}>Save project setup</Button>
         </div>
       </form>
     </ModalFrame>

@@ -1,5 +1,13 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles, type CodeViewItem, type FileDiffMetadata } from "@pierre/diffs";
+import { Button } from "./components/ui/button.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./components/ui/select.js";
 import { CodeView, type CodeViewReactOptions } from "@pierre/diffs/react";
 import type {
   ReviewScope,
@@ -255,14 +263,17 @@ export default memo(function ReviewPanel({
   return (
     <section className="review-panel">
       <div className="review-scope">
-        <select
-          aria-label="Review scope"
-          value={scope}
-          onChange={(event) => onScope(event.target.value as ReviewScope)}
-        >
-          {canReviewTask && <option value="task">Task changes · since starting commit</option>}
-          <option value="working">Working tree · staged and unstaged</option>
-        </select>
+        <Select value={scope} onValueChange={(value) => onScope(value as ReviewScope)}>
+          <SelectTrigger aria-label="Review scope" className="h-8 min-w-0 flex-1 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {canReviewTask && (
+              <SelectItem value="task">Task changes · since starting commit</SelectItem>
+            )}
+            <SelectItem value="working">Working tree · staged and unstaged</SelectItem>
+          </SelectContent>
+        </Select>
         <small>
           {overview?.branch ?? "Git changes"}
           {overview?.baseCommit ? ` · ${overview.baseCommit.slice(0, 8)}` : ""}
@@ -299,16 +310,25 @@ export default memo(function ReviewPanel({
           <small>
             {viewed.size ? `${[...viewed].filter((p) => paths.includes(p)).length} viewed` : ""}
           </small>
-          <button aria-pressed={split} onClick={() => setSplit((value) => !value)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            aria-pressed={split}
+            onClick={() => setSplit((value) => !value)}
+          >
             {split ? "Unified" : "Split"}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
             onClick={() =>
               setCollapsed(collapsed.size >= items.length ? new Set() : new Set(paths))
             }
           >
             {collapsed.size >= items.length && items.length > 0 ? "Expand all" : "Collapse all"}
-          </button>
+          </Button>
         </div>
       )}
       {loading && !items.length && (

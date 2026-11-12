@@ -1423,29 +1423,32 @@ export function DesktopApp(): React.JSX.Element {
               {preparationOutput && <pre>{preparationOutput}</pre>}
               <div className="modal-actions">
                 {["checkout", "copy", "setup"].includes(operation.phase) ? (
-                  <button
+                  <Button
+                    variant="outline"
                     onClick={() => void action(() => window.kairo.cancelPreparation(operation.id))}
                   >
                     Cancel preparation
-                  </button>
+                  </Button>
                 ) : (
                   operation.phase !== "ready" && (
-                    <button
+                    <Button
+                      variant="outline"
                       onClick={() => void action(() => window.kairo.retryPreparation(operation.id))}
                     >
                       Retry preparation
-                    </button>
+                    </Button>
                   )
                 )}
                 {operation.workspaceId && (
-                  <button
+                  <Button
+                    variant="outline"
                     onClick={() => {
                       setOperationId(undefined);
                       void chooseWorkspace(operation.workspaceId!);
                     }}
                   >
                     Open workspace
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -1682,11 +1685,10 @@ export function DesktopApp(): React.JSX.Element {
               </p>
             )}
             <div className="modal-actions">
-              <button disabled={pending} onClick={() => setNewOpen(false)}>
+              <Button variant="outline" disabled={pending} onClick={() => setNewOpen(false)}>
                 Cancel
-              </button>
-              <button
-                className="primary"
+              </Button>
+              <Button
                 disabled={
                   pending ||
                   detecting ||
@@ -1696,7 +1698,7 @@ export function DesktopApp(): React.JSX.Element {
                 onClick={() => void create()}
               >
                 {pending ? "Opening…" : "Open agent terminal"}
-              </button>
+              </Button>
             </div>
           </div>
         </ModalFrame>
@@ -1727,12 +1729,15 @@ export function DesktopApp(): React.JSX.Element {
               onChange={(event) => setRename({ ...rename, title: event.target.value })}
             />
             <div className="modal-actions">
-              <button type="button" disabled={pending} onClick={() => setRename(undefined)}>
+              <Button
+                variant="outline"
+                type="button"
+                disabled={pending}
+                onClick={() => setRename(undefined)}
+              >
                 Cancel
-              </button>
-              <button className="primary" disabled={pending || !rename.title.trim()}>
-                Save name
-              </button>
+              </Button>
+              <Button disabled={pending || !rename.title.trim()}>Save name</Button>
             </div>
           </form>
         </ModalFrame>
@@ -1752,11 +1757,10 @@ export function DesktopApp(): React.JSX.Element {
               </p>
             )}
             <div className="modal-actions">
-              <button disabled={pending} onClick={() => setConfirm(undefined)}>
+              <Button variant="outline" disabled={pending} onClick={() => setConfirm(undefined)}>
                 Cancel
-              </button>
-              <button
-                className="primary"
+              </Button>
+              <Button
                 disabled={pending}
                 onClick={() => {
                   setPending(true);
@@ -1769,7 +1773,7 @@ export function DesktopApp(): React.JSX.Element {
                 }}
               >
                 {pending ? "Working…" : "Confirm"}
-              </button>
+              </Button>
             </div>
           </div>
         </ModalFrame>
