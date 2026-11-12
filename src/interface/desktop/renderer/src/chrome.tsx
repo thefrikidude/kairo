@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from "react";
+import React from "react";
+import { Dialog, DialogContent } from "./components/ui/dialog.js";
 
 export function ModalFrame({
   labelledBy,
@@ -11,41 +12,20 @@ export function ModalFrame({
   onDismiss(): void;
   children: React.ReactNode;
 }): React.JSX.Element {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const previous =
-      document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    const dialog = ref.current!;
-    dialog.showModal();
-    return () => {
-      dialog.close();
-      if (previous?.isConnected) previous.focus();
-    };
-  }, []);
+  // Radix handles focus trapping and restoring focus to the opener; `blocked` pins the dialog open.
   return (
-    <dialog
-      ref={ref}
-      className="modal-host"
-      aria-labelledby={labelledBy}
-      aria-busy={blocked}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!blocked) onDismiss();
-      }}
-      onClick={(event) => {
-        if (event.target !== event.currentTarget || blocked) return;
-        const bounds = event.currentTarget.getBoundingClientRect();
-        if (
-          event.clientX < bounds.left ||
-          event.clientX > bounds.right ||
-          event.clientY < bounds.top ||
-          event.clientY > bounds.bottom
-        )
-          onDismiss();
-      }}
-    >
-      {children}
-    </dialog>
+    <Dialog open onOpenChange={(open) => !open && !blocked && onDismiss()}>
+      <DialogContent
+        className="modal-host"
+        aria-labelledby={labelledBy}
+        aria-describedby={undefined}
+        aria-busy={blocked}
+        onEscapeKeyDown={(event) => blocked && event.preventDefault()}
+        onInteractOutside={(event) => blocked && event.preventDefault()}
+      >
+        {children}
+      </DialogContent>
+    </Dialog>
   );
 }
 
