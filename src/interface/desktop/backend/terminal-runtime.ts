@@ -95,18 +95,22 @@ export async function createTerminalDesktopRuntime(
       emit("sessions:changed", undefined);
     },
   );
+  /**
+   * A plain folder describes itself as its own project, which would pull a chat out of
+   * "This computer". Chats live directly under the chats root, so keep them there.
+   */
+  async function describeWorkspace(directory: string) {
+    const description = await git.describe(directory);
+    const root = chatsRoot();
+    return dirname(description.directory) === root
+      ? { ...description, repositoryPath: root }
+      : description;
+  }
   async function refreshWorkspace(id: string): Promise<void> {
     const value = store.workspace(id);
     if (!value || value.removedAt) return;
     try {
-      const description = await git.describe(value.directory);
-      // A plain folder describes itself as its own project, which would pull a chat out of
-      // "This computer". Chats live directly under the chats root, so keep them there.
-      const root = chatsRoot();
-      store.reconcileWorkspace(
-        id,
-        dirname(value.directory) === root ? { ...description, repositoryPath: root } : description,
-      );
+      store.reconcileWorkspace(id, await describeWorkspace(value.directory));
       store.updateWorkspace(id, { unavailable: false });
     } catch {
       store.updateWorkspace(id, { unavailable: true });
@@ -607,7 +611,8 @@ export async function createTerminalDesktopRuntime(
           throw new Error("Install this agent, then refresh the agent list.");
         const selection = third as WorkspaceSelection | undefined;
         let description;
-        if (!selection || selection.kind === "folder") description = await git.describe(second);
+        if (!selection || selection.kind === "folder")
+          description = await describeWorkspace(second);
         else if (selection.kind === "worktree")
           description = await git.create(second, selection.branch, selection.baseRef);
         else if (selection.kind === "existing")

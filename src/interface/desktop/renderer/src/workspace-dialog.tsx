@@ -170,7 +170,7 @@ export function WorkspaceDialog({
             value={agent}
             onChange={(e) => setAgent(e.target.value)}
           >
-            <option value="">No agent</option>
+            <option value="">Chat (choose the agent in the chat)</option>
             {state.agents
               .filter((a) => a.installed)
               .map((a) => (

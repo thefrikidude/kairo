@@ -2955,32 +2955,6 @@ button svg {
   width: 14px;
   height: 14px;
 }
-.home-input {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: min(560px, 90%);
-  padding: 10px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.home-input textarea {
-  resize: none;
-  width: 100%;
-  color: var(--text);
-  background: transparent;
-  border: 0;
-  outline: 0;
-  font: inherit;
-}
-.home-input button {
-  align-self: flex-end;
-}
-.home-screen {
-  gap: 16px;
-}
-
 /* Multi-select in the sidebar */
 .select-toggle {
   margin-left: auto;
@@ -3007,4 +2981,37 @@ button svg {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+/* Settings screen navigation */
+.sidebar.settings-nav {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-content: flex-start;
+  gap: 2px;
+  padding: 12px 10px;
+}
+.settings-nav > * {
+  flex: none;
+  margin: 0;
+}
+.settings-back {
+  align-self: flex-start;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+.settings-tab {
+  text-align: left;
+  padding: 7px 12px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.settings-tab:hover,
+.settings-tab.selected {
+  color: var(--text, inherit);
+  background: var(--hover, rgba(255, 255, 255, 0.07));
+}
+.settings-content .shortcut-list {
+  max-width: 760px;
 }

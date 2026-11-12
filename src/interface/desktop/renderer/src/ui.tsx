@@ -28,6 +28,13 @@ const activityClass = {
   idle: "status-open",
   none: "",
 } as const;
+const settingsTabs: [string, string][] = [
+  ["general", "General"],
+  ["chats", "Archived chats"],
+  ["workspaces", "Workspaces"],
+  ["tabs", "Closed agent tabs"],
+  ["shortcuts", "Keyboard shortcuts"],
+];
 const shortcuts: [string, string][] = [
   ["Cmd/Ctrl+Shift+N", "New workspace"],
   ["Cmd/Ctrl+J", "Jump to a workspace or tab, or run a command"],
@@ -122,6 +129,16 @@ export function DesktopApp(): React.JSX.Element {
       (op) =>
         !!op.workspaceId && op.workspaceId === workspace?.id && (op.phase !== "ready" || op.error),
     );
+  // A workspace with nothing running shows the Kairo chat view instead of a bare start prompt.
+  const kairoView =
+    !settings &&
+    !activeTerminalId &&
+    !operationId &&
+    !operation &&
+    !!workspace &&
+    !workspace.archivedAt &&
+    !workspace.unavailable &&
+    !current;
   useEffect(() => {
     if (!settings) return;
     let disposed = false;
@@ -238,6 +255,7 @@ export function DesktopApp(): React.JSX.Element {
       ),
     [state?.workspaces, state?.chatsRoot],
   );
+  const [settingsTab, setSettingsTab] = useState("general");
   const [selecting, setSelecting] = useState(false);
   const [pickedWorkspaces, setPickedWorkspaces] = useState<Set<string>>(new Set());
   const [pickedProjects, setPickedProjects] = useState<Set<string>>(new Set());
@@ -251,18 +269,7 @@ export function DesktopApp(): React.JSX.Element {
     setPickedWorkspaces(new Set());
     setPickedProjects(new Set());
   };
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatChoice, setChatChoice] = useState("kairo");
-  const newChat = () => {
-    setError("");
-    setChatOpen(true);
-  };
-  const startChat = () =>
-    void action(async () => {
-      const value = await window.kairo.createChat(chatChoice === "kairo" ? undefined : chatChoice);
-      setChatOpen(false);
-      return value;
-    });
+  const newChat = () => void action(() => window.kairo.createChat());
   const action = useCallback(
     async (operation: () => Promise<DesktopBootstrap | undefined>) => {
       setPending(true);
@@ -475,7 +482,7 @@ export function DesktopApp(): React.JSX.Element {
         const key = event.key.toLowerCase();
         if (key === "b") setSidebarOpen((value) => !value);
         else if (key === "n") {
-          if (workspace && workspace.repositoryPath === state?.chatsRoot) setChatOpen(true);
+          if (workspace && workspace.repositoryPath === state?.chatsRoot) newChat();
           else setWorkspaceDialog(workspace?.repositoryPath ?? "");
         } else {
           setContextTab(key === "e" ? "files" : "changes");
@@ -790,11 +797,17 @@ export function DesktopApp(): React.JSX.Element {
         ]
       : []),
     workspace && workspace.repositoryPath === state?.chatsRoot
-      ? { label: "New chat", run: () => setChatOpen(true) }
+      ? { label: "New chat", run: newChat }
       : { label: "New workspace", run: () => setWorkspaceDialog(workspace?.repositoryPath ?? "") },
     { label: "Open project folder", run: () => void action(() => window.kairo.openWorkspace()) },
     { label: "Settings", run: () => setSettings(true) },
-    { label: "Keyboard shortcuts", run: () => setSettings(true) },
+    {
+      label: "Keyboard shortcuts",
+      run: () => {
+        setSettingsTab("shortcuts");
+        setSettings(true);
+      },
+    },
     ...(["system", "dark", "light"] as const).map((choice) => ({
       label: `Theme: ${choice[0].toUpperCase()}${choice.slice(1)}`,
       run: () => setThemeChoice(choice),
@@ -802,20 +815,8 @@ export function DesktopApp(): React.JSX.Element {
   ];
   const installedAgents = state?.agents.filter((agent) => agent.installed) ?? [];
   const listAll = showAllAgents || (!detecting && !installedAgents.length);
-  const agentPicker = (withKairo = false) => (
+  const agentPicker = () => (
     <>
-      {withKairo && (
-        <div className={`agent-picker-row ${chatChoice === "kairo" ? "selected" : ""}`}>
-          <button
-            role="option"
-            aria-selected={chatChoice === "kairo"}
-            onClick={() => setChatChoice("kairo")}
-          >
-            <strong>Kairo</strong>
-            <small>Multi-agent chat: start empty, add any agents as tabs in one session</small>
-          </button>
-        </div>
-      )}
       {listAll && (
         <div className="agent-picker-heading">
           <input
@@ -836,13 +837,13 @@ export function DesktopApp(): React.JSX.Element {
           .sort((a, b) => Number(b.installed) - Number(a.installed))
           .map((agent) => (
             <div
-              className={`agent-picker-row ${(withKairo ? chatChoice : agentId) === agent.id ? "selected" : ""}`}
+              className={`agent-picker-row ${agentId === agent.id ? "selected" : ""}`}
               key={agent.id}
             >
               <button
                 role="option"
-                aria-selected={(withKairo ? chatChoice : agentId) === agent.id}
-                onClick={() => (withKairo ? setChatChoice(agent.id) : setAgentId(agent.id))}
+                aria-selected={agentId === agent.id}
+                onClick={() => setAgentId(agent.id)}
               >
                 <strong>{agent.name}</strong>
                 <small>{agent.installed ? agent.commands[0] : "Not installed"}</small>
@@ -891,7 +892,27 @@ export function DesktopApp(): React.JSX.Element {
         } as React.CSSProperties
       }
     >
-      <aside className="sidebar" aria-label="Workspaces" hidden={!sidebarOpen}>
+      <aside
+        className="sidebar settings-nav"
+        aria-label="Settings sections"
+        hidden={!sidebarOpen || !settings}
+      >
+        <button className="settings-back" onClick={() => setSettings(false)}>
+          ← Back to app
+        </button>
+        <div className="section-label sidebar-section-title">Settings</div>
+        {settingsTabs.map(([id, label]) => (
+          <button
+            key={id}
+            className={`settings-tab ${settingsTab === id ? "selected" : ""}`}
+            aria-current={settingsTab === id ? "page" : undefined}
+            onClick={() => setSettingsTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </aside>
+      <aside className="sidebar" aria-label="Workspaces" hidden={!sidebarOpen || settings}>
         <div className="brand">
           <KairoLogo className="brand-mark" />
           <span>Kairo</span>
@@ -1163,97 +1184,132 @@ export function DesktopApp(): React.JSX.Element {
           </div>
         )}
         <section className="settings-content terminal-settings" hidden={!settings}>
-          <h2>Settings</h2>
-          <label className="settings-field">
-            Appearance
-            <select
-              aria-label="Theme"
-              value={themeChoice}
-              onChange={(event) => setThemeChoice(event.target.value as ThemeChoice)}
-            >
-              <option value="system">System</option>
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
-          </label>
-          {archivedChats.length > 0 && (
+          <h2>{settingsTabs.find(([id]) => id === settingsTab)?.[1]}</h2>
+          {settingsTab === "general" && (
             <>
-              <h2>Archived chats</h2>
-              <div className="bulk-row">
-                <button
-                  disabled={pending}
-                  onClick={() =>
-                    void action(async () => {
-                      let last: DesktopBootstrap | undefined;
-                      for (const item of archivedChats)
-                        last = await window.kairo.restoreWorkspace(item.id);
-                      return last;
-                    })
-                  }
+              <label className="settings-field">
+                Appearance
+                <select
+                  aria-label="Theme"
+                  value={themeChoice}
+                  onChange={(event) => setThemeChoice(event.target.value as ThemeChoice)}
                 >
-                  Recover all
-                </button>
-                <button
-                  className="danger-outline-button"
-                  disabled={pending}
-                  onClick={() =>
-                    setConfirm({
-                      title: "Delete all archived chats?",
-                      description: `Permanently delete ${archivedChats.length} archived ${archivedChats.length === 1 ? "chat" : "chats"} and their scratch folders. This cannot be undone.`,
-                      action: async () => {
-                        let last: DesktopBootstrap | undefined;
-                        for (const item of archivedChats)
-                          last = await window.kairo.deleteWorkspace(item.id);
-                        if (last) apply(last);
-                      },
-                    })
-                  }
-                >
-                  Delete all
-                </button>
-              </div>
+                  <option value="system">System</option>
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </label>
+              <p className="empty-small">
+                Agent conversations run inside the selected CLI. Models, authentication and
+                approvals are managed by that agent.
+              </p>
             </>
           )}
-          <h2>Workspaces</h2>
-          {state?.workspaces
-            .filter((item) => !item.removedAt && !(isChat(item) && item.archivedAt))
-            .map((item) => (
-              <article className="workspace-catalog-row" key={item.id}>
-                <div>
-                  <strong>{item.name ?? item.branch ?? name(item.directory)}</strong>
-                  <small>{item.archivedAt ? `${item.kind} · archived` : item.kind}</small>
-                  <code>{item.directory}</code>
-                </div>
-                <button
-                  disabled={pending}
-                  onClick={() => {
-                    setSettings(false);
-                    void action(() =>
-                      item.archivedAt
-                        ? window.kairo
-                            .restoreWorkspace(item.id)
-                            .then(() => window.kairo.selectWorkspace(item.id))
-                        : window.kairo.selectWorkspace(item.id),
-                    );
-                  }}
-                >
-                  {item.archivedAt ? "Restore" : "Open"}
-                </button>
-                <button
-                  className="danger-outline-button"
-                  disabled={pending}
-                  onClick={() => deleteWorkspace(item)}
-                >
-                  Delete
-                </button>
-              </article>
-            ))}
-          {!state?.workspaces.some((item) => !item.removedAt) && (
-            <p className="empty-small">No workspaces yet</p>
-          )}
-          {archived.length > 0 && (
+          {settingsTab === "chats" && (
             <>
-              <h2>Closed agent tabs</h2>
+              {!archivedChats.length && <p className="empty-small">No archived chats</p>}
+              {archivedChats.length > 0 && (
+                <div className="bulk-row">
+                  <button
+                    disabled={pending}
+                    onClick={() =>
+                      void action(async () => {
+                        let last: DesktopBootstrap | undefined;
+                        for (const item of archivedChats)
+                          last = await window.kairo.restoreWorkspace(item.id);
+                        return last;
+                      })
+                    }
+                  >
+                    Recover all
+                  </button>
+                  <button
+                    className="danger-outline-button"
+                    disabled={pending}
+                    onClick={() =>
+                      setConfirm({
+                        title: "Delete all archived chats?",
+                        description: `Permanently delete ${archivedChats.length} archived ${archivedChats.length === 1 ? "chat" : "chats"} and their scratch folders. This cannot be undone.`,
+                        action: async () => {
+                          let last: DesktopBootstrap | undefined;
+                          for (const item of archivedChats)
+                            last = await window.kairo.deleteWorkspace(item.id);
+                          if (last) apply(last);
+                        },
+                      })
+                    }
+                  >
+                    Delete all
+                  </button>
+                </div>
+              )}
+              {archivedChats.map((item) => (
+                <article className="workspace-catalog-row" key={item.id}>
+                  <div>
+                    <strong>{item.name ?? name(item.directory)}</strong>
+                    <small>archived</small>
+                  </div>
+                  <button
+                    disabled={pending}
+                    onClick={() => void action(() => window.kairo.restoreWorkspace(item.id))}
+                  >
+                    Restore
+                  </button>
+                  <button
+                    className="danger-outline-button"
+                    disabled={pending}
+                    onClick={() => deleteWorkspace(item)}
+                  >
+                    Delete
+                  </button>
+                </article>
+              ))}
+            </>
+          )}
+          {settingsTab === "workspaces" && (
+            <>
+              {state?.workspaces
+                .filter((item) => !item.removedAt && !(isChat(item) && item.archivedAt))
+                .map((item) => (
+                  <article className="workspace-catalog-row" key={item.id}>
+                    <div>
+                      <strong>{item.name ?? item.branch ?? name(item.directory)}</strong>
+                      <small>{item.archivedAt ? `${item.kind} · archived` : item.kind}</small>
+                      <code>{item.directory}</code>
+                    </div>
+                    <button
+                      disabled={pending}
+                      onClick={() => {
+                        setSettings(false);
+                        void action(() =>
+                          item.archivedAt
+                            ? window.kairo
+                                .restoreWorkspace(item.id)
+                                .then(() => window.kairo.selectWorkspace(item.id))
+                            : window.kairo.selectWorkspace(item.id),
+                        );
+                      }}
+                    >
+                      {item.archivedAt ? "Restore" : "Open"}
+                    </button>
+                    <button
+                      className="danger-outline-button"
+                      disabled={pending}
+                      onClick={() => deleteWorkspace(item)}
+                    >
+                      Delete
+                    </button>
+                  </article>
+                ))}
+              {!state?.workspaces.some((item) => !item.removedAt) && (
+                <p className="empty-small">No workspaces yet</p>
+              )}
+            </>
+          )}
+          {settingsTab === "tabs" && (
+            <>
+              {!archived.length && <p className="empty-small">No closed agent tabs</p>}
+
               {archived.map((session) => (
                 <article className="workspace-catalog-row" key={session.id}>
                   <div>
@@ -1287,9 +1343,8 @@ export function DesktopApp(): React.JSX.Element {
               ))}
             </>
           )}
-          <details className="shortcut-list">
-            <summary>Keyboard shortcuts</summary>
-            <dl>
+          {settingsTab === "shortcuts" && (
+            <dl className="shortcut-list">
               {shortcuts.map(([keys, description]) => (
                 <React.Fragment key={keys}>
                   <dt>{keys}</dt>
@@ -1297,11 +1352,7 @@ export function DesktopApp(): React.JSX.Element {
                 </React.Fragment>
               ))}
             </dl>
-          </details>
-          <p className="empty-small">
-            Agent conversations run inside the selected CLI. Models, authentication and approvals
-            are managed by that agent.
-          </p>
+          )}
         </section>
         <div className="agent-workspace" hidden={!!settings}>
           <Suspense fallback={<p className="empty-small">Loading terminal…</p>}>
@@ -1349,14 +1400,23 @@ export function DesktopApp(): React.JSX.Element {
               </div>
             </div>
           )}
+          {kairoView && workspace && (
+            <HomeScreen
+              pending={pending}
+              storageKey={`kairo.chat:${workspace.id}`}
+              location={isChat(workspace) ? "This computer" : name(workspace.repositoryPath)}
+              agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+            />
+          )}
           {!activeTerminalId && !operationId && !workspace && !groups.length && (
             <HomeScreen
               pending={pending}
+              agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
               onOpenProject={() => void action(() => window.kairo.openWorkspace())}
               onNewChat={newChat}
             />
           )}
-          {!activeTerminalId && !operationId && (workspace || groups.length > 0) && (
+          {!activeTerminalId && !operationId && !kairoView && (workspace || groups.length > 0) && (
             <div className="welcome">
               <KairoLogo className="welcome-logo" />
               <h1>
@@ -1586,43 +1646,6 @@ export function DesktopApp(): React.JSX.Element {
                 onClick={() => void create()}
               >
                 {pending ? "Opening…" : "Open agent terminal"}
-              </button>
-            </div>
-          </div>
-        </ModalFrame>
-      )}
-      {chatOpen && (
-        <ModalFrame
-          labelledBy="new-chat-title"
-          blocked={pending}
-          onDismiss={() => setChatOpen(false)}
-        >
-          <div className="new-session-dialog">
-            <h2 id="new-chat-title">New chat on this computer</h2>
-            <p className="empty-small">
-              Chats live outside any project. Choose Kairo to run several agents in one session, or
-              start directly with one agent.
-            </p>
-            {agentPicker(true)}
-            {error && (
-              <p className="file-error" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="modal-actions">
-              <button disabled={pending} onClick={() => setChatOpen(false)}>
-                Cancel
-              </button>
-              <button
-                className="primary"
-                disabled={
-                  pending ||
-                  (chatChoice !== "kairo" &&
-                    !state?.agents.find((agent) => agent.id === chatChoice)?.installed)
-                }
-                onClick={startChat}
-              >
-                {pending ? "Opening…" : "Start chat"}
               </button>
             </div>
           </div>
