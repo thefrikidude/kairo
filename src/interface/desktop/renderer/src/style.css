@@ -2928,6 +2928,7 @@ button svg {
 }
 .bulk-bar span {
   flex: 1;
+  white-space: nowrap;
 }
 .bulk-row {
   display: flex;

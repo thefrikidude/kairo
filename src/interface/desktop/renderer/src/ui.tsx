@@ -929,14 +929,16 @@ export function DesktopApp(): React.JSX.Element {
         <div className="brand">
           <KairoLogo className="brand-mark" />
           <span>Kairo</span>
-          <button
-            className="select-toggle"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="select-toggle ml-auto h-7 px-2 text-xs"
             aria-pressed={selecting}
             disabled={pending}
             onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
           >
             {selecting ? "Done" : "Select"}
-          </button>
+          </Button>
         </div>
         {state?.workspaces.some((w) => w.pinned && !w.archivedAt && !w.removedAt) && (
           <section className="pinned-sessions" aria-label="Pinned workspaces">
@@ -948,15 +950,18 @@ export function DesktopApp(): React.JSX.Element {
         )}
         <div className="section-label sidebar-section-title">
           <span>Projects</span>
-          <button
-            className="icon-button open-project-button"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="icon-button size-[30px] rounded-md text-muted-foreground open-project-button"
+
             aria-label="Open project"
             title="Open project folder"
             disabled={pending}
             onClick={() => void action(() => window.kairo.openWorkspace())}
           >
             <Icon name="folder" />
-          </button>
+          </Button>
         </div>
         <div className="project-session-list">
           {groups.map((group) => (
@@ -986,15 +991,18 @@ export function DesktopApp(): React.JSX.Element {
                   <Icon name="folder" />
                   <span>{name(group.path)}</span>
                 </button>
-                <button
-                  className="icon-button project-add"
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="icon-button size-[30px] rounded-md text-muted-foreground project-add"
+
                   aria-label={`New workspace in ${name(group.path)}`}
                   title="New workspace"
                   disabled={pending}
                   onClick={() => setWorkspaceDialog(group.path)}
                 >
                   <Icon name="plus" />
-                </button>
+                </Button>
               </div>
               <div hidden={collapsed[group.path]}>
                 {group.workspaces.filter((item) => !item.pinned).map(renderWorkspace)}
@@ -1023,37 +1031,50 @@ export function DesktopApp(): React.JSX.Element {
         <section className="chat-section" aria-label="This computer">
           <div className="section-label sidebar-section-title">
             <span>This computer</span>
-            <button
-              className="icon-button"
+            <Button
+              variant="ghost"
+              size="icon"
+              className="icon-button size-[30px] rounded-md text-muted-foreground "
+
               aria-label="New chat"
               title="New chat"
               disabled={pending}
               onClick={newChat}
             >
               <Icon name="plus" />
-            </button>
+            </Button>
           </div>
           {chats.map(renderWorkspace)}
           {!chats.length && <p className="empty-session-list">No chats yet</p>}
         </section>
         {selecting && (
           <div className="bulk-bar" role="toolbar" aria-label="Selection actions">
-            <span>{pickedCount ? `${pickedCount} selected` : "Select items"}</span>
-            <button disabled={pending || !pickedCount} onClick={() => bulk("archive")}>
+            <span>{pickedCount ? `${pickedCount} selected` : "None selected"}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending || !pickedCount}
+              onClick={() => bulk("archive")}
+            >
               Archive
-            </button>
-            <button
-              className="danger-outline-button"
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
               disabled={pending || !pickedCount}
               onClick={() => bulk("delete")}
             >
               Delete
-            </button>
+            </Button>
           </div>
         )}
-        <button className="settings-link" onClick={() => setSettings(true)}>
+        <Button
+          variant="ghost"
+          className="settings-link h-9 w-full justify-start px-2.5 font-normal text-muted-foreground"
+          onClick={() => setSettings(true)}
+        >
           <Icon name="settings" /> Settings
-        </button>
+        </Button>
       </aside>
       {sidebarOpen && resizeHandle("sidebar")}
       <main className="conversation">
