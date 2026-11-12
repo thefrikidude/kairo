@@ -6,6 +6,7 @@ import type {
   WorkspaceReview,
 } from "../../shared/api.js";
 import { Icon, KairoLogo, ModalFrame } from "./chrome.js";
+import { HomeScreen } from "./home-screen.js";
 import { navigateTabs } from "./tab-navigation.js";
 import { rememberedShell, openWorkspaceShell } from "./workspace-selection.js";
 import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
@@ -208,8 +209,9 @@ export function DesktopApp(): React.JSX.Element {
   const onError = useCallback((value: string) => setError(value), []);
   const groups = useMemo(() => {
     const map = new Map<string, TaskWorkspace[]>();
+    for (const path of state?.projects ?? []) map.set(path, []);
     for (const item of state?.workspaces ?? []) {
-      if (item.removedAt || item.archivedAt) continue;
+      if (item.removedAt || item.archivedAt || item.repositoryPath === state?.chatsRoot) continue;
       map.set(item.repositoryPath, [...(map.get(item.repositoryPath) ?? []), item]);
     }
     for (const op of state?.operations ?? [])
@@ -217,7 +219,50 @@ export function DesktopApp(): React.JSX.Element {
         if (!map.has(op.repositoryPath)) map.set(op.repositoryPath, []);
       }
     return [...map].map(([path, workspaces]) => ({ path, workspaces }));
-  }, [state?.workspaces, state?.operations]);
+  }, [state?.workspaces, state?.operations, state?.projects, state?.chatsRoot]);
+  const chats = useMemo(
+    () =>
+      (state?.workspaces ?? []).filter(
+        (item) =>
+          item.repositoryPath === state?.chatsRoot &&
+          !item.removedAt &&
+          !item.archivedAt &&
+          !item.pinned,
+      ),
+    [state?.workspaces, state?.chatsRoot],
+  );
+  const archivedChats = useMemo(
+    () =>
+      (state?.workspaces ?? []).filter(
+        (item) => item.repositoryPath === state?.chatsRoot && item.archivedAt && !item.removedAt,
+      ),
+    [state?.workspaces, state?.chatsRoot],
+  );
+  const [selecting, setSelecting] = useState(false);
+  const [pickedWorkspaces, setPickedWorkspaces] = useState<Set<string>>(new Set());
+  const [pickedProjects, setPickedProjects] = useState<Set<string>>(new Set());
+  const toggle = (set: Set<string>, value: string) => {
+    const next = new Set(set);
+    if (!next.delete(value)) next.add(value);
+    return next;
+  };
+  const stopSelecting = () => {
+    setSelecting(false);
+    setPickedWorkspaces(new Set());
+    setPickedProjects(new Set());
+  };
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatChoice, setChatChoice] = useState("kairo");
+  const newChat = () => {
+    setError("");
+    setChatOpen(true);
+  };
+  const startChat = () =>
+    void action(async () => {
+      const value = await window.kairo.createChat(chatChoice === "kairo" ? undefined : chatChoice);
+      setChatOpen(false);
+      return value;
+    });
   const action = useCallback(
     async (operation: () => Promise<DesktopBootstrap | undefined>) => {
       setPending(true);
@@ -295,6 +340,23 @@ export function DesktopApp(): React.JSX.Element {
       offSessions();
     };
   }, [apply]);
+  // Opening Kairo lands on a chat in "This computer": the newest one, or a fresh Kairo chat.
+  const landed = useRef(false);
+  useEffect(() => {
+    if (!state || landed.current) return;
+    landed.current = true;
+    const newest = state.workspaces.find(
+      (item) =>
+        item.repositoryPath === state.chatsRoot &&
+        !item.removedAt &&
+        !item.archivedAt &&
+        !item.unavailable,
+    );
+    if (newest && state.activeWorkspaceId === newest.id) return;
+    void action(async () =>
+      newest ? window.kairo.selectWorkspace(newest.id) : window.kairo.createChat(),
+    );
+  }, [state, action]);
   useEffect(() => {
     const query = window.matchMedia("(prefers-color-scheme: dark)");
     const update = () => setSystemDark(query.matches);
@@ -412,8 +474,10 @@ export function DesktopApp(): React.JSX.Element {
         event.preventDefault();
         const key = event.key.toLowerCase();
         if (key === "b") setSidebarOpen((value) => !value);
-        else if (key === "n") setWorkspaceDialog(workspace?.repositoryPath ?? "");
-        else {
+        else if (key === "n") {
+          if (workspace && workspace.repositoryPath === state?.chatsRoot) setChatOpen(true);
+          else setWorkspaceDialog(workspace?.repositoryPath ?? "");
+        } else {
           setContextTab(key === "e" ? "files" : "changes");
           setContextOpen(true);
         }
@@ -525,16 +589,34 @@ export function DesktopApp(): React.JSX.Element {
   };
   const projectActions = (path: string): ContextAction[] => [
     { label: "New workspace", disabled: pending, run: () => setWorkspaceDialog(path) },
+    {
+      label: "Delete project",
+      disabled: pending,
+      run: () => {
+        const count =
+          state?.workspaces.filter(
+            (item) => item.repositoryPath === path && !item.removedAt && !item.archivedAt,
+          ).length ?? 0;
+        setConfirm({
+          title: "Delete project?",
+          description: count
+            ? `Delete ${name(path)} and its ${count} ${count === 1 ? "workspace" : "workspaces"}. Terminals close and worktree folders are removed, and Git refuses while a worktree has uncommitted files or unmerged commits. Shared project folders stay on disk.`
+            : `Remove ${name(path)} from Kairo. Its folder stays on disk.`,
+          action: () => window.kairo.removeProject(path).then(apply),
+        });
+      },
+    },
   ];
+  const isChat = (item: TaskWorkspace) => item.repositoryPath === state?.chatsRoot;
   const deleteWorkspace = (item: TaskWorkspace) =>
     setConfirm({
-      title: "Delete workspace?",
-      description:
-        "Close its terminals and remove this worktree folder. Git keeps the branch and refuses removal while uncommitted files or unmerged commits remain.",
-      action: async () => {
-        if (!item.archivedAt) apply(await window.kairo.archiveWorkspace(item.id));
-        apply(await window.kairo.removeWorktree(item.id));
-      },
+      title: isChat(item) ? "Delete chat?" : "Delete workspace?",
+      description: isChat(item)
+        ? "Close its terminals and delete this chat with its scratch folder. This cannot be undone."
+        : item.managed
+          ? "Close its terminals and remove this worktree folder. Git keeps the branch and refuses removal while uncommitted files or unmerged commits remain."
+          : "Close its terminals and remove this workspace from Kairo. The folder stays on disk.",
+      action: () => window.kairo.deleteWorkspace(item.id).then(apply),
     });
   /** Rename, pin, archive and delete are shared by the row menu and the command palette. */
   const workspaceCommands = (item: TaskWorkspace): ContextAction[] => {
@@ -561,9 +643,7 @@ export function DesktopApp(): React.JSX.Element {
             action: () => window.kairo.archiveWorkspace(item.id).then(apply),
           }),
       },
-      ...(item.managed
-        ? [{ label: "Delete", disabled: pending, run: () => deleteWorkspace(item) }]
-        : []),
+      { label: "Delete", disabled: pending, run: () => deleteWorkspace(item) },
     ];
   };
   const agentActions = (id: string): ContextAction[] => {
@@ -583,6 +663,60 @@ export function DesktopApp(): React.JSX.Element {
         ]
       : [];
   };
+  /** Workspaces covered by the selection: picked ones plus everything inside picked projects. */
+  const bulkTargets = () => {
+    const inProjects = (state?.workspaces ?? []).filter(
+      (item) => !item.removedAt && pickedProjects.has(item.repositoryPath),
+    );
+    const direct = (state?.workspaces ?? []).filter(
+      (item) => pickedWorkspaces.has(item.id) && !pickedProjects.has(item.repositoryPath),
+    );
+    return { inProjects, direct };
+  };
+  const pickedCount = pickedWorkspaces.size + pickedProjects.size;
+  const bulk = (kind: "archive" | "delete") => {
+    const { inProjects, direct } = bulkTargets();
+    const run = async () => {
+      const failures: string[] = [];
+      let last: DesktopBootstrap | undefined;
+      const each = async (items: TaskWorkspace[]) => {
+        for (const item of items) {
+          if (kind === "archive" && item.archivedAt) continue;
+          try {
+            last =
+              kind === "archive"
+                ? await window.kairo.archiveWorkspace(item.id)
+                : await window.kairo.deleteWorkspace(item.id);
+          } catch (cause) {
+            failures.push(`${item.name ?? name(item.directory)}: ${message(cause)}`);
+          }
+        }
+      };
+      await each(direct);
+      await each(inProjects);
+      if (kind === "delete" && !failures.length)
+        for (const path of pickedProjects) last = await window.kairo.removeProject(path);
+      stopSelecting();
+      if (failures.length) throw new Error(failures.join(" "));
+      return last;
+    };
+    if (kind === "archive") return void action(run);
+    const projects = pickedProjects.size;
+    const workspaces = direct.length + inProjects.length;
+    setConfirm({
+      title: "Delete selected?",
+      description: `Delete ${projects ? `${projects} ${projects === 1 ? "project" : "projects"} and ` : ""}${workspaces} ${workspaces === 1 ? "workspace or chat" : "workspaces and chats"}. Terminals close, chats and worktree folders are removed (Git refuses worktrees with uncommitted or unmerged work), and project folders stay on disk. This cannot be undone.`,
+      action: async () => {
+        try {
+          const value = await run();
+          if (value) apply(value);
+        } catch (cause) {
+          apply(await window.kairo.bootstrap(true));
+          throw cause;
+        }
+      },
+    });
+  };
   const renderWorkspace = (item: TaskWorkspace) => {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
@@ -594,11 +728,25 @@ export function DesktopApp(): React.JSX.Element {
         className={`session-row workspace-row ${workspace?.id === item.id ? "selected" : ""}`}
         {...menuHandlers(`${label} actions`, workspaceCommands(item))}
       >
+        {selecting && (
+          <input
+            type="checkbox"
+            className="select-box"
+            aria-label={`Select ${label}`}
+            checked={pickedWorkspaces.has(item.id) || pickedProjects.has(item.repositoryPath)}
+            disabled={pickedProjects.has(item.repositoryPath)}
+            onChange={() => setPickedWorkspaces((set) => toggle(set, item.id))}
+          />
+        )}
         <button
           className="session"
           aria-current={workspace?.id === item.id ? "page" : undefined}
           disabled={pending}
-          onClick={() => void chooseWorkspace(item.id)}
+          onClick={() =>
+            selecting
+              ? setPickedWorkspaces((set) => toggle(set, item.id))
+              : void chooseWorkspace(item.id)
+          }
         >
           <span
             className={`session-status ${item.unavailable ? "status-error" : activityClass[activity]}`}
@@ -630,14 +778,20 @@ export function DesktopApp(): React.JSX.Element {
               detail: workspace.name ?? workspace.branch ?? name(workspace.directory),
               run: command.run,
             })),
-          {
-            label: "Project setup",
-            detail: `Setup script and files to copy · ${name(workspace.repositoryPath)}`,
-            run: () => setProjectSettings(workspace.repositoryPath),
-          },
+          ...(workspace.repositoryPath === state?.chatsRoot
+            ? []
+            : [
+                {
+                  label: "Project setup",
+                  detail: `Setup script and files to copy · ${name(workspace.repositoryPath)}`,
+                  run: () => setProjectSettings(workspace.repositoryPath),
+                },
+              ]),
         ]
       : []),
-    { label: "New workspace", run: () => setWorkspaceDialog(workspace?.repositoryPath ?? "") },
+    workspace && workspace.repositoryPath === state?.chatsRoot
+      ? { label: "New chat", run: () => setChatOpen(true) }
+      : { label: "New workspace", run: () => setWorkspaceDialog(workspace?.repositoryPath ?? "") },
     { label: "Open project folder", run: () => void action(() => window.kairo.openWorkspace()) },
     { label: "Settings", run: () => setSettings(true) },
     { label: "Keyboard shortcuts", run: () => setSettings(true) },
@@ -648,8 +802,20 @@ export function DesktopApp(): React.JSX.Element {
   ];
   const installedAgents = state?.agents.filter((agent) => agent.installed) ?? [];
   const listAll = showAllAgents || (!detecting && !installedAgents.length);
-  const agentPicker = (
+  const agentPicker = (withKairo = false) => (
     <>
+      {withKairo && (
+        <div className={`agent-picker-row ${chatChoice === "kairo" ? "selected" : ""}`}>
+          <button
+            role="option"
+            aria-selected={chatChoice === "kairo"}
+            onClick={() => setChatChoice("kairo")}
+          >
+            <strong>Kairo</strong>
+            <small>Multi-agent chat: start empty, add any agents as tabs in one session</small>
+          </button>
+        </div>
+      )}
       {listAll && (
         <div className="agent-picker-heading">
           <input
@@ -670,13 +836,13 @@ export function DesktopApp(): React.JSX.Element {
           .sort((a, b) => Number(b.installed) - Number(a.installed))
           .map((agent) => (
             <div
-              className={`agent-picker-row ${agentId === agent.id ? "selected" : ""}`}
+              className={`agent-picker-row ${(withKairo ? chatChoice : agentId) === agent.id ? "selected" : ""}`}
               key={agent.id}
             >
               <button
                 role="option"
-                aria-selected={agentId === agent.id}
-                onClick={() => setAgentId(agent.id)}
+                aria-selected={(withKairo ? chatChoice : agentId) === agent.id}
+                onClick={() => (withKairo ? setChatChoice(agent.id) : setAgentId(agent.id))}
               >
                 <strong>{agent.name}</strong>
                 <small>{agent.installed ? agent.commands[0] : "Not installed"}</small>
@@ -729,13 +895,15 @@ export function DesktopApp(): React.JSX.Element {
         <div className="brand">
           <KairoLogo className="brand-mark" />
           <span>Kairo</span>
+          <button
+            className="select-toggle"
+            aria-pressed={selecting}
+            disabled={pending}
+            onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
+          >
+            {selecting ? "Done" : "Select"}
+          </button>
         </div>
-        <button
-          className="new-chat"
-          onClick={() => setWorkspaceDialog(workspace?.repositoryPath ?? "")}
-        >
-          <Icon name="plus" /> New workspace
-        </button>
         {state?.workspaces.some((w) => w.pinned && !w.archivedAt && !w.removedAt) && (
           <section className="pinned-sessions" aria-label="Pinned workspaces">
             <div className="section-label sidebar-section-title">Pinned</div>
@@ -763,6 +931,15 @@ export function DesktopApp(): React.JSX.Element {
                 className="project-heading-row"
                 {...menuHandlers(`${name(group.path)} project actions`, projectActions(group.path))}
               >
+                {selecting && (
+                  <input
+                    type="checkbox"
+                    className="select-box"
+                    aria-label={`Select project ${name(group.path)}`}
+                    checked={pickedProjects.has(group.path)}
+                    onChange={() => setPickedProjects((set) => toggle(set, group.path))}
+                  />
+                )}
                 <button
                   className="project-heading"
                   title={group.path}
@@ -774,6 +951,15 @@ export function DesktopApp(): React.JSX.Element {
                   <Icon name="chevron" />
                   <Icon name="folder" />
                   <span>{name(group.path)}</span>
+                </button>
+                <button
+                  className="icon-button project-add"
+                  aria-label={`New workspace in ${name(group.path)}`}
+                  title="New workspace"
+                  disabled={pending}
+                  onClick={() => setWorkspaceDialog(group.path)}
+                >
+                  <Icon name="plus" />
                 </button>
               </div>
               <div hidden={collapsed[group.path]}>
@@ -800,6 +986,37 @@ export function DesktopApp(): React.JSX.Element {
           ))}
           {!groups.length && <p className="empty-session-list">Open a project to get started</p>}
         </div>
+        <section className="chat-section" aria-label="This computer">
+          <div className="section-label sidebar-section-title">
+            <span>This computer</span>
+            <button
+              className="icon-button"
+              aria-label="New chat"
+              title="New chat"
+              disabled={pending}
+              onClick={newChat}
+            >
+              <Icon name="plus" />
+            </button>
+          </div>
+          {chats.map(renderWorkspace)}
+          {!chats.length && <p className="empty-session-list">No chats yet</p>}
+        </section>
+        {selecting && (
+          <div className="bulk-bar" role="toolbar" aria-label="Selection actions">
+            <span>{pickedCount ? `${pickedCount} selected` : "Select items"}</span>
+            <button disabled={pending || !pickedCount} onClick={() => bulk("archive")}>
+              Archive
+            </button>
+            <button
+              className="danger-outline-button"
+              disabled={pending || !pickedCount}
+              onClick={() => bulk("delete")}
+            >
+              Delete
+            </button>
+          </div>
+        )}
         <button className="settings-link" onClick={() => setSettings(true)}>
           <Icon name="settings" /> Settings
         </button>
@@ -959,9 +1176,47 @@ export function DesktopApp(): React.JSX.Element {
               <option value="light">Light</option>
             </select>
           </label>
+          {archivedChats.length > 0 && (
+            <>
+              <h2>Archived chats</h2>
+              <div className="bulk-row">
+                <button
+                  disabled={pending}
+                  onClick={() =>
+                    void action(async () => {
+                      let last: DesktopBootstrap | undefined;
+                      for (const item of archivedChats)
+                        last = await window.kairo.restoreWorkspace(item.id);
+                      return last;
+                    })
+                  }
+                >
+                  Recover all
+                </button>
+                <button
+                  className="danger-outline-button"
+                  disabled={pending}
+                  onClick={() =>
+                    setConfirm({
+                      title: "Delete all archived chats?",
+                      description: `Permanently delete ${archivedChats.length} archived ${archivedChats.length === 1 ? "chat" : "chats"} and their scratch folders. This cannot be undone.`,
+                      action: async () => {
+                        let last: DesktopBootstrap | undefined;
+                        for (const item of archivedChats)
+                          last = await window.kairo.deleteWorkspace(item.id);
+                        if (last) apply(last);
+                      },
+                    })
+                  }
+                >
+                  Delete all
+                </button>
+              </div>
+            </>
+          )}
           <h2>Workspaces</h2>
           {state?.workspaces
-            .filter((item) => !item.removedAt)
+            .filter((item) => !item.removedAt && !(isChat(item) && item.archivedAt))
             .map((item) => (
               <article className="workspace-catalog-row" key={item.id}>
                 <div>
@@ -984,15 +1239,13 @@ export function DesktopApp(): React.JSX.Element {
                 >
                   {item.archivedAt ? "Restore" : "Open"}
                 </button>
-                {item.managed && (
-                  <button
-                    className="danger-outline-button"
-                    disabled={pending}
-                    onClick={() => deleteWorkspace(item)}
-                  >
-                    Delete
-                  </button>
-                )}
+                <button
+                  className="danger-outline-button"
+                  disabled={pending}
+                  onClick={() => deleteWorkspace(item)}
+                >
+                  Delete
+                </button>
               </article>
             ))}
           {!state?.workspaces.some((item) => !item.removedAt) && (
@@ -1096,7 +1349,14 @@ export function DesktopApp(): React.JSX.Element {
               </div>
             </div>
           )}
-          {!activeTerminalId && !operationId && (
+          {!activeTerminalId && !operationId && !workspace && !groups.length && (
+            <HomeScreen
+              pending={pending}
+              onOpenProject={() => void action(() => window.kairo.openWorkspace())}
+              onNewChat={newChat}
+            />
+          )}
+          {!activeTerminalId && !operationId && (workspace || groups.length > 0) && (
             <div className="welcome">
               <KairoLogo className="welcome-logo" />
               <h1>
@@ -1106,40 +1366,40 @@ export function DesktopApp(): React.JSX.Element {
                     ? "Agent terminal stopped"
                     : workspace
                       ? "Start an agent session"
-                      : "Open your project"}
+                      : "Choose a workspace"}
               </h1>
               <p>
                 {workspace?.archivedAt
                   ? "Restore this workspace to open its agent and terminal tabs. Your files and session history are kept."
                   : current
                     ? "Your workspace and session association are saved."
-                    : "Choose an installed agent and work in its terminal inside Kairo."}
-              </p>
-              <button
-                className="primary"
-                disabled={
-                  pending ||
-                  !!workspace?.unavailable ||
-                  (!!operation && ["checkout", "copy", "setup"].includes(operation.phase))
-                }
-                onClick={() =>
-                  workspace?.archivedAt
-                    ? void action(() => window.kairo.restoreWorkspace(workspace.id))
-                    : current
-                      ? void action(() => window.kairo.startSession(current.id))
-                      : workspace
-                        ? beginSession()
-                        : void action(() => window.kairo.openWorkspace())
-                }
-              >
-                {workspace?.archivedAt
-                  ? "Restore workspace"
-                  : current
-                    ? "Open agent terminal"
                     : workspace
-                      ? "New agent session"
-                      : "Open project folder"}
-              </button>
+                      ? "Choose an installed agent and work in its terminal inside Kairo."
+                      : "Pick one in the sidebar, or press + beside a project to create one."}
+              </p>
+              {workspace && (
+                <button
+                  className="primary"
+                  disabled={
+                    pending ||
+                    !!workspace?.unavailable ||
+                    (!!operation && ["checkout", "copy", "setup"].includes(operation.phase))
+                  }
+                  onClick={() =>
+                    workspace?.archivedAt
+                      ? void action(() => window.kairo.restoreWorkspace(workspace.id))
+                      : current
+                        ? void action(() => window.kairo.startSession(current.id))
+                        : beginSession()
+                  }
+                >
+                  {workspace?.archivedAt
+                    ? "Restore workspace"
+                    : current
+                      ? "Open agent terminal"
+                      : "New agent session"}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1293,17 +1553,19 @@ export function DesktopApp(): React.JSX.Element {
                   running here. Agents in the same workspace edit the same files, and Kairo cannot
                   stop one from overwriting the other.
                 </p>
-                <button
-                  onClick={() => {
-                    setNewOpen(false);
-                    setWorkspaceDialog(workspace.repositoryPath);
-                  }}
-                >
-                  Use a separate workspace instead
-                </button>
+                {workspace.repositoryPath !== state?.chatsRoot && (
+                  <button
+                    onClick={() => {
+                      setNewOpen(false);
+                      setWorkspaceDialog(workspace.repositoryPath);
+                    }}
+                  >
+                    Use a separate workspace instead
+                  </button>
+                )}
               </div>
             )}
-            {agentPicker}
+            {agentPicker()}
             {error && (
               <p className="file-error" role="alert">
                 {error}
@@ -1324,6 +1586,43 @@ export function DesktopApp(): React.JSX.Element {
                 onClick={() => void create()}
               >
                 {pending ? "Opening…" : "Open agent terminal"}
+              </button>
+            </div>
+          </div>
+        </ModalFrame>
+      )}
+      {chatOpen && (
+        <ModalFrame
+          labelledBy="new-chat-title"
+          blocked={pending}
+          onDismiss={() => setChatOpen(false)}
+        >
+          <div className="new-session-dialog">
+            <h2 id="new-chat-title">New chat on this computer</h2>
+            <p className="empty-small">
+              Chats live outside any project. Choose Kairo to run several agents in one session, or
+              start directly with one agent.
+            </p>
+            {agentPicker(true)}
+            {error && (
+              <p className="file-error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="modal-actions">
+              <button disabled={pending} onClick={() => setChatOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="primary"
+                disabled={
+                  pending ||
+                  (chatChoice !== "kairo" &&
+                    !state?.agents.find((agent) => agent.id === chatChoice)?.installed)
+                }
+                onClick={startChat}
+              >
+                {pending ? "Opening…" : "Start chat"}
               </button>
             </div>
           </div>

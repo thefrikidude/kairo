@@ -86,7 +86,9 @@ test("terminal desktop owns independent workspaces, live navigation, Git review 
     await runtime.ready;
     let state = (await request("workspace:open", repo)) as TerminalDesktopBootstrap;
     assert.equal(state.sessions.length, 0); // Opening a repository does not invent a chat.
-    assert.ok(state.activeWorkspaceId);
+    // Adding a project only lists it; no workspace exists until one is created inside it.
+    assert.deepEqual(state.projects, [await realpath(repo)]);
+    assert.equal(state.workspaces.length, 0);
     state = (await request("session:new", "codex", repo, {
       kind: "folder",
     })) as TerminalDesktopBootstrap;
@@ -400,7 +402,7 @@ test("workspace archive drains agent and shell terminals, preserves session flag
     assert.equal(snapshot.workspaces[0].pinned, true);
     assert.ok(snapshot.workspaces[0].archivedAt);
     const reopened = (await request("workspace:open", root)) as TerminalDesktopBootstrap;
-    assert.equal(reopened.activeWorkspaceId, target.id);
+    assert.ok(reopened.projects.includes(root));
     assert.equal(reopened.activeSessionId, undefined);
     assert.deepEqual(await request("worktrees:list", root), []);
     await assert.rejects(request("session:open", current.id), /Restore/);
@@ -425,8 +427,12 @@ test("workspace archive drains agent and shell terminals, preserves session flag
     assert.equal(selected.activeSessionId, undefined);
     const external = join(root, "external-folder");
     await mkdir(external);
-    const opened = (await request("workspace:open", external)) as TerminalDesktopBootstrap;
-    const externalId = opened.activeWorkspaceId!;
+    const externalId = store.registerWorkspace({
+      directory: external,
+      repositoryPath: external,
+      kind: "folder",
+      managed: false,
+    }).id;
     await rm(external, { recursive: true });
     const missing = (await request("workspace:refresh", externalId)) as TerminalDesktopBootstrap;
     assert.equal(missing.workspaces.find((w) => w.id === externalId)?.unavailable, true);

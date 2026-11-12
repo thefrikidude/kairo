@@ -142,6 +142,9 @@ function registerIpc(): void {
   handle("sessions:delete-archived", "sessions:delete-archived");
   handle("worktrees:list", "worktrees:list");
   handle("worktrees:remove", "worktrees:remove");
+  handle("project:remove", "project:remove");
+  handle("chat:create", "chat:create");
+  handle("workspace:delete", "workspace:delete");
   handle("workspace:select", "workspace:select");
   for (const action of [
     "create",

@@ -49,7 +49,8 @@ export class SqliteTerminalSessionStore {
         if (!columns.has(column))
           db.exec(`ALTER TABLE task_workspaces ADD COLUMN ${column} ${type}`);
       db.exec(`CREATE TABLE IF NOT EXISTS workspace_projects (repository_path TEXT PRIMARY KEY, preferences_json TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS workspace_operations (id TEXT PRIMARY KEY, operation_json TEXT NOT NULL);`);
+        CREATE TABLE IF NOT EXISTS workspace_operations (id TEXT PRIMARY KEY, operation_json TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS registered_projects (repository_path TEXT PRIMARY KEY, added_at INTEGER NOT NULL);`);
       for (const row of db
         .prepare("SELECT id, branch, directory FROM task_workspaces WHERE name IS NULL")
         .all() as { id: string; branch?: string; directory: string }[])
@@ -93,8 +94,14 @@ export class SqliteTerminalSessionStore {
     this.db.close();
   }
   registerWorkspace(input: Omit<TaskWorkspace, "id" | "createdAt" | "removedAt">): TaskWorkspace {
-    const previous = this.workspaces(true).find((item) => item.directory === input.directory);
-    if (previous?.removedAt) throw new Error("This workspace was removed. Choose another folder.");
+    let previous = this.workspaces(true).find((item) => item.directory === input.directory);
+    if (previous?.removedAt) {
+      if (previous.managed) throw new Error("This workspace was removed. Choose another folder.");
+      // Unmanaged folders are only unlisted when their project is deleted, so adding the
+      // project again may bring the same folder back.
+      this.db.prepare("UPDATE task_workspaces SET removed_at=NULL WHERE id=?").run(previous.id);
+      previous = { ...previous, removedAt: undefined, archivedAt: undefined };
+    }
     const workspace: TaskWorkspace = {
       ...previous,
       ...input,
@@ -219,6 +226,22 @@ export class SqliteTerminalSessionStore {
     return row
       ? JSON.parse(row.preferences_json)
       : { repositoryPath, setupScript: "", copyPaths: [] };
+  }
+  /** Projects the user added, shown even before they have a workspace. */
+  projects(): string[] {
+    return (
+      this.db
+        .prepare("SELECT repository_path FROM registered_projects ORDER BY added_at")
+        .all() as { repository_path: string }[]
+    ).map((row) => row.repository_path);
+  }
+  registerProject(repositoryPath: string): void {
+    this.db
+      .prepare("INSERT OR IGNORE INTO registered_projects VALUES (?, ?)")
+      .run(repositoryPath, Date.now());
+  }
+  removeProject(repositoryPath: string): void {
+    this.db.prepare("DELETE FROM registered_projects WHERE repository_path=?").run(repositoryPath);
   }
   savePreferences(value: ProjectPreferences): void {
     this.db

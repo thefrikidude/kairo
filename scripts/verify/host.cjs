@@ -1,7 +1,7 @@
 // Electron entry for verification runs. Starts Kairo with an isolated state directory and a
 // loopback control server so an agent can inspect and drive the real app across many commands.
 // Started only by `scripts/verify/control.mjs launch`; never run it against real user data.
-const { app } = require("electron");
+const { app, screen } = require("electron");
 const http = require("node:http");
 const fs = require("node:fs");
 const { join, resolve, sep } = require("node:path");
@@ -19,6 +19,18 @@ const windows = [];
 const errors = [];
 app.on("browser-window-created", (_, window) => {
   windows.push(window);
+  // Test windows open on the built-in MacBook display, never an external monitor.
+  const builtIn = screen.getAllDisplays().find((display) => display.internal);
+  if (builtIn) {
+    const { x, y, width, height } = builtIn.workArea;
+    const [w, h] = window.getSize();
+    window.setBounds({
+      x: x + Math.max(0, Math.round((width - w) / 2)),
+      y: y + Math.max(0, Math.round((height - h) / 2)),
+      width: Math.min(w, width),
+      height: Math.min(h, height),
+    });
+  }
   window.webContents.setBackgroundThrottling(false);
   window.webContents.on("console-message", (event) => {
     if (event.level === "error") errors.push(event.message);

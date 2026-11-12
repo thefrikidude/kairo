@@ -14,6 +14,9 @@ const methods = new Set([
   "terminal:resize",
   "terminal:close",
   "workspace:open",
+  "project:remove",
+  "chat:create",
+  "workspace:delete",
   "workspace:select",
   ...[
     "create",

@@ -5,8 +5,11 @@ import {
 } from "../../../infrastructure/agents/native-session-reader.js";
 import { WorkspaceLifecycle } from "./workspace-lifecycle.js";
 import type { WorkspaceCreation } from "../../../domain/task-workspace.js";
-import { realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { mkdir, realpath, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { stateDir } from "../../../infrastructure/filesystem/platform-paths.js";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { GitWorkspaces } from "../../../infrastructure/repository/git-workspaces.js";
 import { SqliteTerminalSessionStore } from "../../../infrastructure/persistence/sqlite-terminal-session-store.js";
 import { TerminalAgentDiscovery } from "../../../infrastructure/agents/terminal-agent-discovery.js";
@@ -96,7 +99,14 @@ export async function createTerminalDesktopRuntime(
     const value = store.workspace(id);
     if (!value || value.removedAt) return;
     try {
-      store.reconcileWorkspace(id, await git.describe(value.directory));
+      const description = await git.describe(value.directory);
+      // A plain folder describes itself as its own project, which would pull a chat out of
+      // "This computer". Chats live directly under the chats root, so keep them there.
+      const root = chatsRoot();
+      store.reconcileWorkspace(
+        id,
+        dirname(value.directory) === root ? { ...description, repositoryPath: root } : description,
+      );
       store.updateWorkspace(id, { unavailable: false });
     } catch {
       store.updateWorkspace(id, { unavailable: true });
@@ -120,6 +130,17 @@ export async function createTerminalDesktopRuntime(
     if (typeof id !== "string") throw new Error("Choose a workspace or session.");
     return workspace(store.get(id)?.workspaceId ?? id);
   }
+  /** Chats are folder workspaces in private scratch directories, grouped apart from projects. */
+  const chatsRoot = () => {
+    const root = join(stateDir(), "chats");
+    // Workspaces store resolved paths, so the group key must be resolved too (macOS /var symlink).
+    try {
+      return realpathSync(root);
+    } catch {
+      return root;
+    }
+  };
+
   function snapshot(navigationOnly = false): TerminalDesktopBootstrap {
     const active = store.activeSessionId();
     const activeSessionId =
@@ -134,6 +155,8 @@ export async function createTerminalDesktopRuntime(
       sessions: store.list(),
       archivedSessions: navigationOnly ? [] : store.list(true),
       workspaces: store.workspaces(true),
+      projects: store.projects(),
+      chatsRoot: chatsRoot(),
       terminals: terminals.list(),
       activeSessionId,
       activeWorkspaceId: activeSessionId
@@ -409,9 +432,68 @@ export async function createTerminalDesktopRuntime(
         return catalog;
       case "workspace:open": {
         if (typeof first !== "string") throw new Error("Choose a folder.");
-        const target = store.registerWorkspace(await git.describe(first));
+        // Adding a project only lists it; workspaces are created inside it on demand.
+        store.registerProject((await git.describe(first)).repositoryPath);
+        return snapshot();
+      }
+      case "chat:create": {
+        // JSON transport turns an omitted agent into null.
+        if (first != null && typeof first !== "string")
+          throw new Error("Choose an installed agent.");
+        if (first) {
+          agentDefinition(first);
+          if (!(await agents.refresh()).find((agent) => agent.id === first)?.installed)
+            throw new Error("Install this agent, then refresh the agent list.");
+        }
+        const root = chatsRoot();
+        await mkdir(root, { recursive: true, mode: 0o700 });
+        const resolvedRoot = await realpath(root);
+        const directory = join(resolvedRoot, randomUUID().slice(0, 8));
+        await mkdir(directory, { mode: 0o700 });
+        const target = store.registerWorkspace({
+          repositoryPath: resolvedRoot,
+          directory,
+          kind: "folder",
+          managed: false,
+          name: "New chat",
+        });
         store.setActiveSession(undefined);
         store.setActiveWorkspace(target.id);
+        if (first) {
+          const current = store.create(target.id, first);
+          store.setActiveSession(current.id);
+          await start(current.id, "fresh");
+        }
+        return snapshot();
+      }
+      case "workspace:delete": {
+        // Deleting always archives first so terminals and agent sessions stop cleanly.
+        const target = workspace(first);
+        if (!target.archivedAt)
+          await handle({ ...request, method: "workspace:archive", args: [target.id] });
+        if (target.managed)
+          await handle({ ...request, method: "worktrees:remove", args: [target.id] });
+        else {
+          // Only chat scratch folders are ours to delete; project folders stay on disk.
+          if (dirname(target.directory) === chatsRoot())
+            await rm(target.directory, { recursive: true, force: true });
+          store.markWorkspaceRemoved(target.id);
+        }
+        for (const current of [...store.list(), ...store.list(true)].filter(
+          (item) => item.workspaceId === target.id,
+        ))
+          store.delete(current.id);
+        return snapshot();
+      }
+      case "project:remove": {
+        if (typeof first !== "string") throw new Error("Choose a project.");
+        // Deleting a project deletes its workspaces: worktrees go through Git's own safety
+        // checks, while shared folders are only unlisted and never removed from disk.
+        for (const owned of store
+          .workspaces()
+          .filter((item) => item.repositoryPath === first && !item.removedAt))
+          await handle({ ...request, method: "workspace:delete", args: [owned.id] });
+        store.removeProject(first);
         return snapshot();
       }
       case "workspace:select": {

@@ -53,6 +53,9 @@ export type TerminalDesktopBootstrap = {
   sessions: TerminalSession[];
   archivedSessions: TerminalSession[];
   workspaces: TaskWorkspace[];
+  projects: string[];
+  /** Parent folder of chat workspaces; a project path equal to this is the "This computer" group. */
+  chatsRoot: string;
   terminals: WorkspaceTerminal[];
   activeSessionId?: string;
   activeWorkspaceId?: string;
@@ -60,6 +63,9 @@ export type TerminalDesktopBootstrap = {
   sessionNotices: Record<string, string>;
 };
 export interface TerminalDesktopApi {
+  removeProject(path: string): Promise<TerminalDesktopBootstrap>;
+  createChat(agentId?: string): Promise<TerminalDesktopBootstrap>;
+  deleteWorkspace(id: string): Promise<TerminalDesktopBootstrap>;
   createWorkspace(input: WorkspaceCreation): Promise<TerminalDesktopBootstrap>;
   projectPreferences(project: string, input?: ProjectPreferences): Promise<ProjectPreferences>;
   projectRefs(project: string, refresh?: boolean): Promise<ProjectRefs>;

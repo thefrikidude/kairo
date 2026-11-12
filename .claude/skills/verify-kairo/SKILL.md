@@ -27,6 +27,8 @@ baseline, a plain folder, and three sessions: `ticker` and `quiet` share the Git
 - The fixture `claude` (alias `quiet`) is idle until asked, then works for about a second.
 - `quiet` and `plain` start stopped. Start them with `start-session <alias>`.
 
+For first-run states, `launch --empty` starts with no projects (home screen), and `launch --empty --with-project` adds the repo as a project with no workspace.
+
 Each launch prints a run ID and the artifacts folder. The newest run is remembered, so later
 commands need no flags. For side-by-side runs set `KAIRO_VERIFY_RUN=<run id>` or pass `--run`.
 

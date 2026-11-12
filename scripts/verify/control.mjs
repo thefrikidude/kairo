@@ -128,12 +128,20 @@ async function launch() {
     pathToFileURL(join(repo, "dist/infrastructure/repository/git-workspaces.js")).href
   );
   const database = await SqliteTerminalSessionStore.open(join(state, "sessions.sqlite"));
-  const shared = database.registerWorkspace(await new GitWorkspaces().describe(project));
-  const ticker = database.create(shared.id, "codex", "Ticker agent");
-  const quiet = database.create(shared.id, "claude", "Quiet agent");
-  const folder = database.registerWorkspace(await new GitWorkspaces().describe(plain));
-  const plainAgent = database.create(folder.id, "codex", "Plain agent");
-  database.setActiveSession(ticker.id);
+  // --empty skips seeding so the first-run home screen can be checked.
+  const seeded = {};
+  // --with-project adds the repo as a project only, like opening a folder, with no workspace.
+  if (flags.empty && flags["with-project"]) database.registerProject(project);
+  if (!flags.empty) {
+    const shared = database.registerWorkspace(await new GitWorkspaces().describe(project));
+    const ticker = database.create(shared.id, "codex", "Ticker agent");
+    const quiet = database.create(shared.id, "claude", "Quiet agent");
+    const folder = database.registerWorkspace(await new GitWorkspaces().describe(plain));
+    const plainAgent = database.create(folder.id, "codex", "Plain agent");
+    database.setActiveSession(ticker.id);
+    seeded.sessions = { ticker: ticker.id, quiet: quiet.id, plain: plainAgent.id };
+    seeded.workspaces = { shared: shared.id, plain: folder.id };
+  }
   database.close();
 
   const token = randomBytes(16).toString("hex");
@@ -172,8 +180,7 @@ async function launch() {
     launcherPid: child.pid,
     commit: head(),
     startedAt: new Date().toISOString(),
-    sessions: { ticker: ticker.id, quiet: quiet.id, plain: plainAgent.id },
-    workspaces: { shared: shared.id, plain: folder.id },
+    ...seeded,
   };
   const abort = async (message) => {
     await cleanup(instance, { quiet: true });
@@ -194,12 +201,23 @@ async function launch() {
   await writeFile(currentFile, runId);
 
   // Ready means usable: the active agent's terminal is mounted and accepting input.
-  const ready = "!!document.querySelector('.agent-workspace .xterm-helper-textarea')";
-  const readyBy = Date.now() + 60_000;
-  for (;;) {
-    if (await call(instance, { cmd: "eval", code: ready }).catch(() => false)) break;
-    if (Date.now() > readyBy) return abort("The app started but never reached a usable state.");
-    await sleep(150);
+  const waitUntil = async (code) => {
+    const readyBy = Date.now() + 60_000;
+    for (;;) {
+      if (await call(instance, { cmd: "eval", code }).catch(() => false)) return;
+      if (Date.now() > readyBy) return abort("The app started but never reached a usable state.");
+      await sleep(150);
+    }
+  };
+  if (flags.empty) await waitUntil("!!document.querySelector('.sidebar')");
+  else {
+    // Kairo opens on a chat in "This computer"; move to the seeded project like a user would.
+    await waitUntil("!!document.querySelector('.chat-section .session-row.selected')");
+    await call(instance, {
+      cmd: "eval",
+      code: `window.kairo.selectWorkspace(${JSON.stringify(instance.workspaces.shared)}).then(() => true)`,
+    });
+    await waitUntil("!!document.querySelector('.agent-workspace .xterm-helper-textarea')");
   }
   show({
     runId,

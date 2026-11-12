@@ -2942,3 +2942,69 @@ button svg {
 .review-hidden small {
   color: var(--muted);
 }
+.project-add {
+  flex: none;
+  margin-right: 4px;
+  opacity: 0;
+}
+.project-heading-row:hover .project-add,
+.project-add:focus-visible {
+  opacity: 1;
+}
+.project-add svg {
+  width: 14px;
+  height: 14px;
+}
+.home-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(560px, 90%);
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.home-input textarea {
+  resize: none;
+  width: 100%;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font: inherit;
+}
+.home-input button {
+  align-self: flex-end;
+}
+.home-screen {
+  gap: 16px;
+}
+
+/* Multi-select in the sidebar */
+.select-toggle {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.select-box {
+  flex: none;
+  margin: 0 4px 0 8px;
+  accent-color: var(--accent, #7c9cff);
+}
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  font-size: 12px;
+}
+.bulk-bar span {
+  flex: 1;
+}
+.bulk-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
