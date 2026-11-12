@@ -6,6 +6,14 @@ import type {
   WorkspaceReview,
 } from "../../shared/api.js";
 import { Icon, KairoLogo, ModalFrame } from "./chrome.js";
+import { Button } from "./components/ui/button.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./components/ui/select.js";
 import { HomeScreen } from "./home-screen.js";
 import { navigateTabs } from "./tab-navigation.js";
 import { rememberedShell, openWorkspaceShell } from "./workspace-selection.js";
@@ -897,19 +905,24 @@ export function DesktopApp(): React.JSX.Element {
         aria-label="Settings sections"
         hidden={!sidebarOpen || !settings}
       >
-        <button className="settings-back" onClick={() => setSettings(false)}>
+        <Button
+          variant="ghost"
+          className="settings-back h-9 justify-start text-muted-foreground"
+          onClick={() => setSettings(false)}
+        >
           ← Back to app
-        </button>
+        </Button>
         <div className="section-label sidebar-section-title">Settings</div>
         {settingsTabs.map(([id, label]) => (
-          <button
+          <Button
             key={id}
-            className={`settings-tab ${settingsTab === id ? "selected" : ""}`}
+            variant="ghost"
+            className={`settings-tab h-9 justify-start font-normal ${settingsTab === id ? "selected bg-accent font-medium" : "text-muted-foreground"}`}
             aria-current={settingsTab === id ? "page" : undefined}
             onClick={() => setSettingsTab(id)}
           >
             {label}
-          </button>
+          </Button>
         ))}
       </aside>
       <aside className="sidebar" aria-label="Workspaces" hidden={!sidebarOpen || settings}>
@@ -1187,18 +1200,22 @@ export function DesktopApp(): React.JSX.Element {
           <h2>{settingsTabs.find(([id]) => id === settingsTab)?.[1]}</h2>
           {settingsTab === "general" && (
             <>
-              <label className="settings-field">
-                Appearance
-                <select
-                  aria-label="Theme"
+              <div className="settings-field">
+                <span id="theme-label">Appearance</span>
+                <Select
                   value={themeChoice}
-                  onChange={(event) => setThemeChoice(event.target.value as ThemeChoice)}
+                  onValueChange={(value) => setThemeChoice(value as ThemeChoice)}
                 >
-                  <option value="system">System</option>
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                </select>
-              </label>
+                  <SelectTrigger aria-labelledby="theme-label" className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="system">System</SelectItem>
+                    <SelectItem value="dark">Dark</SelectItem>
+                    <SelectItem value="light">Light</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <p className="empty-small">
                 Agent conversations run inside the selected CLI. Models, authentication and
                 approvals are managed by that agent.
@@ -1210,7 +1227,9 @@ export function DesktopApp(): React.JSX.Element {
               {!archivedChats.length && <p className="empty-small">No archived chats</p>}
               {archivedChats.length > 0 && (
                 <div className="bulk-row">
-                  <button
+                  <Button
+                    variant="outline"
+                    size="sm"
                     disabled={pending}
                     onClick={() =>
                       void action(async () => {
@@ -1222,9 +1241,10 @@ export function DesktopApp(): React.JSX.Element {
                     }
                   >
                     Recover all
-                  </button>
-                  <button
-                    className="danger-outline-button"
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
                     disabled={pending}
                     onClick={() =>
                       setConfirm({
@@ -1240,7 +1260,7 @@ export function DesktopApp(): React.JSX.Element {
                     }
                   >
                     Delete all
-                  </button>
+                  </Button>
                 </div>
               )}
               {archivedChats.map((item) => (
@@ -1249,19 +1269,22 @@ export function DesktopApp(): React.JSX.Element {
                     <strong>{item.name ?? name(item.directory)}</strong>
                     <small>archived</small>
                   </div>
-                  <button
+                  <Button
+                    variant="outline"
+                    size="sm"
                     disabled={pending}
                     onClick={() => void action(() => window.kairo.restoreWorkspace(item.id))}
                   >
                     Restore
-                  </button>
-                  <button
-                    className="danger-outline-button"
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
                     disabled={pending}
                     onClick={() => deleteWorkspace(item)}
                   >
                     Delete
-                  </button>
+                  </Button>
                 </article>
               ))}
             </>
@@ -1277,7 +1300,9 @@ export function DesktopApp(): React.JSX.Element {
                       <small>{item.archivedAt ? `${item.kind} · archived` : item.kind}</small>
                       <code>{item.directory}</code>
                     </div>
-                    <button
+                    <Button
+                      variant="outline"
+                      size="sm"
                       disabled={pending}
                       onClick={() => {
                         setSettings(false);
@@ -1291,14 +1316,15 @@ export function DesktopApp(): React.JSX.Element {
                       }}
                     >
                       {item.archivedAt ? "Restore" : "Open"}
-                    </button>
-                    <button
-                      className="danger-outline-button"
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
                       disabled={pending}
                       onClick={() => deleteWorkspace(item)}
                     >
                       Delete
-                    </button>
+                    </Button>
                   </article>
                 ))}
               {!state?.workspaces.some((item) => !item.removedAt) && (
@@ -1318,7 +1344,9 @@ export function DesktopApp(): React.JSX.Element {
                       {state?.workspaces.find((item) => item.id === session.workspaceId)?.directory}
                     </code>
                   </div>
-                  <button
+                  <Button
+                    variant="outline"
+                    size="sm"
                     disabled={
                       pending ||
                       !!state?.workspaces.find((item) => item.id === session.workspaceId)?.removedAt
@@ -1326,9 +1354,10 @@ export function DesktopApp(): React.JSX.Element {
                     onClick={() => void action(() => window.kairo.restoreSession(session.id))}
                   >
                     Restore
-                  </button>
-                  <button
-                    className="danger-outline-button"
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
                     onClick={() =>
                       setConfirm({
                         title: "Delete closed tab?",
@@ -1338,7 +1367,7 @@ export function DesktopApp(): React.JSX.Element {
                     }
                   >
                     Delete
-                  </button>
+                  </Button>
                 </article>
               ))}
             </>

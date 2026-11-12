@@ -1170,20 +1170,6 @@ button svg {
   overflow: auto;
   background: var(--sidebar);
 }
-.settings-back {
-  text-align: left;
-  color: var(--muted);
-  padding: 8px;
-  border-radius: 7px;
-}
-.settings-back:hover,
-.settings-nav:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-.settings-back span {
-  margin-right: 8px;
-}
 .settings-title {
   margin: 26px 8px 12px;
   font-size: 18px;
@@ -2962,22 +2948,11 @@ button svg {
   flex: none;
   margin: 0;
 }
-.settings-back {
-  align-self: flex-start;
-  margin-bottom: 12px;
-  color: var(--muted);
-}
-.settings-tab {
-  text-align: left;
-  padding: 7px 12px;
-  border-radius: 8px;
-  color: var(--muted);
-}
-.settings-tab:hover,
-.settings-tab.selected {
-  color: var(--text, inherit);
-  background: var(--hover, rgba(255, 255, 255, 0.07));
-}
 .settings-content .shortcut-list {
   max-width: 760px;
+}
+
+.settings-content .empty-small {
+  text-align: left;
+  max-width: 640px;
 }
