@@ -38,5 +38,4 @@ sections in this order: `Sub-features`, `How to get to it (user POV)`,
 
 - [Terminal tabs](./terminal-tabs.md) covers agent and plain terminal tabs and switching between them.
 - [Shared agents](./shared-agents.md) covers the shared-workspace chip and warning dialog.
-- [Change map](./change-map.md) covers the graph, contested files, review marks, expand and the map window.
-- [Git review](./git-review.md) covers the changed-file list and diff view.
+- [Git review](./git-review.md) covers the stacked diff review cards.

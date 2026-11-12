@@ -28,12 +28,6 @@ import type {
   FileSearch,
   WorkspaceEntry,
 } from "../../../infrastructure/tools/workspace-files.js";
-import type {
-  MapLink,
-  MapNode,
-  MapSession,
-  WorkspaceMap,
-} from "../../../infrastructure/tools/workspace-map.js";
 
 export type {
   TerminalAgentInfo,
@@ -51,20 +45,8 @@ export type {
   FileSnapshot,
   FileSearch,
   WorkspaceEntry,
-  MapLink,
-  MapNode,
-  MapSession,
-  WorkspaceMap,
 };
 export type { ProjectPreferences, WorkspaceCreation, WorkspaceOperation, ProjectRefs };
-/** What a standalone map window needs; the main process validates every field. */
-export type MapWindowRequest = {
-  sessionId: string;
-  workspaceId: string;
-  title: string;
-  scope: ReviewScope;
-  canReviewTask: boolean;
-};
 export type TerminalDesktopBootstrap = {
   operations: WorkspaceOperationSummary[];
   agents: TerminalAgentInfo[];
@@ -138,7 +120,5 @@ export interface TerminalDesktopApi {
     path: string,
     scope?: ReviewScope,
   ): Promise<{ diff: string; unavailable?: string }>;
-  map(id: string, scope?: ReviewScope): Promise<WorkspaceMap>;
-  openMapWindow(input: MapWindowRequest): Promise<void>;
   openInCursor(id: string, path: string): Promise<void>;
 }

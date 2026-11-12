@@ -23,8 +23,6 @@ import {
   changedFileReview,
   type ReviewScope,
 } from "../../../infrastructure/tools/workspace-review.js";
-import { workspaceMap, type WorkspaceMap } from "../../../infrastructure/tools/workspace-map.js";
-import { ChangeAttribution, ChangeTracker } from "../../../infrastructure/tools/change-tracker.js";
 import type { WorkspaceTerminal } from "../../../domain/workspace-terminal.js";
 import type {
   TerminalSession,
@@ -75,65 +73,11 @@ export async function createTerminalDesktopRuntime(
   const removing = new Set<string>();
   const mutations = new Set<Promise<unknown>>();
   const pendingTerminalCreates = new Map<string, number>();
-  /** Which sessions touched which files, per workspace; kept after a tracker stops for review. */
-  const attributions = new Map<string, ChangeAttribution>();
-  const trackers = new Map<string, ChangeTracker>();
   function emit(event: string, payload: unknown): void {
     if (closed) return;
     emitEvent(event, payload);
-    if (
-      event === "terminal:closed" ||
-      (event === "terminal:state" && (payload as WorkspaceTerminal).state === "exited")
-    )
-      stopIdleTrackers();
   }
   const terminals = options.terminals ?? new WorkspaceTerminals(emit);
-  const workingSessions = (workspaceId: string): string[] =>
-    terminals
-      .list(workspaceId)
-      .filter((terminal) => terminal.state === "running" && terminal.activity === "working")
-      .flatMap((terminal) => (terminal.sessionId ? [terminal.sessionId] : []));
-  function trackChanges(target: { id: string; directory: string }): void {
-    if (closed || trackers.has(target.id)) return;
-    const attribution = attributions.get(target.id) ?? new ChangeAttribution();
-    attributions.set(target.id, attribution);
-    const tracker = new ChangeTracker(
-      target.directory,
-      () => workingSessions(target.id),
-      attribution,
-    );
-    if (tracker.start()) trackers.set(target.id, tracker);
-  }
-  /** Stops watching workspaces whose last agent exited; what was learned stays available. */
-  function stopIdleTrackers(): void {
-    for (const [workspaceId, tracker] of trackers)
-      if (
-        !terminals
-          .list(workspaceId)
-          .some((terminal) => terminal.sessionId && terminal.state === "running")
-      ) {
-        tracker.stop();
-        trackers.delete(workspaceId);
-      }
-  }
-  function withAttribution(workspaceId: string, map: WorkspaceMap): WorkspaceMap {
-    const attribution = attributions.get(workspaceId);
-    if (!attribution) return map;
-    const used = new Set<string>();
-    const nodes = map.nodes.map((node) => {
-      const sessions = attribution.sessionsFor(node.path);
-      for (const id of sessions) used.add(id);
-      return sessions.length ? { ...node, sessions } : node;
-    });
-    return {
-      ...map,
-      nodes,
-      sessions: [...used].map((id) => {
-        const known = store.get(id);
-        return { id, title: known?.title ?? "Agent", agentId: known?.agentId ?? "" };
-      }),
-    };
-  }
   const archiving = new Set<string>();
   const lifecycle = new WorkspaceLifecycle(
     store,
@@ -340,7 +284,6 @@ export async function createTerminalDesktopRuntime(
           captures.set(id, { lookup, baseline });
         }
         if (closed) throw new Error("Kairo is shutting down.");
-        trackChanges(target);
         await terminals.createAgent(target.id, target.directory, launch);
         if (mode === "fresh" || picker) store.clearNativeSession(id);
         store.markStarted(id, since);
@@ -431,8 +374,6 @@ export async function createTerminalDesktopRuntime(
     terminals.beginClose();
     if (nativeTimer) clearTimeout(nativeTimer);
     closePromise = (async () => {
-      for (const tracker of trackers.values()) tracker.stop();
-      trackers.clear();
       await ready.catch(() => {});
       await lifecycle.close();
       await Promise.allSettled([...mutations, ...starts.values()]);
@@ -669,9 +610,6 @@ export async function createTerminalDesktopRuntime(
             throw new Error("Close this workspace's terminals before removing it.");
           await git.remove(target);
           store.markWorkspaceRemoved(target.id);
-          trackers.get(target.id)?.stop();
-          trackers.delete(target.id);
-          attributions.delete(target.id);
           return snapshot();
         } finally {
           removing.delete(target.id);
@@ -725,17 +663,6 @@ export async function createTerminalDesktopRuntime(
         const target = associatedWorkspace(first);
         const scope = second === "task" ? "task" : "working";
         return workspaceReview(target.directory, scope, target.baseCommit);
-      }
-      case "workspace:map": {
-        const target = associatedWorkspace(first);
-        return withAttribution(
-          target.id,
-          await workspaceMap(
-            target.directory,
-            second === "task" ? "task" : "working",
-            target.baseCommit,
-          ),
-        );
       }
       case "workspace:diff": {
         const target = associatedWorkspace(first);

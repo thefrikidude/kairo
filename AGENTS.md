@@ -30,8 +30,7 @@ running anything that loads them, such as the Electron smoke scripts.
   - `terminal`: PTY management and the working/waiting/idle activity inference.
   - `persistence`: the SQLite store for workspaces and sessions.
   - `repository`, `workspaces`: Git worktrees and workspace lifecycle.
-  - `tools`: read-only review (`workspace-review`), the change map (`workspace-map`) and
-    per-session change attribution (`change-tracker`).
+  - `tools`: read-only review (`workspace-review`) and file browsing (`workspace-files`).
 - `src/interface/desktop`: the app shell.
   - `main` (Electron main process), `preload`, `backend` (Node child process), `renderer`
     (React UI, one `style.css`), `shared` (types shared across the process boundary).
@@ -48,8 +47,7 @@ JSON lines → `terminal-runtime.ts`. Adding a method means touching all of thes
 4. `src/interface/desktop/backend/protocol.ts`: add the method to the allowed set.
 5. `src/interface/desktop/backend/terminal-runtime.ts`: the `handle` switch.
 
-Only the main window is trusted by default. Standalone map windows may call `workspace:map`,
-`workspace:diff` and `workspace:open-cursor` only. Keep it that way.
+Only the main window is trusted for IPC. Keep it that way.
 
 ## Conventions
 
