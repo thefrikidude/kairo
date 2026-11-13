@@ -90,6 +90,7 @@ export function DesktopApp(): React.JSX.Element {
   const [detecting, setDetecting] = useState(false);
   const [rename, setRename] = useState<{ id: string; title: string; workspace?: boolean }>();
   const [rowMenu, setRowMenu] = useState<ContextMenuState>();
+  const shellWhenReady = useRef<string | undefined>(undefined);
   const [layout, setLayout] = useState<PaneNode>();
   const [dragging, setDragging] = useState<string>();
   const [paneTabs, setPaneTabs] = useState<Record<string, string>>({});
@@ -600,7 +601,14 @@ export function DesktopApp(): React.JSX.Element {
       ? operation?.workspaceId
       : undefined;
   useEffect(() => {
-    if (readyWorkspaceId) void chooseWorkspace(readyWorkspaceId);
+    if (!readyWorkspaceId) return;
+    const wantsShell = shellWhenReady.current === operationId;
+    void (async () => {
+      await chooseWorkspace(readyWorkspaceId);
+      if (!wantsShell) return;
+      shellWhenReady.current = undefined;
+      await newShell(readyWorkspaceId, true);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readyWorkspaceId]);
   const menuHandlers = (label: string, actions: ContextAction[]) => ({
@@ -1385,12 +1393,16 @@ export function DesktopApp(): React.JSX.Element {
         <WorkspaceDialog
           initialProject={workspaceDialog}
           state={state}
-          apply={(value) => {
+          apply={(value, options) => {
             apply(value);
             const op = value.operations.find(
               (op) => !state.operations.some((old) => old.id === op.id),
             );
             if (op) setOperationId(op.id);
+            if (!options?.terminal) return;
+            // A worktree is prepared in the background; its shell opens once it is ready.
+            if (op) shellWhenReady.current = op.id;
+            else if (value.activeWorkspaceId) void newShell(value.activeWorkspaceId, true);
           }}
           close={() => setWorkspaceDialog(undefined)}
         />
