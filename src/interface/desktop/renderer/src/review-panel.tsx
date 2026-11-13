@@ -264,14 +264,21 @@ export default memo(function ReviewPanel({
     <section className="review-panel">
       <div className="review-scope">
         <Select value={scope} onValueChange={(value) => onScope(value as ReviewScope)}>
-          <SelectTrigger aria-label="Review scope" className="h-9 w-full min-w-0 text-[13px]">
+          <SelectTrigger
+            aria-label="Review scope"
+            className="h-9 w-full min-w-0 justify-between text-left text-[13px] [&>span]:truncate"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {canReviewTask && (
-              <SelectItem value="task">Task changes · since starting commit</SelectItem>
+              <SelectItem value="task" title="Everything changed since this task started">
+                Task changes
+              </SelectItem>
             )}
-            <SelectItem value="working">Working tree · staged and unstaged</SelectItem>
+            <SelectItem value="working" title="Staged and unstaged changes">
+              Working tree
+            </SelectItem>
           </SelectContent>
         </Select>
         <small>
