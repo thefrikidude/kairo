@@ -94,7 +94,13 @@ export const TerminalView = memo(function TerminalView({
     fit.current = () => {
       if (visibleRef.current && element.clientWidth && element.clientHeight) addon.fit();
     };
-    const observer = new ResizeObserver(() => fit.current());
+    // Refit once a burst of size changes settles; every refit resizes the shell behind it, which
+    // agents answer by redrawing the whole screen.
+    let refit: number | undefined;
+    const observer = new ResizeObserver(() => {
+      window.clearTimeout(refit);
+      refit = window.setTimeout(() => fit.current(), 60);
+    });
     observeResize.current = (active) => {
       observer.disconnect();
       if (active) observer.observe(element);
@@ -114,6 +120,7 @@ export const TerminalView = memo(function TerminalView({
     return () => {
       disposed = true;
       unsubscribe();
+      window.clearTimeout(refit);
       observer.disconnect();
       stopTheme();
       input.dispose();

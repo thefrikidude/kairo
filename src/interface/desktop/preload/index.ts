@@ -65,6 +65,9 @@ const api: DesktopApi = {
   onTerminalClosed: (listener) => subscribe("terminal:closed", listener),
   onRuntimeError: (listener) => subscribe("runtime:error", listener),
   onSessionsChanged: (listener) => subscribe("sessions:changed", listener),
+  onZoom: (listener) => subscribe("zoom:changed", listener),
+  adjustZoom: (delta) => ipcRenderer.invoke("zoom:adjust", delta),
+  resetZoom: () => ipcRenderer.invoke("zoom:reset"),
 };
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {

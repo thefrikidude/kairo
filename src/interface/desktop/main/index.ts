@@ -4,7 +4,9 @@ import {
   dialog,
   shell,
   ipcMain,
+  Menu,
   nativeImage,
+  type MenuItemConstructorOptions,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
 } from "electron";
@@ -24,6 +26,52 @@ const pending = new Map<number, { resolve(value: unknown): void; reject(error: E
 
 function send(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+/** Zoom steps of 10%, within a range where the layout stays usable. */
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2;
+let zoomFactor = 1;
+
+function setZoom(next: number): number {
+  zoomFactor = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)) * 10) / 10;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.setZoomFactor(zoomFactor);
+  send("zoom:changed", Math.round(zoomFactor * 100));
+  return Math.round(zoomFactor * 100);
+}
+
+function buildMenu(): Menu {
+  const zoomItems: MenuItemConstructorOptions[] = [
+    { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => setZoom(1) },
+    { label: "Zoom In", accelerator: "CmdOrCtrl+Plus", click: () => setZoom(zoomFactor + 0.1) },
+    // The unshifted key on most layouts; hidden so the menu lists one Zoom In.
+    {
+      label: "Zoom In",
+      accelerator: "CmdOrCtrl+=",
+      visible: false,
+      click: () => setZoom(zoomFactor + 0.1),
+    },
+    { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => setZoom(zoomFactor - 0.1) },
+  ];
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        ...zoomItems,
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    { role: "windowMenu" },
+  ];
+  return Menu.buildFromTemplate(template);
 }
 
 function assertTrusted(event: IpcMainEvent | IpcMainInvokeEvent): void {
@@ -107,6 +155,14 @@ function registerIpc(): void {
       assertTrusted(event);
       return request(method, args);
     });
+  ipcMain.handle("zoom:adjust", (event, delta: unknown) => {
+    assertTrusted(event);
+    return setZoom(zoomFactor + (typeof delta === "number" ? delta : 0));
+  });
+  ipcMain.handle("zoom:reset", (event) => {
+    assertTrusted(event);
+    return setZoom(1);
+  });
   handle("desktop:bootstrap", "bootstrap");
   handle("sessions:archived", "sessions:archived");
   handle("workspace:operation", "workspace:operation");
@@ -239,6 +295,7 @@ app
     }
     await startBackend();
     registerIpc();
+    Menu.setApplicationMenu(buildMenu());
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

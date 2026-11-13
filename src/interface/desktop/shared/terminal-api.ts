@@ -117,6 +117,10 @@ export interface TerminalDesktopApi {
   onTerminalClosed(listener: (event: { id: string; workspaceId: string }) => void): () => void;
   onRuntimeError(listener: (event: { error: string }) => void): () => void;
   onSessionsChanged(listener: () => void): () => void;
+  /** Page zoom is owned by the main process so menu shortcuts and the indicator agree. */
+  onZoom(listener: (percent: number) => void): () => void;
+  adjustZoom(delta: number): Promise<number>;
+  resetZoom(): Promise<number>;
   directory(id: string, path?: string): Promise<WorkspaceEntry[]>;
   fileSnapshot(id: string, path: string): Promise<FileSnapshot>;
   searchFiles(id: string, query: string): Promise<FileSearch>;

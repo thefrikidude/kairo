@@ -24,6 +24,7 @@ import { SplitLayout } from "./split-layout.js";
 import { SecondaryPane } from "./secondary-pane.js";
 import { DropZones, type DropZone } from "./drop-zones.js";
 import { X } from "lucide-react";
+import { ZoomIndicator } from "./zoom-indicator.js";
 import { WindowControls } from "./window-controls.js";
 import { TopbarActions } from "./topbar-actions.js";
 import { WorkspaceTitle } from "./workspace-title.js";
@@ -1504,6 +1505,7 @@ export function DesktopApp(): React.JSX.Element {
           }}
         />
       )}
+      <ZoomIndicator />
     </div>
   );
 }
