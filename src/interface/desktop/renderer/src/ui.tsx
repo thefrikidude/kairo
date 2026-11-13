@@ -191,15 +191,15 @@ export function DesktopApp(): React.JSX.Element {
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [workspace?.id]);
-  const newShell = async () => {
-    if (!workspace || creatingShell) return;
+  const newShell = async (id = workspace?.id, force = false) => {
+    if (!id || creatingShell) return;
     setCreatingShell(true);
     setError("");
     const version = selectionVersion.current;
     try {
       await openWorkspaceShell(
         window.kairo,
-        workspace.id,
+        id,
         (terminal) =>
           setState((all) =>
             all
@@ -210,8 +210,8 @@ export function DesktopApp(): React.JSX.Element {
               : all,
           ),
         () =>
-          selectionVersion.current === version &&
-          stateRef.current?.activeWorkspaceId === workspace.id,
+          force ||
+          (selectionVersion.current === version && stateRef.current?.activeWorkspaceId === id),
         (terminal) => {
           setShellId(terminal.id);
           setSettings(false);
@@ -569,6 +569,30 @@ export function DesktopApp(): React.JSX.Element {
       if (tab?.startsWith("terminal:")) await window.kairo.rememberWorkspaceTab(id, tab);
       return tab ? window.kairo.bootstrap(true) : value;
     });
+  };
+  /** A plain shell for a project: in one of its workspaces, or in a shared folder workspace. */
+  const projectTerminal = async (path: string) => {
+    const own = state?.workspaces.find(
+      (item) =>
+        item.repositoryPath === path && !item.removedAt && !item.archivedAt && !item.unavailable,
+    );
+    setError("");
+    try {
+      let id = own?.id;
+      if (id) await chooseWorkspace(id);
+      else {
+        const value = await window.kairo.createWorkspace({
+          project: path,
+          name: name(path),
+          selection: { kind: "folder" },
+        });
+        apply(value);
+        id = value.activeWorkspaceId;
+      }
+      if (id) await newShell(id, true);
+    } catch (cause) {
+      setError(message(cause));
+    }
   };
   // Once a new workspace finishes preparing there is nothing left to confirm, so open it directly.
   const readyWorkspaceId =
@@ -1233,6 +1257,7 @@ export function DesktopApp(): React.JSX.Element {
         projectActions={projectActions}
         action={action}
         newChat={newChat}
+        onProjectTerminal={(path) => void projectTerminal(path)}
         setWorkspaceDialog={setWorkspaceDialog}
         setOperationId={setOperationId}
         setSettings={setSettings}

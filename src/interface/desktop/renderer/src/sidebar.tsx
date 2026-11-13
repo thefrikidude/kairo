@@ -1,5 +1,6 @@
 import React from "react";
 import type { DesktopBootstrap, TaskWorkspace } from "../../shared/api.js";
+import { SquareTerminal } from "lucide-react";
 import { Icon, KairoLogo } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
 import type { ContextAction } from "./context-menu.js";
@@ -29,6 +30,7 @@ export function Sidebar({
   projectActions,
   action,
   newChat,
+  onProjectTerminal,
   setWorkspaceDialog,
   setOperationId,
   setSettings,
@@ -53,6 +55,7 @@ export function Sidebar({
   projectActions(path: string): ContextAction[];
   action(operation: () => Promise<DesktopBootstrap | undefined>): Promise<void>;
   newChat(): void;
+  onProjectTerminal(path: string): void;
   setWorkspaceDialog(path: string): void;
   setOperationId(id: string): void;
   setSettings(open: boolean): void;
@@ -125,6 +128,17 @@ export function Sidebar({
                 <Icon name="folder" />
                 <span>{name(group.path)}</span>
               </button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="icon-button project-terminal size-[30px] rounded-md text-muted-foreground"
+                aria-label={`New terminal in ${name(group.path)}`}
+                title="New terminal"
+                disabled={pending}
+                onClick={() => onProjectTerminal(group.path)}
+              >
+                <SquareTerminal />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"

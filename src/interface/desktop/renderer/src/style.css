@@ -1362,16 +1362,30 @@ body.pane-resizing {
 .review-hidden small {
   color: var(--muted);
 }
-.project-add {
-  flex: none;
-  margin-right: 4px;
+.project-heading-row {
+  position: relative;
+}
+/* Revealed on hover, laid over the row so they never squeeze the project name. */
+.project-add,
+.project-terminal {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
   opacity: 0;
+  background: var(--sidebar);
+}
+.project-terminal {
+  right: 36px;
 }
 .project-heading-row:hover .project-add,
-.project-add:focus-visible {
+.project-heading-row:hover .project-terminal,
+.project-add:focus-visible,
+.project-terminal:focus-visible {
   opacity: 1;
 }
-.project-add svg {
+.project-add svg,
+.project-terminal svg {
   width: 14px;
   height: 14px;
 }
