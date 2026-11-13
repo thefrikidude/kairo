@@ -1,29 +1,47 @@
 import React from "react";
 import { TerminalView } from "./terminal-view.js";
 import type { WorkspaceTerminal } from "../../shared/api.js";
-/** Keep live views mounted across navigation so alternate screens and scrollback remain intact. */
+import type { Rect } from "./pane-slots.js";
+
+/**
+ * Live terminals stay mounted for the life of the app so alternate screens and scrollback survive
+ * navigation. Each visible one is positioned over its pane's body, which lets several panes show
+ * terminals at once without moving (and so restarting) any of them.
+ */
 export default function AgentTerminals({
   terminals,
-  activeTerminalId,
+  placements,
+  focusedId,
   onError,
 }: {
   terminals: WorkspaceTerminal[];
-  activeTerminalId?: string;
+  placements: Record<string, Rect | undefined>;
+  focusedId?: string;
   onError(error: string): void;
 }): React.JSX.Element {
   return (
-    <div
-      className="agent-terminal-stack"
-      hidden={!activeTerminalId || !terminals.some((terminal) => terminal.id === activeTerminalId)}
-    >
-      {terminals.map((terminal) => (
-        <TerminalView
-          key={terminal.id}
-          info={terminal}
-          visible={terminal.id === activeTerminalId}
-          onError={onError}
-        />
-      ))}
+    <div className="agent-terminal-stack">
+      {terminals.map((terminal) => {
+        const place = placements[terminal.id];
+        return (
+          <div
+            key={terminal.id}
+            className="terminal-slot"
+            style={
+              place
+                ? { left: place.left, top: place.top, width: place.width, height: place.height }
+                : { display: "none" }
+            }
+          >
+            <TerminalView
+              info={terminal}
+              visible={!!place}
+              takeFocus={terminal.id === focusedId}
+              onError={onError}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

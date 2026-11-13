@@ -8,6 +8,22 @@ import type {
 import { Icon, KairoLogo } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs.js";
+import {
+  closeLeaf,
+  leaf,
+  leafForWorkspace,
+  leaves,
+  openBeside,
+  prune,
+  setPaneWorkspace,
+  type Leaf,
+  type PaneNode,
+} from "./pane-layout.js";
+import { usePaneSlots, type Rect } from "./pane-slots.js";
+import { SplitLayout } from "./split-layout.js";
+import { SecondaryPane } from "./secondary-pane.js";
+import { DropZones, type DropZone } from "./drop-zones.js";
+import { X } from "lucide-react";
 import { TopbarActions } from "./topbar-actions.js";
 import { WorkspaceTitle } from "./workspace-title.js";
 import { TerminalTabs } from "./terminal-tabs.js";
@@ -74,6 +90,11 @@ export function DesktopApp(): React.JSX.Element {
   const [detecting, setDetecting] = useState(false);
   const [rename, setRename] = useState<{ id: string; title: string; workspace?: boolean }>();
   const [rowMenu, setRowMenu] = useState<ContextMenuState>();
+  const [layout, setLayout] = useState<PaneNode>();
+  const [dragging, setDragging] = useState<string>();
+  const [paneTabs, setPaneTabs] = useState<Record<string, string>>({});
+  const { area: paneArea, rects, register } = usePaneSlots();
+  const blankLeaf = useMemo(() => leaf(""), []);
   const closeRowMenu = useCallback(() => setRowMenu(undefined), []);
   const [confirm, setConfirm] = useState<{
     title: string;
@@ -713,6 +734,320 @@ export function DesktopApp(): React.JSX.Element {
       },
     });
   };
+  const sidebarToggle = (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="icon-button size-[30px] rounded-md text-muted-foreground"
+      aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+      onClick={() => setSidebarOpen((value) => !value)}
+    >
+      <Icon name="sidebar" />
+    </Button>
+  );
+  // Panes: a tree of workspaces shown side by side. The active workspace's pane gets the full UI.
+  const activeId = state?.activeWorkspaceId;
+  const previousActive = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!state) return;
+    const live = (id: string) =>
+      state.workspaces.some((item) => item.id === id && !item.removedAt && !item.archivedAt);
+    setLayout((current) => {
+      let next = current ? prune(current, live) : undefined;
+      if (activeId && live(activeId)) {
+        if (!next) next = leaf(activeId);
+        else if (!leafForWorkspace(next, activeId)) {
+          const from = previousActive.current
+            ? leafForWorkspace(next, previousActive.current)
+            : undefined;
+          next = setPaneWorkspace(next, (from ?? leaves(next)[0]).id, activeId);
+        }
+      }
+      return next;
+    });
+    previousActive.current = activeId;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.workspaces, activeId]);
+  const root = layout ?? blankLeaf;
+  const paneLeaves = leaves(root);
+  const primaryLeafId =
+    (workspace ? leafForWorkspace(root, workspace.id)?.id : undefined) ?? paneLeaves[0].id;
+  const paneTerminal = (item: Leaf) => {
+    const own = state?.terminals.filter((t) => t.workspaceId === item.workspaceId) ?? [];
+    return (
+      own.find((t) => t.id === paneTabs[item.id]) ??
+      own.find((t) => t.sessionId && t.state === "running") ??
+      own[0]
+    );
+  };
+  const placements: Record<string, Rect | undefined> = {};
+  for (const item of paneLeaves) {
+    const terminalId =
+      item.id === primaryLeafId
+        ? settings || workspace?.archivedAt || operationId
+          ? undefined
+          : activeTerminalId
+        : paneTerminal(item)?.id;
+    if (terminalId) placements[terminalId] = rects[item.id];
+  }
+  const focusPane = (item: Leaf) => {
+    if (item.id === primaryLeafId || pending) return;
+    const tab = paneTerminal(item);
+    void chooseWorkspace(
+      item.workspaceId,
+      tab ? (tab.sessionId ? `session:${tab.sessionId}` : `terminal:${tab.id}`) : undefined,
+    );
+  };
+  const closePane = (leafId: string) => {
+    const next = closeLeaf(root, leafId);
+    if (!next) return;
+    setLayout(next);
+    if (leafId === primaryLeafId) void chooseWorkspace(leaves(next)[0].workspaceId);
+  };
+  const dropOn = (item: Leaf, zone: DropZone) => {
+    const id = dragging;
+    setDragging(undefined);
+    if (!id || id === item.workspaceId) return;
+    setLayout(
+      zone === "center" ? setPaneWorkspace(root, item.id, id) : openBeside(root, item.id, zone, id),
+    );
+    void chooseWorkspace(id);
+  };
+  const closeButton = (item: Leaf) =>
+    paneLeaves.length > 1 && (
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0 rounded-md text-muted-foreground"
+        aria-label="Close pane"
+        title="Close pane"
+        onClick={() => closePane(item.id)}
+      >
+        <X />
+      </Button>
+    );
+  const renderLeaf = (item: Leaf) => {
+    const drop = (
+      <DropZones
+        active={!!dragging && dragging !== item.workspaceId}
+        onDrop={(zone) => dropOn(item, zone)}
+      />
+    );
+    const toggle = item.id === paneLeaves[0].id ? sidebarToggle : undefined;
+    if (item.id !== primaryLeafId) {
+      const owner = state?.workspaces.find((w) => w.id === item.workspaceId);
+      const shown = paneTerminal(item);
+      return (
+        <SecondaryPane
+          key={item.id}
+          workspace={owner}
+          terminals={state?.terminals.filter((t) => t.workspaceId === item.workspaceId) ?? []}
+          tabId={shown?.id}
+          sidebarToggle={toggle}
+          actions={owner ? workspaceCommands(owner) : undefined}
+          onTab={(terminal) => setPaneTabs((tabs) => ({ ...tabs, [item.id]: terminal.id }))}
+          onRename={(title) =>
+            owner && void action(() => window.kairo.renameWorkspace(owner.id, title))
+          }
+          onFocus={() => focusPane(item)}
+          onClose={() => closePane(item.id)}
+        >
+          <div className="pane-body relative flex min-h-0 flex-1 flex-col">
+            <div className="agent-workspace" ref={register(item.id)}>
+              {!shown && owner && (
+                <HomeScreen
+                  pending={pending}
+                  storageKey={`kairo.chat:${owner.id}`}
+                  location={isChat(owner) ? "This computer" : name(owner.repositoryPath)}
+                  agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+                />
+              )}
+            </div>
+            {drop}
+          </div>
+        </SecondaryPane>
+      );
+    }
+    return (
+      <section
+        key={item.id}
+        className="pane pane-primary flex min-h-0 min-w-0 flex-1 flex-col"
+        aria-label="Active pane"
+      >
+        <header className="topbar">
+          {toggle}
+          <WorkspaceTitle
+            name={
+              operationId
+                ? (operation?.name ?? "Kairo")
+                : workspace
+                  ? (workspace.name ?? workspace.branch ?? name(workspace.directory))
+                  : "Kairo"
+            }
+            actions={
+              !operationId && workspace && !workspace.removedAt
+                ? workspaceCommands(workspace)
+                : undefined
+            }
+            disabled={pending || !!workspace?.archivedAt}
+            onRename={(title) =>
+              workspace && void action(() => window.kairo.renameWorkspace(workspace.id, title))
+            }
+          />
+          <TerminalTabs
+            workspace={workspace}
+            state={state}
+            operationId={operationId}
+            runningAgents={runningAgents}
+            projectTabs={projectTabs}
+            stoppedSessions={stoppedSessions}
+            activeTerminalId={activeTerminalId}
+            current={current}
+            selectedShell={selectedShell}
+            pending={pending}
+            menuHandlers={menuHandlers}
+            agentActions={agentActions}
+            action={action}
+            selectionVersion={selectionVersion}
+            setShellId={setShellId}
+            setError={setError}
+          />
+          <TopbarActions
+            canOpenTerminal={
+              !!workspace &&
+              !workspace.removedAt &&
+              !workspace.archivedAt &&
+              !workspace.unavailable &&
+              !creatingShell
+            }
+            canOpenTab={!pending && !!workspace && !workspace.archivedAt && !workspace.unavailable}
+            canOpenPanel={!!accessId && !workspace?.removedAt}
+            panelTab={contextOpen ? contextTab : undefined}
+            changeCount={overview?.changes.length ?? 0}
+            onTerminal={() => void newShell()}
+            onAgent={() => beginSession()}
+            onPanel={(tab) => {
+              setContextTab(tab);
+              setContextOpen(!(contextOpen && contextTab === tab));
+            }}
+          />
+          {closeButton(item)}
+        </header>
+        <div className="pane-body relative flex min-h-0 flex-1 flex-col">
+          <div className="agent-workspace" ref={register(item.id)}>
+            {operation && !workspace?.archivedAt && (
+              <div className="preparation-panel" role="status">
+                <h2>
+                  {operation.name} · {operation.phase}
+                </h2>
+                {operation.error && <p className="file-error">{operation.error}</p>}
+                {preparationOutput && <pre>{preparationOutput}</pre>}
+                <div className="modal-actions">
+                  {["checkout", "copy", "setup"].includes(operation.phase) ? (
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        void action(() => window.kairo.cancelPreparation(operation.id))
+                      }
+                    >
+                      Cancel preparation
+                    </Button>
+                  ) : (
+                    operation.phase !== "ready" && (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          void action(() => window.kairo.retryPreparation(operation.id))
+                        }
+                      >
+                        Retry preparation
+                      </Button>
+                    )
+                  )}
+                  {operation.workspaceId && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setOperationId(undefined);
+                        void chooseWorkspace(operation.workspaceId!);
+                      }}
+                    >
+                      Open workspace
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+            {kairoView && workspace && (
+              <HomeScreen
+                pending={pending}
+                storageKey={`kairo.chat:${workspace.id}`}
+                location={isChat(workspace) ? "This computer" : name(workspace.repositoryPath)}
+                agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+              />
+            )}
+            {!activeTerminalId && !operationId && !workspace && !groups.length && (
+              <HomeScreen
+                pending={pending}
+                agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+                onOpenProject={() => void action(() => window.kairo.openWorkspace())}
+                onNewChat={newChat}
+              />
+            )}
+            {!activeTerminalId &&
+              !operationId &&
+              !kairoView &&
+              (workspace || groups.length > 0) && (
+                <div className="welcome">
+                  <KairoLogo className="welcome-logo" />
+                  <h1>
+                    {workspace?.archivedAt
+                      ? "Workspace archived"
+                      : current
+                        ? "Agent terminal stopped"
+                        : workspace
+                          ? "Start an agent session"
+                          : "Choose a workspace"}
+                  </h1>
+                  <p>
+                    {workspace?.archivedAt
+                      ? "Restore this workspace to open its agent and terminal tabs. Your files and session history are kept."
+                      : current
+                        ? "Your workspace and session association are saved."
+                        : workspace
+                          ? "Choose an installed agent and work in its terminal inside Kairo."
+                          : "Pick one in the sidebar, or press + beside a project to create one."}
+                  </p>
+                  {workspace && (
+                    <Button
+                      disabled={
+                        pending ||
+                        !!workspace?.unavailable ||
+                        (!!operation && ["checkout", "copy", "setup"].includes(operation.phase))
+                      }
+                      onClick={() =>
+                        workspace?.archivedAt
+                          ? void action(() => window.kairo.restoreWorkspace(workspace.id))
+                          : current
+                            ? void action(() => window.kairo.startSession(current.id))
+                            : beginSession()
+                      }
+                    >
+                      {workspace?.archivedAt
+                        ? "Restore workspace"
+                        : current
+                          ? "Open agent terminal"
+                          : "New agent session"}
+                    </Button>
+                  )}
+                </div>
+              )}
+          </div>
+          {drop}
+        </div>
+      </section>
+    );
+  };
   const renderWorkspace = (item: TaskWorkspace) => {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
@@ -723,6 +1058,13 @@ export function DesktopApp(): React.JSX.Element {
         data-workspace-id={item.id}
         className={`session-row workspace-row ${workspace?.id === item.id ? "selected" : ""}`}
         {...menuHandlers(`${label} actions`, workspaceCommands(item))}
+        draggable={!selecting && !pending}
+        onDragStart={(event) => {
+          event.dataTransfer.setData("application/x-kairo-workspace", item.id);
+          event.dataTransfer.effectAllowed = "move";
+          setDragging(item.id);
+        }}
+        onDragEnd={() => setDragging(undefined)}
       >
         {selecting && (
           <input
@@ -865,85 +1207,15 @@ export function DesktopApp(): React.JSX.Element {
       />
       {sidebarOpen && resizeHandle("sidebar")}
       <main className="conversation">
-        <header className="topbar">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="icon-button size-[30px] rounded-md text-muted-foreground"
-            aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            onClick={() => setSidebarOpen((value) => !value)}
-          >
-            <Icon name="sidebar" />
-          </Button>
-          {settings ? (
-            <>
-              <strong>Settings</strong>
-              <Button variant="ghost" size="sm" onClick={() => setSettings(false)}>
-                Back to workspace
-              </Button>
-            </>
-          ) : (
-            <>
-              <WorkspaceTitle
-                name={
-                  operationId
-                    ? (operation?.name ?? "Kairo")
-                    : workspace
-                      ? (workspace.name ?? workspace.branch ?? name(workspace.directory))
-                      : "Kairo"
-                }
-                actions={
-                  !operationId && workspace && !workspace.removedAt
-                    ? workspaceCommands(workspace)
-                    : undefined
-                }
-                disabled={pending || !!workspace?.archivedAt}
-                onRename={(title) =>
-                  workspace && void action(() => window.kairo.renameWorkspace(workspace.id, title))
-                }
-              />
-              <TerminalTabs
-                workspace={workspace}
-                state={state}
-                operationId={operationId}
-                runningAgents={runningAgents}
-                projectTabs={projectTabs}
-                stoppedSessions={stoppedSessions}
-                activeTerminalId={activeTerminalId}
-                current={current}
-                selectedShell={selectedShell}
-                pending={pending}
-                menuHandlers={menuHandlers}
-                agentActions={agentActions}
-                action={action}
-                selectionVersion={selectionVersion}
-                setShellId={setShellId}
-                setError={setError}
-              />
-              <TopbarActions
-                canOpenTerminal={
-                  !!workspace &&
-                  !workspace.removedAt &&
-                  !workspace.archivedAt &&
-                  !workspace.unavailable &&
-                  !creatingShell
-                }
-                canOpenTab={
-                  !pending && !!workspace && !workspace.archivedAt && !workspace.unavailable
-                }
-                canOpenPanel={!!accessId && !workspace?.removedAt}
-                panelTab={contextOpen ? contextTab : undefined}
-                changeCount={overview?.changes.length ?? 0}
-                onTerminal={() => void newShell()}
-                onAgent={() => beginSession()}
-                onPanel={(tab) => {
-                  setContextTab(tab);
-                  setContextOpen(!(contextOpen && contextTab === tab));
-                }}
-              />
-            </>
-          )}
-        </header>
+        {settings && (
+          <header className="topbar">
+            {sidebarToggle}
+            <strong>Settings</strong>
+            <Button variant="ghost" size="sm" onClick={() => setSettings(false)}>
+              Back to workspace
+            </Button>
+          </header>
+        )}
         {error && (
           <div className="desktop-error" role="alert">
             {error}
@@ -973,116 +1245,26 @@ export function DesktopApp(): React.JSX.Element {
           deleteWorkspace={deleteWorkspace}
           closeSettings={() => setSettings(false)}
         />
-        <div className="agent-workspace" hidden={!!settings}>
-          <Suspense fallback={<p className="empty-small">Loading terminal…</p>}>
+        <div
+          ref={paneArea}
+          className={`pane-area relative flex min-h-0 flex-1 ${dragging ? "dragging" : ""}`}
+          hidden={!!settings}
+        >
+          <div className="flex min-h-0 min-w-0 flex-1">
+            <SplitLayout
+              node={root}
+              onResize={(next) => setLayout((current) => next(current ?? root))}
+              renderLeaf={renderLeaf}
+            />
+          </div>
+          <Suspense fallback={null}>
             <AgentTerminals
               terminals={state?.terminals ?? []}
-              activeTerminalId={
-                settings || workspace?.archivedAt || operationId ? undefined : activeTerminalId
-              }
+              placements={placements}
+              focusedId={activeTerminalId}
               onError={onError}
             />
           </Suspense>
-          {operation && !workspace?.archivedAt && (
-            <div className="preparation-panel" role="status">
-              <h2>
-                {operation.name} · {operation.phase}
-              </h2>
-              {operation.error && <p className="file-error">{operation.error}</p>}
-              {preparationOutput && <pre>{preparationOutput}</pre>}
-              <div className="modal-actions">
-                {["checkout", "copy", "setup"].includes(operation.phase) ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => void action(() => window.kairo.cancelPreparation(operation.id))}
-                  >
-                    Cancel preparation
-                  </Button>
-                ) : (
-                  operation.phase !== "ready" && (
-                    <Button
-                      variant="outline"
-                      onClick={() => void action(() => window.kairo.retryPreparation(operation.id))}
-                    >
-                      Retry preparation
-                    </Button>
-                  )
-                )}
-                {operation.workspaceId && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setOperationId(undefined);
-                      void chooseWorkspace(operation.workspaceId!);
-                    }}
-                  >
-                    Open workspace
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-          {kairoView && workspace && (
-            <HomeScreen
-              pending={pending}
-              storageKey={`kairo.chat:${workspace.id}`}
-              location={isChat(workspace) ? "This computer" : name(workspace.repositoryPath)}
-              agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
-            />
-          )}
-          {!activeTerminalId && !operationId && !workspace && !groups.length && (
-            <HomeScreen
-              pending={pending}
-              agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
-              onOpenProject={() => void action(() => window.kairo.openWorkspace())}
-              onNewChat={newChat}
-            />
-          )}
-          {!activeTerminalId && !operationId && !kairoView && (workspace || groups.length > 0) && (
-            <div className="welcome">
-              <KairoLogo className="welcome-logo" />
-              <h1>
-                {workspace?.archivedAt
-                  ? "Workspace archived"
-                  : current
-                    ? "Agent terminal stopped"
-                    : workspace
-                      ? "Start an agent session"
-                      : "Choose a workspace"}
-              </h1>
-              <p>
-                {workspace?.archivedAt
-                  ? "Restore this workspace to open its agent and terminal tabs. Your files and session history are kept."
-                  : current
-                    ? "Your workspace and session association are saved."
-                    : workspace
-                      ? "Choose an installed agent and work in its terminal inside Kairo."
-                      : "Pick one in the sidebar, or press + beside a project to create one."}
-              </p>
-              {workspace && (
-                <Button
-                  disabled={
-                    pending ||
-                    !!workspace?.unavailable ||
-                    (!!operation && ["checkout", "copy", "setup"].includes(operation.phase))
-                  }
-                  onClick={() =>
-                    workspace?.archivedAt
-                      ? void action(() => window.kairo.restoreWorkspace(workspace.id))
-                      : current
-                        ? void action(() => window.kairo.startSession(current.id))
-                        : beginSession()
-                  }
-                >
-                  {workspace?.archivedAt
-                    ? "Restore workspace"
-                    : current
-                      ? "Open agent terminal"
-                      : "New agent session"}
-                </Button>
-              )}
-            </div>
-          )}
         </div>
       </main>
 

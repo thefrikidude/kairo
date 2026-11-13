@@ -57,10 +57,10 @@ async function key(keyCode, modifiers = []) {
 }
 async function terminalCommand(file, content) {
   await waitFor(
-    "document.querySelector('.agent-workspace .terminal-view:not([hidden]) .xterm-helper-textarea')",
+    "document.querySelector('.terminal-slot .terminal-view:not([hidden]) .xterm-helper-textarea')",
   );
   await evaluate(
-    "document.querySelector('.agent-workspace .terminal-view:not([hidden]) .xterm-helper-textarea').focus()",
+    "document.querySelector('.terminal-slot .terminal-view:not([hidden]) .xterm-helper-textarea').focus()",
   );
   for (const character of JSON.stringify({ file, content }))
     win.webContents.sendInputEvent({ type: "char", keyCode: character });
@@ -128,7 +128,7 @@ async function run() {
       : seeded.sessions.find((s) => s.id === process.env.KAIRO_SMOKE_FIRST)?.workspaceId;
   await evaluate(`window.kairo.selectWorkspace(${JSON.stringify(target)}).then(() => true)`);
   await waitFor(
-    "document.querySelector('.session-row.selected') && document.querySelector('.agent-workspace .xterm-helper-textarea')",
+    "document.querySelector('.session-row.selected') && document.querySelector('.terminal-slot .xterm-helper-textarea')",
   );
   const startupMs = performance.now() - started;
   assert.equal(await evaluate("!!document.querySelector('.composer-wrap')"), false);

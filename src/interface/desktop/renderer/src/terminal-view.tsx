@@ -9,15 +9,20 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 export const TerminalView = memo(function TerminalView({
   info,
   visible,
+  takeFocus,
   onError,
 }: {
   info: WorkspaceTerminal;
   visible: boolean;
+  /** Only the focused pane's terminal grabs the keyboard when it appears. */
+  takeFocus: boolean;
   onError(error: string): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const takeFocusRef = useRef(takeFocus);
+  takeFocusRef.current = takeFocus;
   const observeResize = useRef<(active: boolean) => void>(() => {});
   const fit = useRef<() => void>(() => {});
   const terminal = useRef<Terminal | undefined>(undefined);
@@ -126,10 +131,13 @@ export const TerminalView = memo(function TerminalView({
     if (terminal.current) terminal.current.options.screenReaderMode = visible;
     if (visible) {
       fit.current();
-      if (!(
-        document.activeElement instanceof Element &&
-        document.activeElement.closest('[role="tablist"]')
-      ))
+      if (
+        takeFocusRef.current &&
+        !(
+          document.activeElement instanceof Element &&
+          document.activeElement.closest('[role="tablist"]')
+        )
+      )
         terminal.current?.focus();
     }
   }, [visible]);

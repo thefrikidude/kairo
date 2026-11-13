@@ -217,7 +217,7 @@ async function launch() {
       cmd: "eval",
       code: `window.kairo.selectWorkspace(${JSON.stringify(instance.workspaces.shared)}).then(() => true)`,
     });
-    await waitUntil("!!document.querySelector('.agent-workspace .xterm-helper-textarea')");
+    await waitUntil("!!document.querySelector('.terminal-slot .xterm-helper-textarea')");
   }
   show({
     runId,

@@ -39,7 +39,7 @@ async function state() {
 }
 const screen = () =>
   evaluate(
-    "Array.from(document.querySelectorAll('.agent-workspace .terminal-view:not([hidden]) .xterm-accessibility div')).map(n=>n.textContent).join('\\n').replace(/\\u00a0/g,' ')",
+    "Array.from(document.querySelectorAll('.terminal-slot .terminal-view:not([hidden]) .xterm-accessibility div')).map(n=>n.textContent).join('\\n').replace(/\\u00a0/g,' ')",
   );
 async function capture(file) {
   await writeFile(join(output, file), (await win.webContents.capturePage()).toPNG());
@@ -50,18 +50,18 @@ async function focus() {
   win.webContents.focus();
   await until(() =>
     evaluate(
-      "!!document.querySelector('.agent-workspace .terminal-view:not([hidden]) .xterm-helper-textarea')",
+      "!!document.querySelector('.terminal-slot .terminal-view:not([hidden]) .xterm-helper-textarea')",
     ),
   );
   await evaluate(
-    "document.querySelector('.agent-workspace .terminal-view:not([hidden]) .xterm-helper-textarea').focus()",
+    "document.querySelector('.terminal-slot .terminal-view:not([hidden]) .xterm-helper-textarea').focus()",
   );
 }
 async function type(text) {
   await focus();
   // Use the same DOM paste path as xterm's clipboard handling, without changing the user's clipboard.
   await evaluate(
-    `(()=>{const node=document.querySelector('.agent-workspace .terminal-view:not([hidden]) .xterm-helper-textarea');const data=new DataTransfer();data.setData('text/plain',${JSON.stringify(text)});node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));})()`,
+    `(()=>{const node=document.querySelector('.terminal-slot .terminal-view:not([hidden]) .xterm-helper-textarea');const data=new DataTransfer();data.setData('text/plain',${JSON.stringify(text)});node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));})()`,
   );
   await sleep(800);
   await key("Return");
@@ -72,7 +72,7 @@ async function type(text) {
     const displayed = await screen();
     if (/Ask Codex to do anything/.test(displayed) && !displayed.includes(text.slice(0, 25))) {
       await evaluate(
-        `(()=>{const n=document.querySelector('.agent-workspace .terminal-view:not([hidden]) .xterm-helper-textarea');const d=new DataTransfer();d.setData('text/plain',${JSON.stringify(text)});n.dispatchEvent(new ClipboardEvent('paste',{clipboardData:d,bubbles:true,cancelable:true}));})()`,
+        `(()=>{const n=document.querySelector('.terminal-slot .terminal-view:not([hidden]) .xterm-helper-textarea');const d=new DataTransfer();d.setData('text/plain',${JSON.stringify(text)});n.dispatchEvent(new ClipboardEvent('paste',{clipboardData:d,bubbles:true,cancelable:true}));})()`,
       );
       await sleep(800);
       await key("Return");

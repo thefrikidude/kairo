@@ -918,20 +918,36 @@ button svg {
   min-height: 0;
   position: relative;
 }
+/* Live terminals sit in one layer over the pane bodies, each placed over the pane showing it. */
 .agent-terminal-stack {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  position: relative;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
 }
-.agent-terminal-stack:empty {
-  display: none;
+.terminal-slot {
+  position: absolute;
+  pointer-events: auto;
+  overflow: hidden;
 }
-.agent-terminal-stack .terminal-view {
-  flex: 1;
+.terminal-slot .terminal-view {
   height: 100%;
   padding: 10px;
+}
+.pane-area.dragging .terminal-slot,
+body.pane-resizing .terminal-slot {
+  pointer-events: none;
+}
+body.pane-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+.pane-primary,
+.pane-secondary {
+  background: var(--bg);
+}
+.pane-secondary:not(:focus-within) .topbar {
+  opacity: 0.92;
 }
 .agent-session-toolbar > div {
   display: flex;
