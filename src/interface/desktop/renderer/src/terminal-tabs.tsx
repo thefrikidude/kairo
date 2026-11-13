@@ -23,6 +23,8 @@ export function TerminalTabs({
   pending,
   menuHandlers,
   agentActions,
+  shellActions,
+  shellNames,
   action,
   selectionVersion,
   setShellId,
@@ -40,6 +42,8 @@ export function TerminalTabs({
   pending: boolean;
   menuHandlers(label: string, actions: ContextAction[]): React.HTMLAttributes<HTMLElement>;
   agentActions(id: string): ContextAction[];
+  shellActions(terminal: Terminal): ContextAction[];
+  shellNames: Map<string, string>;
   action(operation: () => Promise<DesktopBootstrap | undefined>): Promise<void>;
   selectionVersion: React.MutableRefObject<number>;
   setShellId(id: string | undefined): void;
@@ -74,20 +78,8 @@ export function TerminalTabs({
               aria-controls={`terminal-view-${terminal.id}`}
               title={terminal.directory}
               {...menuHandlers(
-                `${terminal.title} tab actions`,
-                terminal.sessionId
-                  ? agentActions(terminal.sessionId)
-                  : [
-                      {
-                        label: "Close terminal",
-                        disabled: pending,
-                        run: () =>
-                          void action(async () => {
-                            await window.kairo.closeTerminal(terminal.id);
-                            return window.kairo.bootstrap(true);
-                          }),
-                      },
-                    ],
+                `${shellNames.get(terminal.id) ?? terminal.title} tab actions`,
+                terminal.sessionId ? agentActions(terminal.sessionId) : shellActions(terminal),
               )}
               onClick={() => {
                 selectionVersion.current++;
@@ -113,7 +105,7 @@ export function TerminalTabs({
               {terminal.sessionId
                 ? (state?.sessions.find((s) => s.id === terminal.sessionId)?.title ??
                   terminal.title)
-                : `Terminal ${projectTabs.filter((t) => !t.sessionId).findIndex((t) => t.id === terminal.id) + 1}`}
+                : (shellNames.get(terminal.id) ?? terminal.title)}
             </button>
           ))}
           {stoppedSessions.map((session) => (

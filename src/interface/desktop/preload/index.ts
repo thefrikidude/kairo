@@ -54,6 +54,7 @@ const api: DesktopApi = {
   writeTerminal: (id, data) => invoke("terminal:write", id, data),
   resizeTerminal: (id, columns, rows) => invoke("terminal:resize", id, columns, rows),
   closeTerminal: (id) => invoke("terminal:close", id),
+  renameTerminal: (id, title) => invoke("terminal:rename", id, title),
   directory: (id, path) => invoke("workspace:directory", id, path),
   fileSnapshot: (id, path) => invoke("workspace:snapshot", id, path),
   searchFiles: (id, query) => invoke("workspace:search", id, query),

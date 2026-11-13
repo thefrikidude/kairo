@@ -112,6 +112,7 @@ export interface TerminalDesktopApi {
   writeTerminal(id: string, data: string): Promise<void>;
   resizeTerminal(id: string, columns: number, rows: number): Promise<void>;
   closeTerminal(id: string): Promise<void>;
+  renameTerminal(id: string, title: string): Promise<WorkspaceTerminal>;
   onTerminalData(listener: (event: TerminalData) => void): () => void;
   onTerminalState(listener: (terminal: WorkspaceTerminal) => void): () => void;
   onTerminalClosed(listener: (event: { id: string; workspaceId: string }) => void): () => void;

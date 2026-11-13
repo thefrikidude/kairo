@@ -185,14 +185,14 @@ export function NewSessionDialog({
 }
 
 export function RenameDialog({
-  workspace,
+  noun,
   value,
   pending,
   onChange,
   onClose,
   onSubmit,
 }: {
-  workspace: boolean;
+  noun: string;
   value: string;
   pending: boolean;
   onChange(value: string): void;
@@ -209,7 +209,7 @@ export function RenameDialog({
         }}
       >
         <h2 id="rename-title" className={title}>
-          Rename {workspace ? "workspace" : "session"}
+          Rename {noun}
         </h2>
         <Input
           autoFocus

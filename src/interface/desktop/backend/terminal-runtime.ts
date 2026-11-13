@@ -734,6 +734,10 @@ export async function createTerminalDesktopRuntime(
         if (typeof first !== "string") throw new Error("Choose a terminal.");
         terminals.resize(first, second, third);
         return;
+      case "terminal:rename":
+        if (typeof first !== "string" || typeof second !== "string")
+          throw new Error("Choose a terminal and a name.");
+        return terminals.rename(first, second);
       case "terminal:close":
         if (typeof first !== "string") throw new Error("Choose a terminal.");
         await terminals.closeTerminal(first);

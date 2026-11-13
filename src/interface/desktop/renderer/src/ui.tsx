@@ -4,6 +4,7 @@ import type {
   TaskWorkspace,
   ReviewScope,
   WorkspaceReview,
+  WorkspaceTerminal,
 } from "../../shared/api.js";
 import { Icon, KairoLogo } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
@@ -26,6 +27,7 @@ import { DropZones, type DropZone } from "./drop-zones.js";
 import { X } from "lucide-react";
 import { ZoomIndicator } from "./zoom-indicator.js";
 import { WindowControls } from "./window-controls.js";
+import { shellLabels } from "./terminal-label.js";
 import { TopbarActions } from "./topbar-actions.js";
 import { WorkspaceTitle } from "./workspace-title.js";
 import { TerminalTabs } from "./terminal-tabs.js";
@@ -90,7 +92,12 @@ export function DesktopApp(): React.JSX.Element {
   const [agentQuery, setAgentQuery] = useState("");
   const [showAllAgents, setShowAllAgents] = useState(false);
   const [detecting, setDetecting] = useState(false);
-  const [rename, setRename] = useState<{ id: string; title: string; workspace?: boolean }>();
+  const [rename, setRename] = useState<{
+    id: string;
+    title: string;
+    workspace?: boolean;
+    terminal?: boolean;
+  }>();
   const [rowMenu, setRowMenu] = useState<ContextMenuState>();
   const shellWhenReady = useRef<string | undefined>(undefined);
   const [layout, setLayout] = useState<PaneNode>();
@@ -714,6 +721,40 @@ export function DesktopApp(): React.JSX.Element {
         ]
       : [];
   };
+  const selectTerminal = (terminal: WorkspaceTerminal) =>
+    void chooseWorkspace(terminal.workspaceId, `terminal:${terminal.id}`);
+  const shellNames = useMemo(() => shellLabels(state?.terminals ?? []), [state?.terminals]);
+  /** Plain shells: rename, and close (which stops the shell, so the sidebar asks first). */
+  const shellActions = (terminal: WorkspaceTerminal, ask = false): ContextAction[] => {
+    const label = shellNames.get(terminal.id) ?? terminal.title;
+    const close = () =>
+      action(async () => {
+        await window.kairo.closeTerminal(terminal.id);
+        return window.kairo.bootstrap(true);
+      });
+    return [
+      {
+        label: "Rename",
+        disabled: pending,
+        run: () => setRename({ id: terminal.id, title: label, terminal: true }),
+      },
+      {
+        label: ask ? "Delete" : "Close terminal",
+        disabled: pending,
+        run: () =>
+          ask
+            ? setConfirm({
+                title: "Delete terminal?",
+                description: `Stop “${label}” and anything running in it. Its output is not kept.`,
+                action: async () => {
+                  await window.kairo.closeTerminal(terminal.id);
+                  apply(await window.kairo.bootstrap(true));
+                },
+              })
+            : void close(),
+      },
+    ];
+  };
   /** Workspaces covered by the selection: picked ones plus everything inside picked projects. */
   const bulkTargets = () => {
     const inProjects = (state?.workspaces ?? []).filter(
@@ -988,6 +1029,8 @@ export function DesktopApp(): React.JSX.Element {
             pending={pending}
             menuHandlers={menuHandlers}
             agentActions={agentActions}
+            shellActions={shellActions}
+            shellNames={shellNames}
             action={action}
             selectionVersion={selectionVersion}
             setShellId={setShellId}
@@ -1133,6 +1176,18 @@ export function DesktopApp(): React.JSX.Element {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
     const activity = workspaceActivity(item.id);
+    const agents = [
+      ...new Set(
+        (state?.sessions ?? [])
+          .filter((session) => session.workspaceId === item.id)
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .map(
+            (session) =>
+              state?.agents.find((agent) => agent.id === session.agentId)?.name ?? session.agentId,
+          ),
+      ),
+    ];
+    const agentLabel = agents.length > 1 ? `${agents[0]} +${agents.length - 1}` : agents[0];
     const note = item.unavailable
       ? "Unavailable"
       : op && op.phase !== "ready"
@@ -1183,6 +1238,7 @@ export function DesktopApp(): React.JSX.Element {
             {/* The branch or folder kind is not repeated here; only states that need attention. */}
             {note && <small className="session-workspace-label">{note}</small>}
           </span>
+          {agentLabel && <small className="session-agent">{agentLabel}</small>}
         </button>
       </div>
     );
@@ -1291,6 +1347,11 @@ export function DesktopApp(): React.JSX.Element {
         action={action}
         newChat={newChat}
         onProjectTerminal={(path) => void projectTerminal(path)}
+        terminals={state?.terminals.filter((terminal) => !terminal.sessionId) ?? []}
+        shellNames={shellNames}
+        activeTerminalId={workspace?.id ? activeTerminalId : undefined}
+        selectTerminal={selectTerminal}
+        shellActions={(terminal) => shellActions(terminal, true)}
         setWorkspaceDialog={setWorkspaceDialog}
         setOperationId={setOperationId}
         setSettings={setSettings}
@@ -1473,17 +1534,21 @@ export function DesktopApp(): React.JSX.Element {
       )}
       {rename && (
         <RenameDialog
-          workspace={!!rename.workspace}
+          noun={rename.terminal ? "terminal" : rename.workspace ? "workspace" : "session"}
           value={rename.title}
           pending={pending}
           onChange={(title) => setRename({ ...rename, title })}
           onClose={() => setRename(undefined)}
           onSubmit={() =>
-            void action(() =>
-              rename.workspace
+            void action(async () => {
+              if (rename.terminal) {
+                await window.kairo.renameTerminal(rename.id, rename.title);
+                return undefined;
+              }
+              return rename.workspace
                 ? window.kairo.renameWorkspace(rename.id, rename.title)
-                : window.kairo.renameSession(rename.id, rename.title),
-            ).then(() => setRename(undefined))
+                : window.kairo.renameSession(rename.id, rename.title);
+            }).then(() => setRename(undefined))
           }
         />
       )}

@@ -1,5 +1,5 @@
 import React from "react";
-import type { DesktopBootstrap, TaskWorkspace } from "../../shared/api.js";
+import type { DesktopBootstrap, TaskWorkspace, WorkspaceTerminal } from "../../shared/api.js";
 import { SquareTerminal } from "lucide-react";
 import { Icon } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
@@ -31,6 +31,11 @@ export function Sidebar({
   action,
   newChat,
   onProjectTerminal,
+  terminals,
+  shellNames,
+  activeTerminalId,
+  selectTerminal,
+  shellActions,
   setWorkspaceDialog,
   setOperationId,
   setSettings,
@@ -56,6 +61,12 @@ export function Sidebar({
   action(operation: () => Promise<DesktopBootstrap | undefined>): Promise<void>;
   newChat(): void;
   onProjectTerminal(path: string): void;
+  /** Plain shells (not agent terminals), listed under their project. */
+  terminals: WorkspaceTerminal[];
+  shellNames: Map<string, string>;
+  activeTerminalId?: string;
+  selectTerminal(terminal: WorkspaceTerminal): void;
+  shellActions(terminal: WorkspaceTerminal): ContextAction[];
   setWorkspaceDialog(path: string): void;
   setOperationId(id: string): void;
   setSettings(open: boolean): void;
@@ -151,6 +162,43 @@ export function Sidebar({
             </div>
             <div hidden={collapsed[group.path]}>
               {group.workspaces.filter((item) => !item.pinned).map(renderWorkspace)}
+              {terminals
+                .filter((terminal) => group.workspaces.some((w) => w.id === terminal.workspaceId))
+                .map((terminal) => {
+                  const label = shellNames.get(terminal.id) ?? terminal.title;
+                  const owner = group.workspaces.find((w) => w.id === terminal.workspaceId);
+                  return (
+                    <div
+                      key={terminal.id}
+                      data-terminal-id={terminal.id}
+                      className="session-row terminal-row"
+                      {...menuHandlers(`${label} actions`, shellActions(terminal))}
+                    >
+                      <button
+                        className={`session ${activeTerminalId === terminal.id ? "selected" : ""}`}
+                        aria-current={activeTerminalId === terminal.id ? "page" : undefined}
+                        title={terminal.directory}
+                        disabled={pending}
+                        onClick={() => selectTerminal(terminal)}
+                      >
+                        <SquareTerminal className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="session-labels">
+                          <span className="session-title">{label}</span>
+                        </span>
+                        {terminal.state === "exited" ? (
+                          <small className="session-agent">exited</small>
+                        ) : (
+                          group.workspaces.length > 1 &&
+                          owner && (
+                            <small className="session-agent">
+                              {owner.name ?? owner.branch ?? "workspace"}
+                            </small>
+                          )
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
               {state?.operations
                 .filter(
                   (op) =>

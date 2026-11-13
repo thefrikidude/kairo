@@ -10,6 +10,8 @@ export type WorkspaceTerminal = {
   sessionId?: string;
   directory: string;
   title: string;
+  /** True once the user has chosen the title, so it replaces the numbered default. */
+  named?: boolean;
   pid: number;
   state: "running" | "exited";
   activity: TerminalActivity;

@@ -182,6 +182,7 @@ function registerIpc(): void {
   handle("terminal:write", "terminal:write");
   handle("terminal:resize", "terminal:resize");
   handle("terminal:close", "terminal:close");
+  handle("terminal:rename", "terminal:rename");
 
   ipcMain.handle("workspace:open", async (event) => {
     assertTrusted(event);

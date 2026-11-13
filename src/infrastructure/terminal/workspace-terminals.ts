@@ -95,6 +95,16 @@ export class WorkspaceTerminals {
       .filter((record) => !workspaceId || record.info.workspaceId === workspaceId)
       .map((record) => ({ ...record.info }));
   }
+  rename(id: string, title: string): WorkspaceTerminal {
+    const record = this.records.get(id);
+    if (!record) throw new Error("That terminal is no longer open.");
+    const next = title.trim().slice(0, 200);
+    if (!next) throw new Error("Enter a name for the terminal.");
+    record.info.title = next;
+    record.info.named = true;
+    this.emit("terminal:state", { ...record.info });
+    return { ...record.info };
+  }
   hasProcesses(directory: string, overlaps: (a: string, b: string) => boolean): boolean {
     return [...this.records.values()].some(
       (record) =>

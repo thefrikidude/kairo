@@ -13,6 +13,7 @@ const methods = new Set([
   "terminal:write",
   "terminal:resize",
   "terminal:close",
+  "terminal:rename",
   "workspace:open",
   "project:remove",
   "chat:create",

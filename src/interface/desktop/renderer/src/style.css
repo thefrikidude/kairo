@@ -1483,3 +1483,23 @@ body.pane-resizing {
 .mac-inset.page-zoomed .sidebar-header {
   -webkit-app-region: no-drag;
 }
+
+/* The agent (or terminal's workspace) named at the right edge of a sidebar row. */
+.session-agent {
+  flex: none;
+  max-width: 45%;
+  margin-left: auto;
+  padding-left: 8px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-row .session {
+  gap: 8px;
+  color: var(--muted);
+}
+.terminal-row .session.selected {
+  color: var(--text);
+}

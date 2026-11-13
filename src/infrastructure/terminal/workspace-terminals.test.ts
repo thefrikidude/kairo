@@ -280,3 +280,27 @@ test("approval prompts are recognised from the visible tail, not scrollback", ()
   assert.equal(asksForInput("Do you want to proceed?\n" + "line\n".repeat(10)), false);
   assert.equal(asksForInput(""), false);
 });
+
+test("renaming a terminal keeps the name, announces it and rejects blanks", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-terminal-")));
+  const states: { title: string; named?: boolean }[] = [];
+  const service = new WorkspaceTerminals(
+    (event, payload) => {
+      if (event === "terminal:state") states.push(payload as { title: string; named?: boolean });
+    },
+    { shell: "/bin/zsh", args: ["-f"], env: { PS1: "KAIRO_READY> " } },
+  );
+  t.after(async () => {
+    await service.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const shell = await service.create("one", root);
+  assert.equal(shell.named, undefined);
+  const renamed = service.rename(shell.id, "  Build server  ");
+  assert.equal(renamed.title, "Build server");
+  assert.equal(renamed.named, true);
+  assert.equal(service.list("one")[0].title, "Build server");
+  assert.ok(states.some((state) => state.title === "Build server" && state.named));
+  assert.throws(() => service.rename(shell.id, "   "), /Enter a name/);
+  assert.throws(() => service.rename("missing", "x"), /no longer open/);
+});
