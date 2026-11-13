@@ -128,6 +128,8 @@ export function DesktopApp(): React.JSX.Element {
     : undefined;
   const activeTerminalId = selectedShell?.id ?? currentTerminal?.id;
   const projectTabs = state?.terminals.filter((t) => t.workspaceId === workspace?.id) ?? [];
+  // Plain shells live in the sidebar, so the top bar only has tabs for agents.
+  const agentTabs = projectTabs.filter((t) => t.sessionId);
   // Agents running in one checkout share its files, so their edits can collide.
   const runningAgents = projectTabs.filter((t) => t.sessionId && t.state === "running").length;
   const stoppedSessions =
@@ -918,8 +920,8 @@ export function DesktopApp(): React.JSX.Element {
       </Button>
     );
   /** With one tab the strip is hidden, so that tab's actions live in the title menu instead. */
-  const onlyTab = projectTabs.length + stoppedSessions.length === 1;
-  const loneTerminal = onlyTab ? projectTabs[0] : undefined;
+  const onlyTab = agentTabs.length + stoppedSessions.length === 1;
+  const loneTerminal = onlyTab ? agentTabs[0] : undefined;
   const loneSession = onlyTab ? stoppedSessions[0] : undefined;
   const loneActions: ContextAction[] = (
     loneSession
@@ -1021,7 +1023,7 @@ export function DesktopApp(): React.JSX.Element {
             state={state}
             operationId={operationId}
             runningAgents={runningAgents}
-            projectTabs={projectTabs}
+            projectTabs={agentTabs}
             stoppedSessions={stoppedSessions}
             activeTerminalId={activeTerminalId}
             current={current}
@@ -1187,6 +1189,11 @@ export function DesktopApp(): React.JSX.Element {
           ),
       ),
     ];
+    // Opening a workspace from the sidebar shows its agent, not whichever shell was last open.
+    const lastSession = (state?.sessions ?? [])
+      .filter((session) => session.workspaceId === item.id)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const agentTab = lastSession ? `session:${lastSession.id}` : undefined;
     const agentLabel = agents.length > 1 ? `${agents[0]} +${agents.length - 1}` : agents[0];
     const note = item.unavailable
       ? "Unavailable"
@@ -1226,7 +1233,7 @@ export function DesktopApp(): React.JSX.Element {
           onClick={() =>
             selecting
               ? setPickedWorkspaces((set) => toggle(set, item.id))
-              : void chooseWorkspace(item.id)
+              : void chooseWorkspace(item.id, agentTab)
           }
         >
           <span
