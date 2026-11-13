@@ -264,7 +264,7 @@ export default memo(function ReviewPanel({
     <section className="review-panel">
       <div className="review-scope">
         <Select value={scope} onValueChange={(value) => onScope(value as ReviewScope)}>
-          <SelectTrigger aria-label="Review scope" className="h-8 min-w-0 flex-1 text-xs">
+          <SelectTrigger aria-label="Review scope" className="h-9 w-full min-w-0 text-[13px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -280,7 +280,7 @@ export default memo(function ReviewPanel({
         </small>
       </div>
       {!overview && !error && (
-        <p className="empty-small" role="status">
+        <p className="empty-small px-4 text-left" role="status">
           Loading changes…
         </p>
       )}
@@ -295,7 +295,7 @@ export default memo(function ReviewPanel({
         </p>
       )}
       {overview && !error && !overview.unavailable && !changes.length && (
-        <p className="empty-small">
+        <p className="empty-small px-4 py-6 text-left text-[13px]">
           {scope === "task" ? "No changes since this task started" : "Working tree is clean"}
         </p>
       )}

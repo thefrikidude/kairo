@@ -1049,9 +1049,8 @@ export function DesktopApp(): React.JSX.Element {
       {!settings && (
         <aside className="workspace-tools" aria-label="Workspace tools">
           <Button
-            variant="outline"
-            size="sm"
-            className="review-toggle"
+            variant="ghost"
+            className="review-toggle relative h-auto flex-col gap-1 px-1 py-2 text-[11px] aria-expanded:bg-accent"
             disabled={!accessId || !!workspace?.removedAt}
             aria-label="Browse files"
             title="Files"
@@ -1064,9 +1063,8 @@ export function DesktopApp(): React.JSX.Element {
             <Icon name="folder" /> <span>Files</span>
           </Button>
           <Button
-            variant="outline"
-            size="sm"
-            className="review-toggle"
+            variant="ghost"
+            className="review-toggle relative h-auto flex-col gap-1 px-1 py-2 text-[11px] aria-expanded:bg-accent"
             disabled={!accessId || !!workspace?.removedAt}
             aria-label="Review changes"
             title="Review"
@@ -1078,7 +1076,9 @@ export function DesktopApp(): React.JSX.Element {
           >
             <Icon name="panel" /> <span>Review</span>{" "}
             {overview?.changes.length ? (
-              <span className="count">{overview.changes.length}</span>
+              <span className="absolute right-1.5 top-1 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-semibold leading-4 text-primary-foreground">
+                {overview.changes.length}
+              </span>
             ) : null}
           </Button>
         </aside>

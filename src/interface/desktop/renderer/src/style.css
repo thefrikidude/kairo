@@ -814,8 +814,8 @@ button svg {
 .review-scope {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 12px;
+  gap: 8px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--line);
 }
 .review-scope small {
@@ -1349,8 +1349,8 @@ button svg {
   align-items: center;
   gap: 8px;
   flex: none;
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: 10px 16px;
+  font-size: 13px;
   border-bottom: 1px solid var(--line);
 }
 .review-summary button,
