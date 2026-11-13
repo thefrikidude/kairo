@@ -547,6 +547,15 @@ export function DesktopApp(): React.JSX.Element {
       return tab ? window.kairo.bootstrap(true) : value;
     });
   };
+  // Once a new workspace finishes preparing there is nothing left to confirm, so open it directly.
+  const readyWorkspaceId =
+    operation?.id === operationId && operation?.phase === "ready" && !operation?.error
+      ? operation?.workspaceId
+      : undefined;
+  useEffect(() => {
+    if (readyWorkspaceId) void chooseWorkspace(readyWorkspaceId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyWorkspaceId]);
   const menuHandlers = (label: string, actions: ContextAction[]) => ({
     onContextMenu: (event: React.MouseEvent<HTMLElement>) => {
       event.preventDefault();
