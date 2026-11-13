@@ -35,7 +35,15 @@ let zoomFactor = 1;
 
 function setZoom(next: number): number {
   zoomFactor = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)) * 10) / 10;
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.setZoomFactor(zoomFactor);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.setZoomFactor(zoomFactor);
+    // The top bar scales with the page, so keep the traffic lights centred in it.
+    if (process.platform === "darwin")
+      mainWindow.setWindowButtonPosition({
+        x: Math.round(18 * zoomFactor),
+        y: Math.round(22 * zoomFactor - 7),
+      });
+  }
   send("zoom:changed", Math.round(zoomFactor * 100));
   return Math.round(zoomFactor * 100);
 }
