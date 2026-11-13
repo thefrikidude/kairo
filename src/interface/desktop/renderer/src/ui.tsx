@@ -1133,6 +1133,13 @@ export function DesktopApp(): React.JSX.Element {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
     const activity = workspaceActivity(item.id);
+    const note = item.unavailable
+      ? "Unavailable"
+      : op && op.phase !== "ready"
+        ? op.phase
+        : activity === "waiting"
+          ? "Waiting for you"
+          : undefined;
     return (
       <div
         key={item.id}
@@ -1173,15 +1180,8 @@ export function DesktopApp(): React.JSX.Element {
           />
           <span className="session-labels">
             <span className="session-title">{label}</span>
-            <small className="session-workspace-label">
-              {item.unavailable
-                ? "Unavailable"
-                : op && op.phase !== "ready"
-                  ? op.phase
-                  : activity === "waiting"
-                    ? "Waiting for you"
-                    : (item.branch ?? item.kind)}
-            </small>
+            {/* The branch or folder kind is not repeated here; only states that need attention. */}
+            {note && <small className="session-workspace-label">{note}</small>}
           </span>
         </button>
       </div>
