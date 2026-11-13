@@ -1174,6 +1174,9 @@ export function DesktopApp(): React.JSX.Element {
       </section>
     );
   };
+  // With a plain shell open, its sidebar row is the active one, not the workspace it belongs to.
+  const shellOpen =
+    !!activeTerminalId && !state?.terminals.find((t) => t.id === activeTerminalId)?.sessionId;
   const renderWorkspace = (item: TaskWorkspace) => {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
@@ -1206,7 +1209,7 @@ export function DesktopApp(): React.JSX.Element {
       <div
         key={item.id}
         data-workspace-id={item.id}
-        className={`session-row workspace-row ${workspace?.id === item.id ? "selected" : ""}`}
+        className={`session-row workspace-row ${workspace?.id === item.id && !shellOpen ? "selected" : ""}`}
         {...menuHandlers(`${label} actions`, workspaceCommands(item))}
         draggable={!selecting && !pending}
         onDragStart={(event) => {
@@ -1228,7 +1231,7 @@ export function DesktopApp(): React.JSX.Element {
         )}
         <button
           className="session"
-          aria-current={workspace?.id === item.id ? "page" : undefined}
+          aria-current={workspace?.id === item.id && !shellOpen ? "page" : undefined}
           disabled={pending}
           onClick={() =>
             selecting

@@ -171,11 +171,11 @@ export function Sidebar({
                     <div
                       key={terminal.id}
                       data-terminal-id={terminal.id}
-                      className="session-row terminal-row"
+                      className={`session-row terminal-row ${activeTerminalId === terminal.id ? "selected" : ""}`}
                       {...menuHandlers(`${label} actions`, shellActions(terminal))}
                     >
                       <button
-                        className={`session ${activeTerminalId === terminal.id ? "selected" : ""}`}
+                        className="session"
                         aria-current={activeTerminalId === terminal.id ? "page" : undefined}
                         title={terminal.directory}
                         disabled={pending}
