@@ -215,6 +215,8 @@ async function run() {
   await capture("normal-shell.png");
   await evaluate(`window.kairo.writeTerminal(${JSON.stringify(firstPty.id)}, "fg\\r")`);
   await sleep(100);
+  await pointerClick('[aria-label="New tab"]');
+  await waitFor("document.querySelector('[role=menu]')");
   await click('[aria-label="New terminal tab"]');
   await waitFor("window.kairo.listTerminals().then(all=>all.some(t=>!t.sessionId))");
   const shell = (await state()).terminals.find((t) => !t.sessionId);
@@ -229,6 +231,8 @@ async function run() {
   );
   await capture("terminal-tabs.png");
   // Jumping between shells in the same workspace must update the visible tab.
+  await pointerClick('[aria-label="New tab"]');
+  await waitFor("document.querySelector('[role=menu]')");
   await click('[aria-label="New terminal tab"]');
   await waitFor("window.kairo.listTerminals().then(all=>all.filter(t=>!t.sessionId).length===2)");
   const extraShell = (await state()).terminals.find((t) => !t.sessionId && t.id !== shell.id);
@@ -248,6 +252,8 @@ async function run() {
   await waitFor(
     `document.querySelector('[aria-controls="terminal-view-${firstPty.id}"]')?.getAttribute('aria-selected')==='true'`,
   );
+  await pointerClick('[aria-label="New tab"]');
+  await waitFor("document.querySelector('[role=menu]')");
   await click('[aria-label="New agent tab"]');
   await waitFor(
     "document.querySelector('[role=dialog] .primary') && !document.querySelector('[role=dialog] .primary').disabled",
@@ -408,6 +414,8 @@ async function run() {
     beforeStop.sessions.find((s) => s.id === second.id).nativeSession.id,
     (await nativeRecord(owner.directory)).id,
   );
+  await pointerClick('[aria-label="New tab"]');
+  await waitFor("document.querySelector('[role=menu]')");
   await click('[aria-label="New agent tab"]');
   await waitFor(
     "document.querySelector('[role=dialog] .primary') && !document.querySelector('[role=dialog] .primary').disabled",

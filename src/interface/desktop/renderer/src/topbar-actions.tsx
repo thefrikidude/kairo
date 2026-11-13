@@ -1,11 +1,17 @@
 import React from "react";
-import { Bot, FolderOpen, GitCompareArrows, SquareTerminal } from "lucide-react";
+import { Bot, FolderOpen, GitCompareArrows, Plus, SquareTerminal } from "lucide-react";
 import { Button } from "./components/ui/button.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu.js";
 import { cn } from "./lib/utils.js";
 
 type Tab = "files" | "changes";
 
-/** Icon actions at the top right, like Claude's: new tabs on the left, workspace panels beside them. */
+/** Icon actions at the top right, like Claude's: one + for new tabs, workspace panels beside it. */
 export function TopbarActions({
   canOpenTab,
   canOpenTerminal,
@@ -29,28 +35,34 @@ export function TopbarActions({
   const icon = "size-8 rounded-md text-muted-foreground hover:text-foreground";
   return (
     <div className="topbar-actions ml-auto flex shrink-0 items-center gap-0.5">
-      <Button
-        variant="ghost"
-        size="icon"
-        className={icon}
-        aria-label="New terminal tab"
-        title="New terminal"
-        disabled={!canOpenTerminal}
-        onClick={onTerminal}
-      >
-        <SquareTerminal />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className={icon}
-        aria-label="New agent tab"
-        title="New agent"
-        disabled={!canOpenTab}
-        onClick={onAgent}
-      >
-        <Bot />
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={icon}
+            aria-label="New tab"
+            title="New terminal or agent"
+            disabled={!canOpenTerminal && !canOpenTab}
+          >
+            <Plus />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-40">
+          <DropdownMenuItem
+            aria-label="New terminal tab"
+            disabled={!canOpenTerminal}
+            onSelect={onTerminal}
+          >
+            <SquareTerminal className="mr-2 size-4 text-muted-foreground" />
+            Terminal
+          </DropdownMenuItem>
+          <DropdownMenuItem aria-label="New agent tab" disabled={!canOpenTab} onSelect={onAgent}>
+            <Bot className="mr-2 size-4 text-muted-foreground" />
+            Agent
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
       <Button
         variant="ghost"
