@@ -14,7 +14,7 @@ export function SecondaryPane({
   workspace,
   terminals,
   tabId,
-  sidebarToggle,
+  first,
   actions,
   onTab,
   onRename,
@@ -25,8 +25,8 @@ export function SecondaryPane({
   workspace?: TaskWorkspace;
   terminals: WorkspaceTerminal[];
   tabId?: string;
-  /** The sidebar toggle belongs to the top-left pane only. */
-  sidebarToggle?: React.ReactNode;
+  /** The top-left pane leaves room for the window controls when the sidebar is hidden. */
+  first?: boolean;
   actions?: ContextAction[];
   onTab(terminal: WorkspaceTerminal): void;
   onRename(title: string): void;
@@ -40,8 +40,7 @@ export function SecondaryPane({
       aria-label={`${workspace?.name ?? "Workspace"} pane`}
       onPointerDownCapture={onFocus}
     >
-      <header className={`topbar ${sidebarToggle ? "topbar-first" : ""}`}>
-        {sidebarToggle}
+      <header className={`topbar ${first ? "topbar-first" : ""}`}>
         <WorkspaceTitle
           name={workspace?.name ?? workspace?.branch ?? "Workspace"}
           actions={actions}

@@ -193,23 +193,10 @@ button svg {
   cursor: col-resize;
   user-select: none;
 }
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0 10px 22px;
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: -0.4px;
-}
 .kairo-logo {
   display: block;
   flex: none;
   color: var(--text);
-}
-.brand-mark {
-  width: 26px;
-  height: 26px;
 }
 .new-chat,
 .open-project-button,
@@ -1440,17 +1427,44 @@ body.pane-resizing {
   max-width: 640px;
 }
 
+/* The window controls (sidebar toggle, back, forward) float at the top left over both the sidebar
+   and the top bar. On macOS they sit just right of the traffic lights. */
+.window-controls {
+  position: absolute;
+  z-index: 40;
+  top: 0;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  -webkit-app-region: no-drag;
+}
+.sidebar-header {
+  flex: none;
+  height: 44px;
+  margin-bottom: 4px;
+}
+.app-shell.sidebar-closed .topbar-first {
+  padding-left: 116px;
+}
+.sidebar.settings-nav {
+  padding-top: 44px;
+}
+
 /* macOS: the window has no title bar, so the top bars double as the drag area and leave room for
    the traffic lights. */
+.mac-inset .window-controls {
+  left: 80px;
+}
 .mac-inset .topbar,
-.mac-inset .brand {
+.mac-inset .sidebar-header {
   -webkit-app-region: drag;
 }
 .mac-inset .topbar button,
 .mac-inset .topbar input,
 .mac-inset .topbar [role="tablist"],
-.mac-inset .topbar .workspace-heading,
-.mac-inset .brand button {
+.mac-inset .topbar .workspace-heading {
   -webkit-app-region: no-drag;
 }
 .mac-inset .sidebar {
@@ -1459,13 +1473,6 @@ body.pane-resizing {
 .mac-inset .sidebar.settings-nav {
   padding-top: 44px;
 }
-.mac-inset .brand {
-  flex: none;
-  box-sizing: border-box;
-  height: 44px;
-  margin-bottom: 8px;
-  padding: 0 12px 0 84px;
-}
 .mac-inset .app-shell.sidebar-closed .topbar-first {
-  padding-left: 84px;
+  padding-left: 186px;
 }

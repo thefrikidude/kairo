@@ -24,6 +24,7 @@ import { SplitLayout } from "./split-layout.js";
 import { SecondaryPane } from "./secondary-pane.js";
 import { DropZones, type DropZone } from "./drop-zones.js";
 import { X } from "lucide-react";
+import { WindowControls } from "./window-controls.js";
 import { TopbarActions } from "./topbar-actions.js";
 import { WorkspaceTitle } from "./workspace-title.js";
 import { TerminalTabs } from "./terminal-tabs.js";
@@ -766,17 +767,33 @@ export function DesktopApp(): React.JSX.Element {
       },
     });
   };
-  const sidebarToggle = (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="icon-button size-[30px] rounded-md text-muted-foreground"
-      aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-      onClick={() => setSidebarOpen((value) => !value)}
-    >
-      <Icon name="sidebar" />
-    </Button>
-  );
+  // Back and forward walk through the workspaces visited, like a browser.
+  const history = useRef({ stack: [] as string[], index: -1 });
+  const [, setHistoryTick] = useState(0);
+  useEffect(() => {
+    const current = state?.activeWorkspaceId;
+    if (!current) return;
+    const visited = history.current;
+    if (visited.stack[visited.index] === current) return;
+    visited.stack = [...visited.stack.slice(0, visited.index + 1), current];
+    visited.index = visited.stack.length - 1;
+    setHistoryTick((tick) => tick + 1);
+  }, [state?.activeWorkspaceId]);
+  const historyTarget = (delta: -1 | 1) => {
+    const visited = history.current;
+    const alive = (id: string) =>
+      state?.workspaces.some((item) => item.id === id && !item.removedAt && !item.archivedAt);
+    for (let at = visited.index + delta; at >= 0 && at < visited.stack.length; at += delta)
+      if (alive(visited.stack[at])) return at;
+    return undefined;
+  };
+  const stepHistory = (delta: -1 | 1) => {
+    const at = historyTarget(delta);
+    if (at === undefined) return;
+    history.current.index = at;
+    setHistoryTick((tick) => tick + 1);
+    void chooseWorkspace(history.current.stack[at]);
+  };
   // Panes: a tree of workspaces shown side by side. The active workspace's pane gets the full UI.
   const activeId = state?.activeWorkspaceId;
   const previousActive = useRef<string | undefined>(undefined);
@@ -888,7 +905,7 @@ export function DesktopApp(): React.JSX.Element {
         onDrop={(zone) => dropOn(item, zone)}
       />
     );
-    const toggle = item.id === paneLeaves[0].id ? sidebarToggle : undefined;
+    const first = item.id === paneLeaves[0].id;
     if (item.id !== primaryLeafId) {
       const owner = state?.workspaces.find((w) => w.id === item.workspaceId);
       const shown = paneTerminal(item);
@@ -898,7 +915,7 @@ export function DesktopApp(): React.JSX.Element {
           workspace={owner}
           terminals={state?.terminals.filter((t) => t.workspaceId === item.workspaceId) ?? []}
           tabId={shown?.id}
-          sidebarToggle={toggle}
+          first={first}
           actions={owner ? workspaceCommands(owner) : undefined}
           onTab={(terminal) => setPaneTabs((tabs) => ({ ...tabs, [item.id]: terminal.id }))}
           onRename={(title) =>
@@ -929,8 +946,7 @@ export function DesktopApp(): React.JSX.Element {
         className="pane pane-primary flex min-h-0 min-w-0 flex-1 flex-col"
         aria-label="Active pane"
       >
-        <header className={`topbar ${toggle ? "topbar-first" : ""}`}>
-          {toggle}
+        <header className={`topbar ${first ? "topbar-first" : ""}`}>
           <WorkspaceTitle
             name={
               operationId
@@ -1244,6 +1260,14 @@ export function DesktopApp(): React.JSX.Element {
         onTab={setSettingsTab}
         onBack={() => setSettings(false)}
       />
+      <WindowControls
+        sidebarOpen={sidebarOpen}
+        canBack={historyTarget(-1) !== undefined}
+        canForward={historyTarget(1) !== undefined}
+        onToggle={() => setSidebarOpen((value) => !value)}
+        onBack={() => stepHistory(-1)}
+        onForward={() => stepHistory(1)}
+      />
       <Sidebar
         hidden={!sidebarOpen || settings}
         pending={pending}
@@ -1274,7 +1298,6 @@ export function DesktopApp(): React.JSX.Element {
       <main className="conversation">
         {settings && (
           <header className="topbar topbar-first">
-            {sidebarToggle}
             <strong>Settings</strong>
             <Button variant="ghost" size="sm" onClick={() => setSettings(false)}>
               Back to workspace

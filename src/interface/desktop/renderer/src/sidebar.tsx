@@ -1,7 +1,7 @@
 import React from "react";
 import type { DesktopBootstrap, TaskWorkspace } from "../../shared/api.js";
 import { SquareTerminal } from "lucide-react";
-import { Icon, KairoLogo } from "./chrome.js";
+import { Icon } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
 import type { ContextAction } from "./context-menu.js";
 
@@ -62,20 +62,7 @@ export function Sidebar({
 }): React.JSX.Element {
   return (
     <aside className="sidebar" aria-label="Workspaces" hidden={hidden}>
-      <div className="brand">
-        <KairoLogo className="brand-mark" />
-        <span>Kairo</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="select-toggle ml-auto h-7 px-2 text-xs"
-          aria-pressed={selecting}
-          disabled={pending}
-          onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
-        >
-          {selecting ? "Done" : "Select"}
-        </Button>
-      </div>
+      <div className="sidebar-header" />
       {state?.workspaces.some((w) => w.pinned && !w.archivedAt && !w.removedAt) && (
         <section className="pinned-sessions" aria-label="Pinned workspaces">
           <div className="section-label sidebar-section-title">Pinned</div>
@@ -86,6 +73,16 @@ export function Sidebar({
       )}
       <div className="section-label sidebar-section-title">
         <span>Projects</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="select-toggle ml-auto mr-1 h-7 px-2 text-xs"
+          aria-pressed={selecting}
+          disabled={pending}
+          onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
+        >
+          {selecting ? "Done" : "Select"}
+        </Button>
         <Button
           variant="ghost"
           size="icon"
