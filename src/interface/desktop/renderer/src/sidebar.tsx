@@ -118,7 +118,10 @@ export function Sidebar({
                 aria-expanded={!collapsed[group.path]}
                 onClick={() => setCollapsed((all) => ({ ...all, [group.path]: !all[group.path] }))}
               >
-                <Icon name="chevron" />
+                <Icon
+                  name="chevron"
+                  className={`transition-transform ${collapsed[group.path] ? "-rotate-90" : ""}`}
+                />
                 <Icon name="folder" />
                 <span>{name(group.path)}</span>
               </button>
