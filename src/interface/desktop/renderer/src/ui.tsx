@@ -826,6 +826,29 @@ export function DesktopApp(): React.JSX.Element {
         <X />
       </Button>
     );
+  /** With one tab the strip is hidden, so that tab's actions live in the title menu instead. */
+  const onlyTab = projectTabs.length + stoppedSessions.length === 1;
+  const loneTerminal = onlyTab ? projectTabs[0] : undefined;
+  const loneSession = onlyTab ? stoppedSessions[0] : undefined;
+  const loneActions: ContextAction[] = (
+    loneSession
+      ? agentActions(loneSession.id)
+      : loneTerminal?.sessionId
+        ? agentActions(loneTerminal.sessionId)
+        : loneTerminal
+          ? [
+              {
+                label: "Close",
+                disabled: pending,
+                run: () =>
+                  void action(async () => {
+                    await window.kairo.closeTerminal(loneTerminal.id);
+                    return window.kairo.bootstrap(true);
+                  }),
+              },
+            ]
+          : []
+  ).map((item) => ({ ...item, label: `${item.label} tab` }));
   const renderLeaf = (item: Leaf) => {
     const drop = (
       <DropZones
@@ -874,7 +897,7 @@ export function DesktopApp(): React.JSX.Element {
         className="pane pane-primary flex min-h-0 min-w-0 flex-1 flex-col"
         aria-label="Active pane"
       >
-        <header className="topbar">
+        <header className={`topbar ${toggle ? "topbar-first" : ""}`}>
           {toggle}
           <WorkspaceTitle
             name={
@@ -886,7 +909,16 @@ export function DesktopApp(): React.JSX.Element {
             }
             actions={
               !operationId && workspace && !workspace.removedAt
-                ? workspaceCommands(workspace)
+                ? [...workspaceCommands(workspace), ...loneActions]
+                : undefined
+            }
+            status={
+              loneTerminal?.state === "running" &&
+              (loneTerminal.activity === "working" || loneTerminal.activity === "waiting")
+                ? {
+                    className: activityClass[loneTerminal.activity],
+                    label: activityLabel[loneTerminal.activity],
+                  }
                 : undefined
             }
             disabled={pending || !!workspace?.archivedAt}
@@ -1208,7 +1240,7 @@ export function DesktopApp(): React.JSX.Element {
       {sidebarOpen && resizeHandle("sidebar")}
       <main className="conversation">
         {settings && (
-          <header className="topbar">
+          <header className="topbar topbar-first">
             {sidebarToggle}
             <strong>Settings</strong>
             <Button variant="ghost" size="sm" onClick={() => setSettings(false)}>

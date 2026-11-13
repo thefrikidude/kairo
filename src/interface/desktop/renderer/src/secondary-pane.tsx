@@ -40,7 +40,7 @@ export function SecondaryPane({
       aria-label={`${workspace?.name ?? "Workspace"} pane`}
       onPointerDownCapture={onFocus}
     >
-      <header className="topbar">
+      <header className={`topbar ${sidebarToggle ? "topbar-first" : ""}`}>
         {sidebarToggle}
         <WorkspaceTitle
           name={workspace?.name ?? workspace?.branch ?? "Workspace"}

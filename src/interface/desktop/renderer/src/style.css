@@ -1053,7 +1053,7 @@ body.pane-resizing {
   flex-wrap: wrap;
 }
 
-.topbar:has(.terminal-tabs) {
+.topbar {
   padding: 0 10px;
   min-height: 44px;
   gap: 8px;
@@ -1179,7 +1179,7 @@ body.pane-resizing {
   width: 100%;
 }
 @media (max-width: 1100px) {
-  .topbar:has(.terminal-tabs) {
+  .topbar {
     flex-wrap: wrap;
     height: auto;
     min-height: 80px;
@@ -1424,4 +1424,34 @@ body.pane-resizing {
 .settings-content .empty-small {
   text-align: left;
   max-width: 640px;
+}
+
+/* macOS: the window has no title bar, so the top bars double as the drag area and leave room for
+   the traffic lights. */
+.mac-inset .topbar,
+.mac-inset .brand {
+  -webkit-app-region: drag;
+}
+.mac-inset .topbar button,
+.mac-inset .topbar input,
+.mac-inset .topbar [role="tablist"],
+.mac-inset .topbar .workspace-heading,
+.mac-inset .brand button {
+  -webkit-app-region: no-drag;
+}
+.mac-inset .sidebar {
+  padding-top: 0;
+}
+.mac-inset .sidebar.settings-nav {
+  padding-top: 44px;
+}
+.mac-inset .brand {
+  flex: none;
+  box-sizing: border-box;
+  height: 44px;
+  margin-bottom: 8px;
+  padding: 0 12px 0 84px;
+}
+.mac-inset .app-shell.sidebar-closed .topbar-first {
+  padding-left: 84px;
 }

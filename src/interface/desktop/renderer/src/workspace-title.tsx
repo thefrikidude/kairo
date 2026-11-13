@@ -15,12 +15,15 @@ export function WorkspaceTitle({
   name,
   actions,
   disabled,
+  status,
   onRename,
 }: {
   name: string;
   /** Without actions the title is plain text, for example while a workspace is still preparing. */
   actions?: ContextAction[];
   disabled?: boolean;
+  /** Activity of the only open tab, shown as a dot since the tab strip is hidden for one tab. */
+  status?: { className: string; label: string };
   onRename(title: string): void;
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false);
@@ -68,6 +71,13 @@ export function WorkspaceTitle({
           setEditing(true);
         }}
       >
+        {status && (
+          <span
+            className={`tab-status ${status.className}`}
+            title={status.label}
+            aria-hidden="true"
+          />
+        )}
         <span className="truncate">{name}</span>
       </Button>
       <DropdownMenu>

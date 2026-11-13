@@ -217,6 +217,11 @@ function createWindow(): void {
     minHeight: 640,
     title: "Kairo",
     icon: appIconPath,
+    // The top bar draws into the title bar area, like Claude's desktop app; only the traffic
+    // lights stay native.
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 15 } }
+      : {}),
     webPreferences,
   });
   loadRenderer(mainWindow);

@@ -56,82 +56,87 @@ export function TerminalTabs({
           {runningAgents} agents share these files
         </span>
       )}
-      <div
-        className="terminal-tabs"
-        role="tablist"
-        aria-label="Terminal tabs"
-        onKeyDown={navigateTabs}
-      >
-        {projectTabs.map((terminal) => (
-          <button
-            key={terminal.id}
-            data-session-id={terminal.sessionId}
-            disabled={pending || !!workspace?.archivedAt || !!workspace?.unavailable}
-            role="tab"
-            aria-selected={terminal.id === activeTerminalId}
-            tabIndex={terminal.id === activeTerminalId ? 0 : -1}
-            aria-controls={`terminal-view-${terminal.id}`}
-            title={terminal.directory}
-            {...menuHandlers(
-              `${terminal.title} tab actions`,
-              terminal.sessionId
-                ? agentActions(terminal.sessionId)
-                : [
-                    {
-                      label: "Close terminal",
-                      disabled: pending,
-                      run: () =>
-                        void action(async () => {
-                          await window.kairo.closeTerminal(terminal.id);
-                          return window.kairo.bootstrap(true);
-                        }),
-                    },
-                  ],
-            )}
-            onClick={() => {
-              selectionVersion.current++;
-              if (terminal.sessionId) {
-                setShellId(undefined);
-                void action(() => window.kairo.openSession(terminal.sessionId!));
-              } else {
-                setShellId(terminal.id);
-                void window.kairo
-                  .rememberWorkspaceTab(terminal.workspaceId, `terminal:${terminal.id}`)
-                  .catch((cause) => setError(message(cause)));
-              }
-            }}
-          >
-            {terminal.state === "running" &&
-              (terminal.activity === "working" || terminal.activity === "waiting") && (
-                <span
-                  className={`tab-status ${activityClass[terminal.activity]}`}
-                  title={activityLabel[terminal.activity]}
-                  aria-hidden="true"
-                />
+      {projectTabs.length + stoppedSessions.length > 1 ? (
+        <div
+          className="terminal-tabs"
+          role="tablist"
+          aria-label="Terminal tabs"
+          onKeyDown={navigateTabs}
+        >
+          {projectTabs.map((terminal) => (
+            <button
+              key={terminal.id}
+              data-session-id={terminal.sessionId}
+              disabled={pending || !!workspace?.archivedAt || !!workspace?.unavailable}
+              role="tab"
+              aria-selected={terminal.id === activeTerminalId}
+              tabIndex={terminal.id === activeTerminalId ? 0 : -1}
+              aria-controls={`terminal-view-${terminal.id}`}
+              title={terminal.directory}
+              {...menuHandlers(
+                `${terminal.title} tab actions`,
+                terminal.sessionId
+                  ? agentActions(terminal.sessionId)
+                  : [
+                      {
+                        label: "Close terminal",
+                        disabled: pending,
+                        run: () =>
+                          void action(async () => {
+                            await window.kairo.closeTerminal(terminal.id);
+                            return window.kairo.bootstrap(true);
+                          }),
+                      },
+                    ],
               )}
-            {terminal.sessionId
-              ? (state?.sessions.find((s) => s.id === terminal.sessionId)?.title ?? terminal.title)
-              : `Terminal ${projectTabs.filter((t) => !t.sessionId).findIndex((t) => t.id === terminal.id) + 1}`}
-          </button>
-        ))}
-        {stoppedSessions.map((session) => (
-          <button
-            key={session.id}
-            data-session-id={session.id}
-            disabled={pending || !!workspace?.archivedAt || !!workspace?.unavailable}
-            {...menuHandlers(`${session.title} tab actions`, agentActions(session.id))}
-            role="tab"
-            aria-selected={session.id === current?.id && !selectedShell}
-            tabIndex={session.id === current?.id ? 0 : -1}
-            onClick={() => {
-              selectionVersion.current++;
-              void action(() => window.kairo.openSession(session.id));
-            }}
-          >
-            {session.title} · stopped
-          </button>
-        ))}
-      </div>
+              onClick={() => {
+                selectionVersion.current++;
+                if (terminal.sessionId) {
+                  setShellId(undefined);
+                  void action(() => window.kairo.openSession(terminal.sessionId!));
+                } else {
+                  setShellId(terminal.id);
+                  void window.kairo
+                    .rememberWorkspaceTab(terminal.workspaceId, `terminal:${terminal.id}`)
+                    .catch((cause) => setError(message(cause)));
+                }
+              }}
+            >
+              {terminal.state === "running" &&
+                (terminal.activity === "working" || terminal.activity === "waiting") && (
+                  <span
+                    className={`tab-status ${activityClass[terminal.activity]}`}
+                    title={activityLabel[terminal.activity]}
+                    aria-hidden="true"
+                  />
+                )}
+              {terminal.sessionId
+                ? (state?.sessions.find((s) => s.id === terminal.sessionId)?.title ??
+                  terminal.title)
+                : `Terminal ${projectTabs.filter((t) => !t.sessionId).findIndex((t) => t.id === terminal.id) + 1}`}
+            </button>
+          ))}
+          {stoppedSessions.map((session) => (
+            <button
+              key={session.id}
+              data-session-id={session.id}
+              disabled={pending || !!workspace?.archivedAt || !!workspace?.unavailable}
+              {...menuHandlers(`${session.title} tab actions`, agentActions(session.id))}
+              role="tab"
+              aria-selected={session.id === current?.id && !selectedShell}
+              tabIndex={session.id === current?.id ? 0 : -1}
+              onClick={() => {
+                selectionVersion.current++;
+                void action(() => window.kairo.openSession(session.id));
+              }}
+            >
+              {session.title} · stopped
+            </button>
+          ))}
+        </div>
+      ) : (
+        <span className="flex-1" />
+      )}
     </>
   );
 }
