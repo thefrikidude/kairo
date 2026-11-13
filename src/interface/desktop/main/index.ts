@@ -281,6 +281,8 @@ function createWindow(): void {
     webPreferences,
   });
   loadRenderer(mainWindow);
+  // Chromium can remember a page's zoom; start from 100% so the renderer's idea of it is right.
+  mainWindow.webContents.once("did-finish-load", () => mainWindow?.webContents.setZoomFactor(1));
   mainWindow.on("closed", () => {
     mainWindow = undefined;
   });

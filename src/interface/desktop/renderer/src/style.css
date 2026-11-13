@@ -1493,3 +1493,14 @@ body.pane-resizing {
   font-size: 14px;
   box-shadow: 0 8px 24px #0004;
 }
+
+/* Keep the top row at its native size at any page zoom, so it lines up with the traffic lights. */
+.topbar,
+.sidebar-header,
+.window-controls {
+  zoom: calc(1 / var(--page-zoom, 1));
+}
+.mac-inset.page-zoomed .topbar,
+.mac-inset.page-zoomed .sidebar-header {
+  -webkit-app-region: no-drag;
+}
