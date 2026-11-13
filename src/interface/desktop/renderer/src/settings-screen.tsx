@@ -1,13 +1,7 @@
 import React from "react";
 import type { DesktopBootstrap, TaskWorkspace } from "../../shared/api.js";
 import { Button } from "./components/ui/button.js";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./components/ui/select.js";
+import { NativeSelect } from "./components/ui/native-select.js";
 
 export type ThemeChoice = "system" | "dark" | "light";
 const settingsTabs: [string, string][] = [
@@ -102,17 +96,17 @@ export function SettingsContent({
       {tab === "general" && (
         <>
           <div className="settings-field">
-            <span id="theme-label">Appearance</span>
-            <Select value={theme} onValueChange={(value) => onTheme(value as ThemeChoice)}>
-              <SelectTrigger aria-labelledby="theme-label" className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="system">System</SelectItem>
-                <SelectItem value="dark">Dark</SelectItem>
-                <SelectItem value="light">Light</SelectItem>
-              </SelectContent>
-            </Select>
+            <span>Appearance</span>
+            <NativeSelect
+              aria-label="Theme"
+              className="w-48"
+              value={theme}
+              onChange={(event) => onTheme(event.target.value as ThemeChoice)}
+            >
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </NativeSelect>
           </div>
           <p className="empty-small">
             Agent conversations run inside the selected CLI. Models, authentication and approvals

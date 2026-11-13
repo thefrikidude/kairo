@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { DesktopBootstrap, TaskWorkspace } from "../../shared/api.js";
 import { ModalFrame } from "./chrome.js";
+import { Input } from "./components/ui/input.js";
 export type PaletteCommand = { label: string; detail?: string; run(): void };
 export function WorkspacePalette({
   kind,
@@ -106,7 +107,7 @@ export function WorkspacePalette({
         <h2 id="palette-title">
           {kind === "file" ? "Quick open file" : "Jump to a workspace, tab or command"}
         </h2>
-        <input
+        <Input
           autoFocus
           aria-label="Palette search"
           placeholder={kind === "file" ? "Search filenames…" : "Search workspaces, tabs, commands…"}

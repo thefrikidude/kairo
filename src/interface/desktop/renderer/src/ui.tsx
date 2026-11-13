@@ -7,13 +7,13 @@ import type {
 } from "../../shared/api.js";
 import { Icon, KairoLogo } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
+import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs.js";
 import { TerminalTabs } from "./terminal-tabs.js";
 import { activityClass, activityLabel } from "./activity.js";
 import { Sidebar } from "./sidebar.js";
 import { SettingsContent, SettingsNav } from "./settings-screen.js";
 import { AgentPicker, ConfirmDialog, NewSessionDialog, RenameDialog } from "./session-dialogs.js";
 import { HomeScreen } from "./home-screen.js";
-import { navigateTabs } from "./tab-navigation.js";
 import { rememberedShell, openWorkspaceShell } from "./workspace-selection.js";
 import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
 import { WorkspacePalette, type PaletteCommand } from "./workspace-palette.js";
@@ -855,17 +855,21 @@ export function DesktopApp(): React.JSX.Element {
       {sidebarOpen && resizeHandle("sidebar")}
       <main className="conversation">
         <header className="topbar">
-          <button
-            className="icon-button"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="icon-button size-[30px] rounded-md text-muted-foreground"
             aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
             onClick={() => setSidebarOpen((value) => !value)}
           >
             <Icon name="sidebar" />
-          </button>
+          </Button>
           {settings ? (
             <>
               <strong>Settings</strong>
-              <button onClick={() => setSettings(false)}>Back to workspace</button>
+              <Button variant="ghost" size="sm" onClick={() => setSettings(false)}>
+                Back to workspace
+              </Button>
             </>
           ) : (
             <TerminalTabs
@@ -895,9 +899,14 @@ export function DesktopApp(): React.JSX.Element {
         {error && (
           <div className="desktop-error" role="alert">
             {error}
-            <button aria-label="Dismiss error" onClick={() => setError("")}>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Dismiss error"
+              onClick={() => setError("")}
+            >
               ×
-            </button>
+            </Button>
           </div>
         )}
         <SettingsContent
@@ -1003,8 +1012,7 @@ export function DesktopApp(): React.JSX.Element {
                       : "Pick one in the sidebar, or press + beside a project to create one."}
               </p>
               {workspace && (
-                <button
-                  className="primary"
+                <Button
                   disabled={
                     pending ||
                     !!workspace?.unavailable ||
@@ -1023,7 +1031,7 @@ export function DesktopApp(): React.JSX.Element {
                     : current
                       ? "Open agent terminal"
                       : "New agent session"}
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -1031,7 +1039,9 @@ export function DesktopApp(): React.JSX.Element {
       </main>
       {!settings && (
         <aside className="workspace-tools" aria-label="Workspace tools">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             className="review-toggle"
             disabled={!accessId || !!workspace?.removedAt}
             aria-label="Browse files"
@@ -1043,8 +1053,10 @@ export function DesktopApp(): React.JSX.Element {
             }}
           >
             <Icon name="folder" /> <span>Files</span>
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             className="review-toggle"
             disabled={!accessId || !!workspace?.removedAt}
             aria-label="Review changes"
@@ -1059,7 +1071,7 @@ export function DesktopApp(): React.JSX.Element {
             {overview?.changes.length ? (
               <span className="count">{overview.changes.length}</span>
             ) : null}
-          </button>
+          </Button>
         </aside>
       )}
 
@@ -1067,33 +1079,25 @@ export function DesktopApp(): React.JSX.Element {
         <aside className="workbench" id="workspace-panel" aria-label="Workspace files and review">
           {resizeHandle("context")}
           <header className="workbench-header">
-            <div
-              className="context-tab-list"
-              role="tablist"
-              aria-label="Workspace tabs"
-              onKeyDown={navigateTabs}
+            <Tabs
+              className="context-tab-list flex flex-1"
+              value={contextTab}
+              onValueChange={(tab) => setContextTab(tab as "files" | "changes")}
             >
-              {(["files", "changes"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  role="tab"
-                  tabIndex={contextTab === tab ? 0 : -1}
-                  aria-selected={contextTab === tab}
-                  onClick={() => {
-                    setContextTab(tab);
-                  }}
-                >
-                  {tab === "files" ? "Files" : "Review"}
-                </button>
-              ))}
-            </div>
-            <button
-              className="icon-button"
+              <TabsList aria-label="Workspace tabs">
+                <TabsTrigger value="files">Files</TabsTrigger>
+                <TabsTrigger value="changes">Review</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="icon-button size-[30px] rounded-md text-muted-foreground"
               aria-label="Close workspace panel"
               onClick={() => setContextOpen(false)}
             >
               <Icon name="close" />
-            </button>
+            </Button>
           </header>
           <Suspense fallback={<p className="empty-small">Loading workspace…</p>}>
             {contextTab === "files" ? (

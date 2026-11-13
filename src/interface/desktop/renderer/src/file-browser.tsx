@@ -1,3 +1,4 @@
+import { Input } from "./components/ui/input.js";
 import React, { memo, useEffect, useRef, useState } from "react";
 import type { WorkspaceEntry, FileSearch } from "../../shared/api.js";
 import type { WorkspaceChange } from "../../../../infrastructure/tools/workspace-review.js";
@@ -174,8 +175,8 @@ export default memo(function FileBrowser({
           <div className="file-preview-toolbar">
             <strong>Project files</strong>
           </div>
-          <input
-            className="file-search"
+          <Input
+            className="file-search m-3 w-auto"
             type="search"
             placeholder="Search file paths…"
             aria-label="Search project files"

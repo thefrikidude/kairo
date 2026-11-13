@@ -106,7 +106,7 @@ async function create(id) {
   await click(".new-chat");
   await until(() =>
     evaluate(
-      "!!document.querySelector('dialog[open]') && Array.from(document.querySelectorAll('dialog button')).some(b=>b.textContent==='Refresh agents'&&!b.disabled)",
+      "!!document.querySelector('[role=dialog]') && Array.from(document.querySelectorAll('[role=dialog] button')).some(b=>b.textContent==='Refresh agents'&&!b.disabled)",
     ),
   );
   await input('[aria-label="Search agents"]', id);
@@ -117,8 +117,8 @@ async function create(id) {
     evaluate("!!document.querySelector('[aria-label=\"Workspace mode\"] option[value=worktree]')"),
   );
   await input('[aria-label="Branch"]', `kairo/native-${id}`);
-  await button("Open agent terminal", "document.querySelector('dialog')");
-  await until(() => evaluate("!document.querySelector('dialog[open]')"));
+  await button("Open agent terminal", "document.querySelector('[role=dialog]')");
+  await until(() => evaluate("!document.querySelector('[role=dialog]')"));
   const value = await state(),
     session = value.sessions.find((item) => item.id === value.activeSessionId),
     workspace = value.workspaces.find((item) => item.id === session.workspaceId);

@@ -175,7 +175,7 @@ export function NewSessionDialog({
           <Button variant="outline" disabled={pending} onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={!canOpen} onClick={onOpen}>
+          <Button className="primary" disabled={!canOpen} onClick={onOpen}>
             {pending ? "Opening…" : "Open agent terminal"}
           </Button>
         </div>
@@ -222,7 +222,9 @@ export function RenameDialog({
           <Button variant="outline" type="button" disabled={pending} onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={pending || !value.trim()}>Save name</Button>
+          <Button className="primary" disabled={pending || !value.trim()}>
+            Save name
+          </Button>
         </div>
       </form>
     </ModalFrame>
@@ -260,7 +262,7 @@ export function ConfirmDialog({
           <Button variant="outline" disabled={pending} onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={pending} onClick={onConfirm}>
+          <Button className="primary" disabled={pending} onClick={onConfirm}>
             {pending ? "Working…" : "Confirm"}
           </Button>
         </div>

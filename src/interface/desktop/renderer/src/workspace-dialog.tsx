@@ -8,6 +8,9 @@ import type {
 } from "../../shared/api.js";
 import { ModalFrame } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
+import { Input } from "./components/ui/input.js";
+import { NativeSelect } from "./components/ui/native-select.js";
+import { Textarea } from "./components/ui/textarea.js";
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 const envAskedKey = (project: string) => `kairo-env-copy-asked:${project}`;
@@ -120,13 +123,15 @@ export function WorkspaceDialog({
   return (
     <ModalFrame labelledBy="workspace-create-title" blocked={pending} onDismiss={close}>
       <form
-        className="new-session-dialog"
+        className="new-session-dialog max-h-[85vh] overflow-auto rounded-xl border border-border bg-background p-[22px]"
         onSubmit={(e) => {
           e.preventDefault();
           void create();
         }}
       >
-        <h2 id="workspace-create-title">New workspace</h2>
+        <h2 id="workspace-create-title" className="mb-4 text-[17px] font-semibold">
+          New workspace
+        </h2>
         {initialProject ? (
           <p className="empty-small" title={project}>
             {project}
@@ -135,12 +140,14 @@ export function WorkspaceDialog({
           <label className="settings-field">
             Project folder
             <div className="folder-picker">
-              <input
+              <Input
                 aria-label="Workspace project"
                 value={project}
                 onChange={(e) => setProject(e.target.value)}
               />
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 type="button"
                 onClick={() =>
                   void window.kairo.pickWorkspace().then((path) => {
@@ -149,13 +156,13 @@ export function WorkspaceDialog({
                 }
               >
                 Browse…
-              </button>
+              </Button>
             </div>
           </label>
         )}
         <label className="settings-field">
           Task name
-          <input
+          <Input
             autoFocus
             aria-label="Workspace name"
             maxLength={200}
@@ -166,7 +173,7 @@ export function WorkspaceDialog({
         </label>
         <label className="settings-field">
           Agent
-          <select
+          <NativeSelect
             aria-label="Workspace agent"
             value={agent}
             onChange={(e) => setAgent(e.target.value)}
@@ -179,7 +186,7 @@ export function WorkspaceDialog({
                   {a.name}
                 </option>
               ))}
-          </select>
+          </NativeSelect>
         </label>
         {askEnv && (
           <label className="inline-check">
@@ -198,12 +205,14 @@ export function WorkspaceDialog({
             <label className="settings-field">
               Project folder
               <div className="folder-picker">
-                <input
+                <Input
                   aria-label="Workspace project"
                   value={project}
                   onChange={(e) => setProject(e.target.value)}
                 />
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   type="button"
                   onClick={() =>
                     void window.kairo.pickWorkspace().then((path) => {
@@ -212,13 +221,13 @@ export function WorkspaceDialog({
                   }
                 >
                   Browse…
-                </button>
+                </Button>
               </div>
             </label>
           )}
           <label className="settings-field">
             Workspace
-            <select
+            <NativeSelect
               aria-label="Workspace mode"
               value={mode}
               onChange={(e) => setMode(e.target.value as typeof mode)}
@@ -230,13 +239,13 @@ export function WorkspaceDialog({
                   <option value="existing">Existing worktree</option>
                 </>
               )}
-            </select>
+            </NativeSelect>
           </label>
           {mode === "worktree" && (
             <>
               <label className="settings-field">
                 Starting branch or commit
-                <input
+                <Input
                   aria-label="Starting ref"
                   list="workspace-refs"
                   value={base}
@@ -251,7 +260,9 @@ export function WorkspaceDialog({
               <p className="empty-small">
                 Project default: {refs?.defaultRef || "unavailable"}. Uses committed files.
               </p>
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 type="button"
                 disabled={loading}
                 onClick={() => {
@@ -264,10 +275,10 @@ export function WorkspaceDialog({
                 }}
               >
                 Fetch latest remote branches
-              </button>
+              </Button>
               <label className="settings-field">
                 Branch name (optional)
-                <input
+                <Input
                   aria-label="Branch override"
                   value={branch}
                   placeholder={`kairo/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "task"}-…`}
@@ -279,7 +290,7 @@ export function WorkspaceDialog({
           {mode === "existing" && (
             <label className="settings-field">
               Existing worktree
-              <select
+              <NativeSelect
                 aria-label="Existing worktree"
                 value={existing}
                 onChange={(e) => setExisting(e.target.value)}
@@ -291,7 +302,7 @@ export function WorkspaceDialog({
                       {t.branch ?? "Detached"} · {t.directory}
                     </option>
                   ))}
-              </select>
+              </NativeSelect>
             </label>
           )}
         </details>
@@ -305,6 +316,7 @@ export function WorkspaceDialog({
             Cancel
           </Button>
           <Button
+            className="primary"
             disabled={
               pending || loading || !refs || !name.trim() || (mode === "worktree" && !base.trim())
             }
@@ -348,7 +360,7 @@ export function ProjectSettings({
   return (
     <ModalFrame labelledBy="project-settings-title" blocked={pending} onDismiss={close}>
       <form
-        className="new-session-dialog"
+        className="new-session-dialog max-h-[85vh] overflow-auto rounded-xl border border-border bg-background p-[22px]"
         onSubmit={(e) => {
           e.preventDefault();
           if (!prefs) return;
@@ -366,13 +378,15 @@ export function ProjectSettings({
             .finally(() => setPending(false));
         }}
       >
-        <h2 id="project-settings-title">Project setup</h2>
+        <h2 id="project-settings-title" className="mb-4 text-[17px] font-semibold">
+          Project setup
+        </h2>
         <p className="empty-small">{project}</p>
         {prefs && (
           <>
             <label className="settings-field">
               Default base ref
-              <input
+              <Input
                 aria-label="Default base ref"
                 placeholder="Detect default branch"
                 value={prefs.baseRef ?? ""}
@@ -381,7 +395,8 @@ export function ProjectSettings({
             </label>
             <label className="settings-field">
               Setup script
-              <textarea
+              <Textarea
+                className="rounded-md border border-border bg-popover p-2 text-sm"
                 aria-label="Setup script"
                 rows={6}
                 placeholder="pnpm install"
@@ -395,7 +410,8 @@ export function ProjectSettings({
             </p>
             <label className="settings-field">
               Ignored paths to copy
-              <textarea
+              <Textarea
+                className="rounded-md border border-border bg-popover p-2 text-sm"
                 aria-label="Copy paths"
                 rows={4}
                 placeholder={".env\n.env.local"}
@@ -418,7 +434,9 @@ export function ProjectSettings({
           <Button variant="outline" type="button" onClick={close} disabled={pending}>
             Cancel
           </Button>
-          <Button disabled={pending || !prefs}>Save project setup</Button>
+          <Button className="primary" disabled={pending || !prefs}>
+            Save project setup
+          </Button>
         </div>
       </form>
     </ModalFrame>

@@ -144,7 +144,9 @@ export function TerminalTabs({
         ))}
       </div>
       <div className="terminal-tab-actions">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           aria-label="New terminal tab"
           disabled={
             !workspace ||
@@ -156,14 +158,16 @@ export function TerminalTabs({
           onClick={() => void newShell()}
         >
           + Terminal
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           aria-label="New agent tab"
           disabled={pending || !workspace || !!workspace.archivedAt || !!workspace.unavailable}
           onClick={() => beginSession()}
         >
           + Agent
-        </button>
+        </Button>
       </div>
     </>
   );
