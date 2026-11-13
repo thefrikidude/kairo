@@ -8,6 +8,8 @@ import type {
 import { Icon, KairoLogo } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs.js";
+import { TopbarActions } from "./topbar-actions.js";
+import { WorkspaceTitle } from "./workspace-title.js";
 import { TerminalTabs } from "./terminal-tabs.js";
 import { activityClass, activityLabel } from "./activity.js";
 import { Sidebar } from "./sidebar.js";
@@ -821,7 +823,7 @@ export function DesktopApp(): React.JSX.Element {
   );
   return (
     <div
-      className={`app-shell ${!settings ? "tools-visible" : ""} ${contextOpen && !settings && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
+      className={`app-shell ${contextOpen && !settings && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
       data-theme={theme}
       style={
         {
@@ -881,28 +883,65 @@ export function DesktopApp(): React.JSX.Element {
               </Button>
             </>
           ) : (
-            <TerminalTabs
-              workspace={workspace}
-              state={state}
-              operationName={operation?.name}
-              operationId={operationId}
-              runningAgents={runningAgents}
-              projectTabs={projectTabs}
-              stoppedSessions={stoppedSessions}
-              activeTerminalId={activeTerminalId}
-              current={current}
-              selectedShell={selectedShell}
-              pending={pending}
-              creatingShell={creatingShell}
-              menuHandlers={menuHandlers}
-              agentActions={agentActions}
-              action={action}
-              selectionVersion={selectionVersion}
-              setShellId={setShellId}
-              setError={setError}
-              newShell={newShell}
-              beginSession={beginSession}
-            />
+            <>
+              <WorkspaceTitle
+                name={
+                  operationId
+                    ? (operation?.name ?? "Kairo")
+                    : workspace
+                      ? (workspace.name ?? workspace.branch ?? name(workspace.directory))
+                      : "Kairo"
+                }
+                actions={
+                  !operationId && workspace && !workspace.removedAt
+                    ? workspaceCommands(workspace)
+                    : undefined
+                }
+                disabled={pending || !!workspace?.archivedAt}
+                onRename={(title) =>
+                  workspace && void action(() => window.kairo.renameWorkspace(workspace.id, title))
+                }
+              />
+              <TerminalTabs
+                workspace={workspace}
+                state={state}
+                operationId={operationId}
+                runningAgents={runningAgents}
+                projectTabs={projectTabs}
+                stoppedSessions={stoppedSessions}
+                activeTerminalId={activeTerminalId}
+                current={current}
+                selectedShell={selectedShell}
+                pending={pending}
+                menuHandlers={menuHandlers}
+                agentActions={agentActions}
+                action={action}
+                selectionVersion={selectionVersion}
+                setShellId={setShellId}
+                setError={setError}
+              />
+              <TopbarActions
+                canOpenTerminal={
+                  !!workspace &&
+                  !workspace.removedAt &&
+                  !workspace.archivedAt &&
+                  !workspace.unavailable &&
+                  !creatingShell
+                }
+                canOpenTab={
+                  !pending && !!workspace && !workspace.archivedAt && !workspace.unavailable
+                }
+                canOpenPanel={!!accessId && !workspace?.removedAt}
+                panelTab={contextOpen ? contextTab : undefined}
+                changeCount={overview?.changes.length ?? 0}
+                onTerminal={() => void newShell()}
+                onAgent={() => beginSession()}
+                onPanel={(tab) => {
+                  setContextTab(tab);
+                  setContextOpen(!(contextOpen && contextTab === tab));
+                }}
+              />
+            </>
           )}
         </header>
         {error && (
@@ -1046,43 +1085,6 @@ export function DesktopApp(): React.JSX.Element {
           )}
         </div>
       </main>
-      {!settings && (
-        <aside className="workspace-tools" aria-label="Workspace tools">
-          <Button
-            variant="ghost"
-            className="review-toggle relative h-auto flex-col gap-1 px-1 py-2 text-[11px] aria-expanded:bg-accent"
-            disabled={!accessId || !!workspace?.removedAt}
-            aria-label="Browse files"
-            title="Files"
-            aria-expanded={contextOpen && contextTab === "files"}
-            onClick={() => {
-              setContextTab("files");
-              setContextOpen(!(contextOpen && contextTab === "files"));
-            }}
-          >
-            <Icon name="folder" /> <span>Files</span>
-          </Button>
-          <Button
-            variant="ghost"
-            className="review-toggle relative h-auto flex-col gap-1 px-1 py-2 text-[11px] aria-expanded:bg-accent"
-            disabled={!accessId || !!workspace?.removedAt}
-            aria-label="Review changes"
-            title="Review"
-            aria-expanded={contextOpen && contextTab === "changes"}
-            onClick={() => {
-              setContextTab("changes");
-              setContextOpen(!(contextOpen && contextTab === "changes"));
-            }}
-          >
-            <Icon name="panel" /> <span>Review</span>{" "}
-            {overview?.changes.length ? (
-              <span className="absolute right-1.5 top-1 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-semibold leading-4 text-primary-foreground">
-                {overview.changes.length}
-              </span>
-            ) : null}
-          </Button>
-        </aside>
-      )}
 
       {contextOpen && !settings && accessId && workspace && (
         <aside className="workbench" id="workspace-panel" aria-label="Workspace files and review">

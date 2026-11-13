@@ -13,7 +13,6 @@ type Session = DesktopBootstrap["sessions"][number];
 export function TerminalTabs({
   workspace,
   state,
-  operationName,
   operationId,
   runningAgents,
   projectTabs,
@@ -22,19 +21,15 @@ export function TerminalTabs({
   current,
   selectedShell,
   pending,
-  creatingShell,
   menuHandlers,
   agentActions,
   action,
   selectionVersion,
   setShellId,
   setError,
-  newShell,
-  beginSession,
 }: {
   workspace?: TaskWorkspace;
   state?: DesktopBootstrap;
-  operationName?: string;
   operationId?: string;
   runningAgents: number;
   projectTabs: Terminal[];
@@ -43,21 +38,15 @@ export function TerminalTabs({
   current?: Session;
   selectedShell?: Terminal;
   pending: boolean;
-  creatingShell: boolean;
   menuHandlers(label: string, actions: ContextAction[]): React.HTMLAttributes<HTMLElement>;
   agentActions(id: string): ContextAction[];
   action(operation: () => Promise<DesktopBootstrap | undefined>): Promise<void>;
   selectionVersion: React.MutableRefObject<number>;
   setShellId(id: string | undefined): void;
   setError(value: string): void;
-  newShell(): Promise<void>;
-  beginSession(): void;
 }): React.JSX.Element {
   return (
     <>
-      <strong className="workspace-heading">
-        {operationId ? operationName : (workspace?.name ?? "Kairo")}
-      </strong>
       {!operationId && runningAgents > 1 && (
         <span
           className="shared-chip"
@@ -142,32 +131,6 @@ export function TerminalTabs({
             {session.title} · stopped
           </button>
         ))}
-      </div>
-      <div className="terminal-tab-actions">
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="New terminal tab"
-          disabled={
-            !workspace ||
-            !!workspace.removedAt ||
-            !!workspace.archivedAt ||
-            !!workspace.unavailable ||
-            creatingShell
-          }
-          onClick={() => void newShell()}
-        >
-          + Terminal
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="New agent tab"
-          disabled={pending || !workspace || !!workspace.archivedAt || !!workspace.unavailable}
-          onClick={() => beginSession()}
-        >
-          + Agent
-        </Button>
       </div>
     </>
   );
