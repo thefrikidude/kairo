@@ -228,18 +228,23 @@ test("agent sessions retain shell job control, literal argv and distinct durable
   );
 });
 
-test("shell prompts show the full current directory and follow cd", async (t) => {
+test("a plain shell starts in its directory without any startup text typed into it", async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-prompt-")));
-  const service = new WorkspaceTerminals(() => {}, { shell: "/bin/zsh", args: ["-f"] });
+  const service = new WorkspaceTerminals(() => {}, {
+    shell: "/bin/zsh",
+    args: ["-f"],
+    env: { PROMPT: "KAIRO_READY> " },
+  });
   t.after(async () => {
     await service.close();
     await rm(root, { recursive: true, force: true });
   });
   const terminal = await service.create("workspace", root);
-  await waitUntil(() => service.attach(terminal.id).buffer.includes(`${root} % `));
-  const parent = root.slice(0, root.lastIndexOf("/"));
-  service.input(terminal.id, "cd ..\r");
-  await waitUntil(() => service.attach(terminal.id).buffer.includes(`${parent} % `));
+  await waitUntil(() => service.attach(terminal.id).buffer.includes("KAIRO_READY> "));
+  // Nothing but the prompt: no "PROMPT=…" line is echoed, and the shell starts in the directory.
+  assert.doesNotMatch(service.attach(terminal.id).buffer, /PROMPT=|PS1=/);
+  service.input(terminal.id, "pwd\r");
+  await waitUntil(() => service.attach(terminal.id).buffer.includes(root));
 });
 
 test("activity follows output, flags approval prompts and ignores keystroke echo", async (t) => {
