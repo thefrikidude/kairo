@@ -12,7 +12,7 @@ better-sqlite3, and the installed `git` CLI. Node 24.21+ and pnpm are required (
 
 ```sh
 pnpm install            # postinstall makes node-pty's spawn-helper executable
-pnpm desktop:dev        # run the app with hot reload
+pnpm desktop:dev        # run the app: renderer hot-reloads, main/preload/backend changes restart it
 pnpm check              # typecheck (tsc --noEmit)
 pnpm test               # build to dist/ then run node --test on dist/**/*.test.js
 pnpm format:check       # prettier (pnpm format to fix)
