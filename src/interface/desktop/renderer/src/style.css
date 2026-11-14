@@ -214,8 +214,7 @@ button svg {
 .open-project-button:hover,
 .settings-link:hover,
 .session:hover,
-.icon-button:hover,
-.review-toggle:hover {
+.icon-button:hover {
   background: var(--hover);
 }
 .open-project-button {
@@ -354,18 +353,6 @@ button svg {
   place-items: center;
   color: var(--muted);
   flex: none;
-}
-.review-toggle {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  font-size: 12px;
-}
-.review-toggle.selected {
-  background: var(--hover);
 }
 .count {
   color: var(--muted);
@@ -921,7 +908,7 @@ button svg {
   height: 100%;
   padding: 10px;
 }
-.pane-area.dragging .terminal-slot,
+.app-shell.dragging .terminal-slot,
 body.pane-resizing .terminal-slot {
   pointer-events: none;
 }
@@ -1068,16 +1055,6 @@ body.pane-resizing {
   color: var(--text);
   background: var(--surface);
   border-bottom-color: var(--text);
-}
-.terminal-tab-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-}
-.terminal-tab-actions button {
-  padding: 6px 8px;
-  font-size: 12px;
-  white-space: nowrap;
 }
 .pinned-sessions {
   flex-shrink: 0;
@@ -1338,8 +1315,7 @@ body.pane-resizing {
   position: relative;
 }
 /* Revealed on hover, laid over the row so they never squeeze the project name. */
-.project-add,
-.project-terminal {
+.project-add {
   position: absolute;
   top: 50%;
   right: 4px;
@@ -1347,17 +1323,11 @@ body.pane-resizing {
   opacity: 0;
   background: var(--sidebar);
 }
-.project-terminal {
-  right: 36px;
-}
 .project-heading-row:hover .project-add,
-.project-heading-row:hover .project-terminal,
-.project-add:focus-visible,
-.project-terminal:focus-visible {
+.project-add:focus-visible {
   opacity: 1;
 }
-.project-add svg,
-.project-terminal svg {
+.project-add svg {
   width: 14px;
   height: 14px;
 }
@@ -1495,11 +1465,4 @@ body.pane-resizing {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.terminal-row .session {
-  gap: 8px;
-  color: var(--muted);
-}
-.terminal-row .session.selected {
-  color: var(--text);
 }

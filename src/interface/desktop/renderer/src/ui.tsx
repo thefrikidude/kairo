@@ -28,6 +28,7 @@ import { X } from "lucide-react";
 import { ZoomIndicator } from "./zoom-indicator.js";
 import { WindowControls } from "./window-controls.js";
 import { detectAgent } from "./agent-detect.js";
+import { TerminalPanel } from "./terminal-panel.js";
 import { shellLabels } from "./terminal-label.js";
 import { TopbarActions } from "./topbar-actions.js";
 import { WorkspaceTitle } from "./workspace-title.js";
@@ -37,7 +38,6 @@ import { Sidebar } from "./sidebar.js";
 import { SettingsContent, SettingsNav } from "./settings-screen.js";
 import { AgentPicker, ConfirmDialog, NewSessionDialog, RenameDialog } from "./session-dialogs.js";
 import { HomeScreen } from "./home-screen.js";
-import { rememberedShell, openWorkspaceShell } from "./workspace-selection.js";
 import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
 import { WorkspacePalette, type PaletteCommand } from "./workspace-palette.js";
 import { ContextMenu, type ContextAction, type ContextMenuState } from "./context-menu.js";
@@ -74,8 +74,9 @@ export function DesktopApp(): React.JSX.Element {
     storedNumber("kairo-context-width", 420, 300, 800),
   );
   const [contextOpen, setContextOpen] = useState(false);
-  const [contextTab, setContextTab] = useState<"files" | "changes">("changes");
-  const [shellId, setShellId] = useState<string>();
+  const [contextTab, setContextTab] = useState<"files" | "changes" | "terminal">("changes");
+  // Which shell each workspace's Terminal tab shows.
+  const [panelChoice, setPanelChoice] = useState<Record<string, string>>({});
   const [creatingShell, setCreatingShell] = useState(false);
   const [settings, setSettings] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -100,7 +101,6 @@ export function DesktopApp(): React.JSX.Element {
     terminal?: boolean;
   }>();
   const [rowMenu, setRowMenu] = useState<ContextMenuState>();
-  const shellWhenReady = useRef<string | undefined>(undefined);
   const [layout, setLayout] = useState<PaneNode>();
   const [dragging, setDragging] = useState<string>();
   const [paneTabs, setPaneTabs] = useState<Record<string, string>>({});
@@ -116,20 +116,16 @@ export function DesktopApp(): React.JSX.Element {
   stateRef.current = state;
   const selectionVersion = useRef(0);
   const current = state?.sessions.find((session) => session.id === state.activeSessionId);
-  const selectedShell = state?.terminals.find(
-    (t) => t.id === shellId && !t.sessionId && t.workspaceId === state.activeWorkspaceId,
-  );
   const workspace = state?.workspaces.find(
-    (item) =>
-      item.id === (selectedShell?.workspaceId ?? current?.workspaceId ?? state.activeWorkspaceId),
+    (item) => item.id === (current?.workspaceId ?? state.activeWorkspaceId),
   );
-  const accessId = selectedShell ? workspace?.id : (current?.id ?? workspace?.id);
+  const accessId = current?.id ?? workspace?.id;
   const currentTerminal = current
     ? state?.terminals.find((terminal) => terminal.sessionId === current.id)
     : undefined;
-  const activeTerminalId = selectedShell?.id ?? currentTerminal?.id;
+  const activeTerminalId = currentTerminal?.id;
   const projectTabs = state?.terminals.filter((t) => t.workspaceId === workspace?.id) ?? [];
-  // Plain shells live in the sidebar, so the top bar only has tabs for agents.
+  // Plain shells live in the right panel's Terminal tab, so the top bar only has tabs for agents.
   const agentTabs = projectTabs.filter((t) => t.sessionId);
   // Agents running in one checkout share its files, so their edits can collide.
   const runningAgents = projectTabs.filter((t) => t.sessionId && t.state === "running").length;
@@ -186,14 +182,6 @@ export function DesktopApp(): React.JSX.Element {
       disposed = true;
     };
   }, [operation]);
-  const savedShellId = rememberedShell(
-    state?.activeWorkspaceId,
-    state?.workspaces.find((w) => w.id === state.activeWorkspaceId)?.lastTab,
-    state?.terminals,
-  );
-  useEffect(() => {
-    setShellId(savedShellId);
-  }, [state?.activeSessionId, state?.activeWorkspaceId, savedShellId]);
   useEffect(() => {
     if (!workspace?.id) return;
     const refresh = () =>
@@ -204,32 +192,21 @@ export function DesktopApp(): React.JSX.Element {
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [workspace?.id]);
-  const newShell = async (id = workspace?.id, force = false) => {
+  const newShell = async (id = workspace?.id) => {
     if (!id || creatingShell) return;
     setCreatingShell(true);
     setError("");
-    const version = selectionVersion.current;
     try {
-      await openWorkspaceShell(
-        window.kairo,
-        id,
-        (terminal) =>
-          setState((all) =>
-            all
-              ? {
-                  ...all,
-                  terminals: [...all.terminals.filter((t) => t.id !== terminal.id), terminal],
-                }
-              : all,
-          ),
-        () =>
-          force ||
-          (selectionVersion.current === version && stateRef.current?.activeWorkspaceId === id),
-        (terminal) => {
-          setShellId(terminal.id);
-          setSettings(false);
-        },
+      const terminal = await window.kairo.createTerminal(id);
+      setState((all) =>
+        all
+          ? { ...all, terminals: [...all.terminals.filter((t) => t.id !== terminal.id), terminal] }
+          : all,
       );
+      setPanelChoice((all) => ({ ...all, [terminal.workspaceId]: terminal.id }));
+      setContextTab("terminal");
+      setContextOpen(true);
+      setSettings(false);
     } catch (error) {
       setError(message(error));
     } finally {
@@ -486,7 +463,7 @@ export function DesktopApp(): React.JSX.Element {
         setPalette(event.key.toLowerCase() === "j" ? "jump" : "file");
       } else if (modifier && event.code === "Backquote") {
         event.preventDefault();
-        void newShell();
+        toggleTerminal();
       } else if (
         (event.metaKey || event.ctrlKey) &&
         event.shiftKey &&
@@ -512,7 +489,15 @@ export function DesktopApp(): React.JSX.Element {
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [beginSession, settings, contextOpen, workspace?.id, creatingShell]);
+  }, [
+    beginSession,
+    settings,
+    contextOpen,
+    contextTab,
+    workspace?.id,
+    creatingShell,
+    state?.terminals,
+  ]);
   const create = async () => {
     setPending(true);
     setError("");
@@ -576,6 +561,11 @@ export function DesktopApp(): React.JSX.Element {
     selectionVersion.current++;
     setOperationId(undefined);
     setSettings(false);
+    if (tab?.startsWith("terminal:")) {
+      setPanelChoice((all) => ({ ...all, [id]: tab.slice(9) }));
+      setContextTab("terminal");
+      setContextOpen(true);
+    }
     await action(async () => {
       const value = await window.kairo.selectWorkspace(id);
       if (tab?.startsWith("session:")) return window.kairo.openSession(tab.slice(8));
@@ -583,44 +573,13 @@ export function DesktopApp(): React.JSX.Element {
       return tab ? window.kairo.bootstrap(true) : value;
     });
   };
-  /** A plain shell for a project: in one of its workspaces, or in a shared folder workspace. */
-  const projectTerminal = async (path: string) => {
-    const own = state?.workspaces.find(
-      (item) =>
-        item.repositoryPath === path && !item.removedAt && !item.archivedAt && !item.unavailable,
-    );
-    setError("");
-    try {
-      let id = own?.id;
-      if (id) await chooseWorkspace(id);
-      else {
-        const value = await window.kairo.createWorkspace({
-          project: path,
-          name: name(path),
-          selection: { kind: "folder" },
-        });
-        apply(value);
-        id = value.activeWorkspaceId;
-      }
-      if (id) await newShell(id, true);
-    } catch (cause) {
-      setError(message(cause));
-    }
-  };
   // Once a new workspace finishes preparing there is nothing left to confirm, so open it directly.
   const readyWorkspaceId =
     operation?.id === operationId && operation?.phase === "ready" && !operation?.error
       ? operation?.workspaceId
       : undefined;
   useEffect(() => {
-    if (!readyWorkspaceId) return;
-    const wantsShell = shellWhenReady.current === operationId;
-    void (async () => {
-      await chooseWorkspace(readyWorkspaceId);
-      if (!wantsShell) return;
-      shellWhenReady.current = undefined;
-      await newShell(readyWorkspaceId, true);
-    })();
+    if (readyWorkspaceId) void chooseWorkspace(readyWorkspaceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readyWorkspaceId]);
   const menuHandlers = (label: string, actions: ContextAction[]) => ({
@@ -724,8 +683,6 @@ export function DesktopApp(): React.JSX.Element {
         ]
       : [];
   };
-  const selectTerminal = (terminal: WorkspaceTerminal) =>
-    void chooseWorkspace(terminal.workspaceId, `terminal:${terminal.id}`);
   const shellNames = useMemo(() => shellLabels(state?.terminals ?? []), [state?.terminals]);
   /** Plain shells: rename, and close (which stops the shell, so the sidebar asks first). */
   const shellActions = (terminal: WorkspaceTerminal, ask = false): ContextAction[] => {
@@ -867,12 +824,26 @@ export function DesktopApp(): React.JSX.Element {
   const primaryLeafId =
     (workspace ? leafForWorkspace(root, workspace.id)?.id : undefined) ?? paneLeaves[0].id;
   const paneTerminal = (item: Leaf) => {
-    const own = state?.terminals.filter((t) => t.workspaceId === item.workspaceId) ?? [];
+    const own =
+      state?.terminals.filter((t) => t.workspaceId === item.workspaceId && t.sessionId) ?? [];
     return (
       own.find((t) => t.id === paneTabs[item.id]) ??
       own.find((t) => t.sessionId && t.state === "running") ??
       own[0]
     );
+  };
+  // The Terminal tab shows this workspace's plain shells, one at a time.
+  const panelShells =
+    state?.terminals.filter((t) => !t.sessionId && t.workspaceId === workspace?.id) ?? [];
+  const panelShell =
+    panelShells.find((t) => t.id === (workspace && panelChoice[workspace.id])) ?? panelShells[0];
+  const toggleTerminal = () => {
+    if (!workspace || workspace.removedAt || workspace.archivedAt || workspace.unavailable) return;
+    if (contextOpen && contextTab === "terminal") return setContextOpen(false);
+    setContextTab("terminal");
+    setContextOpen(true);
+    // Opening the tab for a workspace with no shell yet starts one.
+    if (!panelShells.length) void newShell();
   };
   const placements: Record<string, Rect | undefined> = {};
   for (const item of paneLeaves) {
@@ -884,13 +855,12 @@ export function DesktopApp(): React.JSX.Element {
         : paneTerminal(item)?.id;
     if (terminalId) placements[terminalId] = rects[item.id];
   }
+  const panelVisible = contextOpen && contextTab === "terminal" && !settings && !!workspace;
+  if (panelVisible && panelShell) placements[panelShell.id] = rects["terminal-panel"];
   const focusPane = (item: Leaf) => {
     if (item.id === primaryLeafId || pending) return;
     const tab = paneTerminal(item);
-    void chooseWorkspace(
-      item.workspaceId,
-      tab ? (tab.sessionId ? `session:${tab.sessionId}` : `terminal:${tab.id}`) : undefined,
-    );
+    void chooseWorkspace(item.workspaceId, tab?.sessionId ? `session:${tab.sessionId}` : undefined);
   };
   const closePane = (leafId: string) => {
     const next = closeLeaf(root, leafId);
@@ -958,7 +928,9 @@ export function DesktopApp(): React.JSX.Element {
         <SecondaryPane
           key={item.id}
           workspace={owner}
-          terminals={state?.terminals.filter((t) => t.workspaceId === item.workspaceId) ?? []}
+          terminals={
+            state?.terminals.filter((t) => t.workspaceId === item.workspaceId && t.sessionId) ?? []
+          }
           tabId={shown?.id}
           first={first}
           actions={owner ? workspaceCommands(owner) : undefined}
@@ -1028,16 +1000,11 @@ export function DesktopApp(): React.JSX.Element {
             stoppedSessions={stoppedSessions}
             activeTerminalId={activeTerminalId}
             current={current}
-            selectedShell={selectedShell}
             pending={pending}
             menuHandlers={menuHandlers}
             agentActions={agentActions}
-            shellActions={shellActions}
-            shellNames={shellNames}
             action={action}
             selectionVersion={selectionVersion}
-            setShellId={setShellId}
-            setError={setError}
           />
           <TopbarActions
             canOpenTerminal={
@@ -1051,9 +1018,10 @@ export function DesktopApp(): React.JSX.Element {
             canOpenPanel={!!accessId && !workspace?.removedAt}
             panelTab={contextOpen ? contextTab : undefined}
             changeCount={overview?.changes.length ?? 0}
-            onTerminal={() => void newShell()}
+            terminalCount={panelShells.length}
             onAgent={() => beginSession()}
             onPanel={(tab) => {
+              if (tab === "terminal") return toggleTerminal();
               setContextTab(tab);
               setContextOpen(!(contextOpen && contextTab === tab));
             }}
@@ -1175,9 +1143,6 @@ export function DesktopApp(): React.JSX.Element {
       </section>
     );
   };
-  // With a plain shell open, its sidebar row is the active one, not the workspace it belongs to.
-  const shellOpen =
-    !!activeTerminalId && !state?.terminals.find((t) => t.id === activeTerminalId)?.sessionId;
   const renderWorkspace = (item: TaskWorkspace) => {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
@@ -1216,7 +1181,7 @@ export function DesktopApp(): React.JSX.Element {
       <div
         key={item.id}
         data-workspace-id={item.id}
-        className={`session-row workspace-row ${workspace?.id === item.id && !shellOpen ? "selected" : ""}`}
+        className={`session-row workspace-row ${workspace?.id === item.id ? "selected" : ""}`}
         {...menuHandlers(`${label} actions`, workspaceCommands(item))}
         draggable={!selecting && !pending}
         onDragStart={(event) => {
@@ -1238,7 +1203,7 @@ export function DesktopApp(): React.JSX.Element {
         )}
         <button
           className="session"
-          aria-current={workspace?.id === item.id && !shellOpen ? "page" : undefined}
+          aria-current={workspace?.id === item.id ? "page" : undefined}
           disabled={pending}
           onClick={() =>
             selecting
@@ -1319,7 +1284,8 @@ export function DesktopApp(): React.JSX.Element {
   );
   return (
     <div
-      className={`app-shell ${contextOpen && !settings && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
+      ref={paneArea}
+      className={`app-shell ${dragging ? "dragging" : ""} ${contextOpen && !settings && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
       data-theme={theme}
       style={
         {
@@ -1363,12 +1329,6 @@ export function DesktopApp(): React.JSX.Element {
         projectActions={projectActions}
         action={action}
         newChat={newChat}
-        onProjectTerminal={(path) => void projectTerminal(path)}
-        terminals={state?.terminals.filter((terminal) => !terminal.sessionId) ?? []}
-        shellNames={shellNames}
-        activeTerminalId={workspace?.id ? activeTerminalId : undefined}
-        selectTerminal={selectTerminal}
-        shellActions={(terminal) => shellActions(terminal, true)}
         setWorkspaceDialog={setWorkspaceDialog}
         setOperationId={setOperationId}
         setSettings={setSettings}
@@ -1412,11 +1372,7 @@ export function DesktopApp(): React.JSX.Element {
           deleteWorkspace={deleteWorkspace}
           closeSettings={() => setSettings(false)}
         />
-        <div
-          ref={paneArea}
-          className={`pane-area relative flex min-h-0 flex-1 ${dragging ? "dragging" : ""}`}
-          hidden={!!settings}
-        >
+        <div className="pane-area relative flex min-h-0 flex-1" hidden={!!settings}>
           <div className="flex min-h-0 min-w-0 flex-1">
             <SplitLayout
               node={root}
@@ -1424,14 +1380,6 @@ export function DesktopApp(): React.JSX.Element {
               renderLeaf={renderLeaf}
             />
           </div>
-          <Suspense fallback={null}>
-            <AgentTerminals
-              terminals={state?.terminals ?? []}
-              placements={placements}
-              focusedId={activeTerminalId}
-              onError={onError}
-            />
-          </Suspense>
         </div>
       </main>
 
@@ -1442,11 +1390,12 @@ export function DesktopApp(): React.JSX.Element {
             <Tabs
               className="context-tab-list flex flex-1"
               value={contextTab}
-              onValueChange={(tab) => setContextTab(tab as "files" | "changes")}
+              onValueChange={(tab) => setContextTab(tab as "files" | "changes" | "terminal")}
             >
               <TabsList aria-label="Workspace tabs">
                 <TabsTrigger value="files">Files</TabsTrigger>
                 <TabsTrigger value="changes">Review</TabsTrigger>
+                <TabsTrigger value="terminal">Terminal</TabsTrigger>
               </TabsList>
             </Tabs>
             <Button
@@ -1459,8 +1408,36 @@ export function DesktopApp(): React.JSX.Element {
               <Icon name="close" />
             </Button>
           </header>
+          {contextTab === "terminal" && (
+            <TerminalPanel
+              shells={panelShells}
+              labels={shellNames}
+              selectedId={panelShell?.id}
+              slotRef={register("terminal-panel")}
+              creating={creatingShell}
+              onSelect={(terminal) =>
+                setPanelChoice((all) => ({ ...all, [terminal.workspaceId]: terminal.id }))
+              }
+              onAdd={() => void newShell()}
+              onRename={(terminal) =>
+                setRename({
+                  id: terminal.id,
+                  title: shellNames.get(terminal.id) ?? terminal.title,
+                  terminal: true,
+                })
+              }
+              onClose={(terminal) =>
+                void action(async () => {
+                  await window.kairo.closeTerminal(terminal.id);
+                  return window.kairo.bootstrap(true);
+                })
+              }
+              menuHandlers={menuHandlers}
+              shellActions={(terminal) => shellActions(terminal)}
+            />
+          )}
           <Suspense fallback={<p className="empty-small">Loading workspace…</p>}>
-            {contextTab === "files" ? (
+            {contextTab === "terminal" ? null : contextTab === "files" ? (
               <FileBrowser
                 key={workspace.id}
                 sessionId={accessId}
@@ -1495,16 +1472,12 @@ export function DesktopApp(): React.JSX.Element {
         <WorkspaceDialog
           initialProject={workspaceDialog}
           state={state}
-          apply={(value, options) => {
+          apply={(value) => {
             apply(value);
             const op = value.operations.find(
               (op) => !state.operations.some((old) => old.id === op.id),
             );
             if (op) setOperationId(op.id);
-            if (!options?.terminal) return;
-            // A worktree is prepared in the background; its shell opens once it is ready.
-            if (op) shellWhenReady.current = op.id;
-            else if (value.activeWorkspaceId) void newShell(value.activeWorkspaceId, true);
           }}
           close={() => setWorkspaceDialog(undefined)}
         />
@@ -1587,6 +1560,14 @@ export function DesktopApp(): React.JSX.Element {
           }}
         />
       )}
+      <Suspense fallback={null}>
+        <AgentTerminals
+          terminals={state?.terminals ?? []}
+          placements={placements}
+          focusedId={panelVisible && panelShell ? panelShell.id : activeTerminalId}
+          onError={onError}
+        />
+      </Suspense>
       <ZoomIndicator />
     </div>
   );

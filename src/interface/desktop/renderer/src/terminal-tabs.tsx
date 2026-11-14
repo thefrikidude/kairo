@@ -19,16 +19,11 @@ export function TerminalTabs({
   stoppedSessions,
   activeTerminalId,
   current,
-  selectedShell,
   pending,
   menuHandlers,
   agentActions,
-  shellActions,
-  shellNames,
   action,
   selectionVersion,
-  setShellId,
-  setError,
 }: {
   workspace?: TaskWorkspace;
   state?: DesktopBootstrap;
@@ -38,16 +33,11 @@ export function TerminalTabs({
   stoppedSessions: Session[];
   activeTerminalId?: string;
   current?: Session;
-  selectedShell?: Terminal;
   pending: boolean;
   menuHandlers(label: string, actions: ContextAction[]): React.HTMLAttributes<HTMLElement>;
   agentActions(id: string): ContextAction[];
-  shellActions(terminal: Terminal): ContextAction[];
-  shellNames: Map<string, string>;
   action(operation: () => Promise<DesktopBootstrap | undefined>): Promise<void>;
   selectionVersion: React.MutableRefObject<number>;
-  setShellId(id: string | undefined): void;
-  setError(value: string): void;
 }): React.JSX.Element {
   return (
     <>
@@ -78,20 +68,13 @@ export function TerminalTabs({
               aria-controls={`terminal-view-${terminal.id}`}
               title={terminal.directory}
               {...menuHandlers(
-                `${shellNames.get(terminal.id) ?? terminal.title} tab actions`,
-                terminal.sessionId ? agentActions(terminal.sessionId) : shellActions(terminal),
+                `${terminal.title} tab actions`,
+                terminal.sessionId ? agentActions(terminal.sessionId) : [],
               )}
               onClick={() => {
                 selectionVersion.current++;
-                if (terminal.sessionId) {
-                  setShellId(undefined);
+                if (terminal.sessionId)
                   void action(() => window.kairo.openSession(terminal.sessionId!));
-                } else {
-                  setShellId(terminal.id);
-                  void window.kairo
-                    .rememberWorkspaceTab(terminal.workspaceId, `terminal:${terminal.id}`)
-                    .catch((cause) => setError(message(cause)));
-                }
               }}
             >
               {terminal.state === "running" &&
@@ -102,10 +85,7 @@ export function TerminalTabs({
                     aria-hidden="true"
                   />
                 )}
-              {terminal.sessionId
-                ? (state?.sessions.find((s) => s.id === terminal.sessionId)?.title ??
-                  terminal.title)
-                : (shellNames.get(terminal.id) ?? terminal.title)}
+              {state?.sessions.find((s) => s.id === terminal.sessionId)?.title ?? terminal.title}
             </button>
           ))}
           {stoppedSessions.map((session) => (
@@ -115,7 +95,7 @@ export function TerminalTabs({
               disabled={pending || !!workspace?.archivedAt || !!workspace?.unavailable}
               {...menuHandlers(`${session.title} tab actions`, agentActions(session.id))}
               role="tab"
-              aria-selected={session.id === current?.id && !selectedShell}
+              aria-selected={session.id === current?.id}
               tabIndex={session.id === current?.id ? 0 : -1}
               onClick={() => {
                 selectionVersion.current++;

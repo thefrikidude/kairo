@@ -23,9 +23,6 @@ const remembered = (key: string) => {
 };
 
 /** One decision (a task name); everything about branches and worktrees is an advanced detail. */
-/** Not an agent id: asks for a plain shell in the new workspace. */
-const TERMINAL = "__terminal__";
-
 export function WorkspaceDialog({
   initialProject,
   state,
@@ -34,8 +31,7 @@ export function WorkspaceDialog({
 }: {
   initialProject: string;
   state: DesktopBootstrap;
-  /** `terminal` asks the caller to open a plain shell once the workspace is ready. */
-  apply(value: DesktopBootstrap, options?: { terminal: boolean }): void;
+  apply(value: DesktopBootstrap): void;
   close(): void;
 }): React.JSX.Element {
   const [project, setProject] = useState(initialProject);
@@ -108,17 +104,15 @@ export function WorkspaceDialog({
           localStorage.setItem(envAskedKey(project), "1");
         } catch {}
       }
-      const terminal = agent === TERMINAL;
       apply(
         await window.kairo.createWorkspace({
           project,
           name,
           selection,
-          agentId: agent && !terminal ? agent : undefined,
+          agentId: agent || undefined,
         }),
-        { terminal },
       );
-      if (agent && !terminal) localStorage.setItem("kairo-last-agent", agent);
+      if (agent) localStorage.setItem("kairo-last-agent", agent);
       close();
     } catch (error) {
       setError(errorText(error));
@@ -185,7 +179,6 @@ export function WorkspaceDialog({
             onChange={(e) => setAgent(e.target.value)}
           >
             <option value="">Chat (choose the agent in the chat)</option>
-            <option value={TERMINAL}>Terminal (plain shell, no agent)</option>
             {state.agents
               .filter((a) => a.installed)
               .map((a) => (
