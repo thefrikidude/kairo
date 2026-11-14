@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowUp, Folder } from "lucide-react";
-import { KairoLogo } from "./chrome.js";
+import { Folder } from "lucide-react";
 import { Button } from "./components/ui/button.js";
+import { Composer } from "./components/composer.js";
 import {
   Select,
   SelectContent,
@@ -9,7 +9,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./components/ui/select.js";
-import { Textarea } from "./components/ui/textarea.js";
 import { cn } from "./lib/utils.js";
 
 type Message = {
@@ -19,12 +18,6 @@ type Message = {
   agentId?: string;
 };
 type Thread = { agentId?: string; messages: Message[] };
-
-const suggestions = [
-  "Summarize what changed in this repository recently",
-  "Find a small TODO in the codebase and fix it",
-  "Review my uncommitted changes for bugs",
-];
 
 function load(key: string): Thread {
   try {
@@ -67,11 +60,15 @@ export function seedThread(storageKey: string, agentId: string, text: string, ag
  * this UI and whichever agent is selected. Transport to agents (ACP) and hand-off between
  * them (A2A) plug in where messages are sent and where the agent is switched.
  */
+export type Recent = { id: string; title: string; detail: string };
+
 export function HomeScreen({
   pending = false,
   storageKey = "kairo.chat:home",
   location,
   agents = [],
+  recents = [],
+  onOpenRecent,
   onOpenProject,
   onNewChat,
 }: {
@@ -81,6 +78,9 @@ export function HomeScreen({
   /** Where this chat lives, for example "This computer" or a project name. */
   location?: string;
   agents?: { id: string; name: string }[];
+  /** Sessions to pick up again, shown under the empty chat's composer. */
+  recents?: Recent[];
+  onOpenRecent?(id: string): void;
   onOpenProject?(): void;
   onNewChat?(): void;
 }): React.JSX.Element {
@@ -138,41 +138,32 @@ export function HomeScreen({
   const submit = () => {
     const body = text.trim();
     if (!body) return;
-    add(
-      { role: "user", text: body },
-      {
-        role: "notice",
-        text: undelivered(agent?.name),
-      },
-    );
+    add({ role: "user", text: body }, { role: "notice", text: undelivered(agent?.name) });
     setText("");
   };
 
   const composer = (
-    <form
-      className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 pb-3 focus-within:border-ring"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
-      <Textarea
-        aria-label="Message"
-        placeholder={agent ? `Message ${agent.name}…` : "Install an agent to start chatting"}
-        rows={3}
-        className="min-h-14"
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            submit();
-          }
-        }}
-      />
-      <div className="flex items-center justify-between gap-3">
+    <Composer
+      value={text}
+      onChange={setText}
+      onSubmit={submit}
+      label="Message"
+      placeholder={agent ? `Message ${agent.name}…` : "Install an agent to start chatting"}
+      canSend={!!text.trim()}
+      leading={
+        location && (
+          <span
+            className="flex items-center gap-1.5 px-2 text-sm text-muted-foreground"
+            title={location}
+          >
+            <Folder className="size-4 shrink-0" />
+            <span className="max-w-48 truncate">{location}</span>
+          </span>
+        )
+      }
+      trailing={
         <Select value={agent?.id ?? ""} disabled={pending || !agents.length} onValueChange={choose}>
-          <SelectTrigger aria-label="Agent" className="max-w-[60%]">
+          <SelectTrigger aria-label="Agent" className="h-8 max-w-48 border-0 text-sm">
             <SelectValue placeholder="No agents installed" />
           </SelectTrigger>
           <SelectContent>
@@ -183,18 +174,15 @@ export function HomeScreen({
             ))}
           </SelectContent>
         </Select>
-        <Button type="submit" size="icon" aria-label="Send" disabled={!text.trim()}>
-          <ArrowUp />
-        </Button>
-      </div>
-    </form>
+      }
+    />
   );
 
   if (thread.messages.length)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col gap-3 overflow-auto px-6 pt-7 pb-2"
+          className="mx-auto flex min-h-0 w-full max-w-[740px] flex-1 flex-col gap-4 overflow-auto px-6 pt-8 pb-3"
           role="log"
           aria-label="Conversation"
         >
@@ -202,10 +190,9 @@ export function HomeScreen({
             <p
               key={message.id}
               className={cn(
-                "m-0 break-words whitespace-pre-wrap",
-                message.role === "user" &&
-                  "max-w-[80%] self-end rounded-2xl border border-border bg-card px-3.5 py-2.5",
-                message.role === "notice" && "text-muted-foreground",
+                "m-0 break-words whitespace-pre-wrap text-[15px] leading-7",
+                message.role === "user" && "max-w-[80%] self-end rounded-2xl bg-card px-4 py-2.5",
+                message.role === "notice" && "text-sm text-muted-foreground",
                 message.role === "switch" &&
                   "self-center rounded-full border border-border px-3 py-0.5 text-xs text-muted-foreground",
               )}
@@ -215,38 +202,38 @@ export function HomeScreen({
           ))}
           <div ref={end} />
         </div>
-        <div className="mx-auto w-full max-w-[760px] px-6 pt-2 pb-5">{composer}</div>
+        <div className="mx-auto w-full max-w-[740px] px-6 pt-2 pb-5">{composer}</div>
       </div>
     );
 
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[radial-gradient(var(--line)_1px,transparent_1px)] bg-[length:22px_22px] p-8">
-      <div className="flex w-full max-w-[760px] flex-col gap-3">
-        <KairoLogo className="mb-1 ml-1 size-14 text-foreground" />
-        {location && (
-          <div
-            className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-border bg-card px-3.5"
-            title={location}
-          >
-            <Folder className="size-4 shrink-0" />
-            <span className="truncate font-medium">{location}</span>
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto px-6 py-10">
+      <div className="flex w-full max-w-[680px] flex-col gap-7">
+        <div className="flex flex-col gap-1.5 px-1">
+          <h1 className="m-0 text-[28px] font-normal tracking-tight text-foreground">
+            What should we work on?
+          </h1>
+          {location && <p className="m-0 text-[15px] text-muted-foreground">in {location}</p>}
+        </div>
+        {composer}
+        {recents.length > 0 && (
+          <div className="flex flex-col gap-0.5">
+            <span className="px-3 pb-1 text-xs text-muted-foreground">Recent</span>
+            {recents.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-accent"
+                onClick={() => onOpenRecent?.(item.id)}
+              >
+                <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{item.detail}</span>
+              </button>
+            ))}
           </div>
         )}
-        {composer}
-        <div className="mt-1 grid grid-cols-3 gap-2.5">
-          {suggestions.map((suggestion) => (
-            <button
-              key={suggestion}
-              type="button"
-              className="min-h-[72px] rounded-xl border border-border bg-transparent p-3.5 text-left leading-snug text-foreground hover:bg-accent"
-              onClick={() => setText(suggestion)}
-            >
-              {suggestion}
-            </button>
-          ))}
-        </div>
         {(onNewChat || onOpenProject) && (
-          <div className="mt-2 flex justify-center gap-2">
+          <div className="flex gap-2">
             {onNewChat && (
               <Button disabled={pending} onClick={onNewChat}>
                 New chat on this computer

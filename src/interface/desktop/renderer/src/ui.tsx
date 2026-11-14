@@ -36,7 +36,7 @@ import { activityClass, activityLabel } from "./activity.js";
 import { Sidebar } from "./sidebar.js";
 import { SettingsDialog } from "./settings-screen.js";
 import { AgentPicker, ConfirmDialog, NewSessionDialog, RenameDialog } from "./session-dialogs.js";
-import { HomeScreen, seedThread } from "./home-screen.js";
+import { HomeScreen, seedThread, type Recent } from "./home-screen.js";
 import { NewSession, type StartOptions } from "./new-session.js";
 import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
 import { WorkspacePalette, type PaletteCommand } from "./workspace-palette.js";
@@ -914,6 +914,24 @@ export function DesktopApp(): React.JSX.Element {
             ]
           : []
   ).map((item) => ({ ...item, label: `${item.label} tab` }));
+  /** Sessions worth picking up again: the most recently used workspaces other than this one. */
+  const recentsFor = (excludeId?: string): Recent[] => {
+    const seen = new Set<string>(excludeId ? [excludeId] : []);
+    const list: Recent[] = [];
+    for (const session of [...(state?.sessions ?? [])].sort((a, b) => b.updatedAt - a.updatedAt)) {
+      const owner = state?.workspaces.find((w) => w.id === session.workspaceId);
+      if (!owner || owner.removedAt || owner.archivedAt || seen.has(owner.id)) continue;
+      seen.add(owner.id);
+      list.push({
+        id: owner.id,
+        title: owner.name ?? owner.branch ?? name(owner.directory),
+        detail:
+          state?.agents.find((agent) => agent.id === session.agentId)?.name ?? session.agentId,
+      });
+      if (list.length === 4) break;
+    }
+    return list;
+  };
   const renderLeaf = (item: Leaf) => {
     const drop = (
       <DropZones
@@ -950,6 +968,8 @@ export function DesktopApp(): React.JSX.Element {
                   storageKey={`kairo.chat:${owner.id}`}
                   location={isChat(owner) ? "This computer" : name(owner.repositoryPath)}
                   agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+                  recents={recentsFor(owner.id)}
+                  onOpenRecent={(id) => void chooseWorkspace(id)}
                 />
               )}
             </div>
@@ -1080,6 +1100,8 @@ export function DesktopApp(): React.JSX.Element {
                 storageKey={`kairo.chat:${workspace.id}`}
                 location={isChat(workspace) ? "This computer" : name(workspace.repositoryPath)}
                 agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+                recents={recentsFor(workspace.id)}
+                onOpenRecent={(id) => void chooseWorkspace(id)}
               />
             )}
             {!activeTerminalId && !operationId && !workspace && !groups.length && (
