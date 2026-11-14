@@ -246,19 +246,6 @@ export function DesktopApp(): React.JSX.Element {
     [state?.workspaces, state?.chatsRoot],
   );
   const [settingsTab, setSettingsTab] = useState("general");
-  const [selecting, setSelecting] = useState(false);
-  const [pickedWorkspaces, setPickedWorkspaces] = useState<Set<string>>(new Set());
-  const [pickedProjects, setPickedProjects] = useState<Set<string>>(new Set());
-  const toggle = (set: Set<string>, value: string) => {
-    const next = new Set(set);
-    if (!next.delete(value)) next.add(value);
-    return next;
-  };
-  const stopSelecting = () => {
-    setSelecting(false);
-    setPickedWorkspaces(new Set());
-    setPickedProjects(new Set());
-  };
   const newChat = () => void action(() => window.kairo.createChat());
   const action = useCallback(
     async (operation: () => Promise<DesktopBootstrap | undefined>) => {
@@ -714,60 +701,6 @@ export function DesktopApp(): React.JSX.Element {
       },
     ];
   };
-  /** Workspaces covered by the selection: picked ones plus everything inside picked projects. */
-  const bulkTargets = () => {
-    const inProjects = (state?.workspaces ?? []).filter(
-      (item) => !item.removedAt && pickedProjects.has(item.repositoryPath),
-    );
-    const direct = (state?.workspaces ?? []).filter(
-      (item) => pickedWorkspaces.has(item.id) && !pickedProjects.has(item.repositoryPath),
-    );
-    return { inProjects, direct };
-  };
-  const pickedCount = pickedWorkspaces.size + pickedProjects.size;
-  const bulk = (kind: "archive" | "delete") => {
-    const { inProjects, direct } = bulkTargets();
-    const run = async () => {
-      const failures: string[] = [];
-      let last: DesktopBootstrap | undefined;
-      const each = async (items: TaskWorkspace[]) => {
-        for (const item of items) {
-          if (kind === "archive" && item.archivedAt) continue;
-          try {
-            last =
-              kind === "archive"
-                ? await window.kairo.archiveWorkspace(item.id)
-                : await window.kairo.deleteWorkspace(item.id);
-          } catch (cause) {
-            failures.push(`${item.name ?? name(item.directory)}: ${message(cause)}`);
-          }
-        }
-      };
-      await each(direct);
-      await each(inProjects);
-      if (kind === "delete" && !failures.length)
-        for (const path of pickedProjects) last = await window.kairo.removeProject(path);
-      stopSelecting();
-      if (failures.length) throw new Error(failures.join(" "));
-      return last;
-    };
-    if (kind === "archive") return void action(run);
-    const projects = pickedProjects.size;
-    const workspaces = direct.length + inProjects.length;
-    setConfirm({
-      title: "Delete selected?",
-      description: `Delete ${projects ? `${projects} ${projects === 1 ? "project" : "projects"} and ` : ""}${workspaces} ${workspaces === 1 ? "workspace or chat" : "workspaces and chats"}. Terminals close, chats and worktree folders are removed (Git refuses worktrees with uncommitted or unmerged work), and project folders stay on disk. This cannot be undone.`,
-      action: async () => {
-        try {
-          const value = await run();
-          if (value) apply(value);
-        } catch (cause) {
-          apply(await window.kairo.bootstrap(true));
-          throw cause;
-        }
-      },
-    });
-  };
   // Back and forward walk through the workspaces visited, like a browser.
   const history = useRef({ stack: [] as string[], index: -1 });
   const [, setHistoryTick] = useState(0);
@@ -1185,7 +1118,7 @@ export function DesktopApp(): React.JSX.Element {
         data-workspace-id={item.id}
         className={`session-row workspace-row ${workspace?.id === item.id ? "selected" : ""}`}
         {...menuHandlers(`${label} actions`, workspaceCommands(item))}
-        draggable={!selecting && !pending}
+        draggable={!pending}
         onDragStart={(event) => {
           event.dataTransfer.setData("application/x-kairo-workspace", item.id);
           event.dataTransfer.effectAllowed = "move";
@@ -1193,25 +1126,11 @@ export function DesktopApp(): React.JSX.Element {
         }}
         onDragEnd={() => setDragging(undefined)}
       >
-        {selecting && (
-          <input
-            type="checkbox"
-            className="select-box"
-            aria-label={`Select ${label}`}
-            checked={pickedWorkspaces.has(item.id) || pickedProjects.has(item.repositoryPath)}
-            disabled={pickedProjects.has(item.repositoryPath)}
-            onChange={() => setPickedWorkspaces((set) => toggle(set, item.id))}
-          />
-        )}
         <button
           className="session"
           aria-current={workspace?.id === item.id ? "page" : undefined}
           disabled={pending}
-          onClick={() =>
-            selecting
-              ? setPickedWorkspaces((set) => toggle(set, item.id))
-              : void chooseWorkspace(item.id, agentTab)
-          }
+          onClick={() => void chooseWorkspace(item.id, agentTab)}
         >
           <span
             className={`session-status ${item.unavailable ? "status-error" : activityClass[activity]}`}
@@ -1318,19 +1237,12 @@ export function DesktopApp(): React.JSX.Element {
         chats={chats}
         collapsed={collapsed}
         setCollapsed={setCollapsed}
-        selecting={selecting}
-        setSelecting={setSelecting}
-        stopSelecting={stopSelecting}
-        pickedProjects={pickedProjects}
-        setPickedProjects={setPickedProjects}
-        pickedCount={pickedCount}
-        toggle={toggle}
-        bulk={bulk}
         renderWorkspace={renderWorkspace}
         menuHandlers={menuHandlers}
         projectActions={projectActions}
         action={action}
         newChat={newChat}
+        onSearch={() => setPalette("jump")}
         setWorkspaceDialog={setWorkspaceDialog}
         setOperationId={setOperationId}
         setSettings={setSettings}

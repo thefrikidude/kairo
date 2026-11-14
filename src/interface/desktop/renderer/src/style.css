@@ -955,19 +955,6 @@ body.pane-resizing {
   max-height: 85vh;
   overflow: auto;
 }
-.context-tab-list {
-  display: flex;
-  flex: 1;
-  gap: 8px;
-}
-.context-tab-list button {
-  padding: 8px;
-}
-.context-tab-list button[aria-selected="true"] {
-  color: var(--text);
-  background: var(--hover);
-  border-radius: 5px;
-}
 .modal-host {
   width: min(calc(100vw - 48px), 520px);
 }
@@ -1001,13 +988,6 @@ body.pane-resizing {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
-}
-.workbench-header {
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--line);
-  padding: 8px 12px;
-  flex: none;
 }
 
 @media (max-width: 1100px) {
@@ -1324,28 +1304,6 @@ body.pane-resizing {
   height: 14px;
 }
 /* Multi-select in the sidebar */
-.select-toggle {
-  margin-left: auto;
-  font-size: 12px;
-  padding: 2px 8px;
-}
-.select-box {
-  flex: none;
-  margin: 0 4px 0 8px;
-  accent-color: var(--accent, #7c9cff);
-}
-.bulk-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  font-size: 12px;
-}
-.bulk-bar span {
-  flex: 1;
-  white-space: nowrap;
-}
 .bulk-row {
   display: flex;
   gap: 8px;
@@ -1463,18 +1421,6 @@ body.pane-resizing {
   height: 100%;
 }
 /* The terminal blends into the app: no black viewport behind it and a thin matching scrollbar. */
-.terminal-view .xterm .xterm-viewport {
-  background-color: transparent !important;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
-}
-.terminal-view .xterm .xterm-viewport::-webkit-scrollbar {
-  width: 8px;
-}
-.terminal-view .xterm .xterm-viewport::-webkit-scrollbar-thumb {
-  border-radius: 8px;
-  background: var(--line);
-}
 .terminal-find {
   position: absolute;
   z-index: 6;
@@ -1488,14 +1434,6 @@ body.pane-resizing {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: 0 8px 24px #0004;
-}
-.terminal-view .xterm .scrollbar.vertical {
-  width: 10px !important;
-}
-.terminal-view .xterm .scrollbar.vertical > .slider {
-  left: 2px !important;
-  width: 6px !important;
-  border-radius: 6px;
 }
 
 /* A wide, invisible grab area with a thin line that lights up once the pointer has rested on it. */
@@ -1529,4 +1467,44 @@ body.pane-resizing {
 .sidebar-resize-handle.active::before {
   background: var(--focus);
   transition-delay: 0s;
+}
+
+/* Sidebar: New and Search at the top, then collapsible Pinned, Projects and chat sections. */
+.sidebar-header {
+  margin-bottom: 0;
+}
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 4px;
+}
+.sidebar-nav-row svg {
+  width: 17px;
+  height: 17px;
+  color: var(--muted);
+}
+.sidebar-section {
+  margin-top: 8px;
+}
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+}
+.section-toggle:hover {
+  color: var(--text);
+}
+.section-toggle svg {
+  width: 13px;
+  height: 13px;
+}
+.terminal-view .xterm .scrollbar.horizontal {
+  display: none !important;
 }

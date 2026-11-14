@@ -120,7 +120,7 @@ async function run() {
   win.show();
   win.focus();
   // Kairo opens on a chat in "This computer"; move to the seeded workspace the way a user would.
-  await waitFor("!!document.querySelector('.chat-section .session-row.selected')");
+  await waitFor("!!document.querySelector('.sidebar-section-chats .session-row.selected')");
   const seeded = await state();
   const target =
     process.env.KAIRO_SMOKE_RESTART === "1"
@@ -138,7 +138,7 @@ async function run() {
     assert.equal(value.activeSessionId, saved.sessionId);
     assert.ok(
       await evaluate(
-        `!!document.querySelector('.pinned-sessions [data-workspace-id="${saved.workspaceId}"]')`,
+        `!!document.querySelector('.sidebar-section-pinned [data-workspace-id="${saved.workspaceId}"]')`,
       ),
     );
     assert.equal(
@@ -454,19 +454,19 @@ async function run() {
   await waitFor("document.querySelector('[role=menu]')");
   await button("Pin", "document.querySelector('[role=menu]')");
   await waitFor(
-    `document.querySelector('.pinned-sessions [data-workspace-id="${second.workspaceId}"]')`,
+    `document.querySelector('.sidebar-section-pinned [data-workspace-id="${second.workspaceId}"]')`,
   );
   await pointerClick(`[data-workspace-id="${second.workspaceId}"] .session`, "right");
   await waitFor("document.querySelector('[role=menu]')");
   await button("Unpin", "document.querySelector('[role=menu]')");
   await waitFor(
-    `!document.querySelector('.pinned-sessions [data-workspace-id="${second.workspaceId}"]')`,
+    `!document.querySelector('.sidebar-section-pinned [data-workspace-id="${second.workspaceId}"]')`,
   );
   await pointerClick(`[data-workspace-id="${second.workspaceId}"] .session`, "right");
   await waitFor("document.querySelector('[role=menu]')");
   await button("Pin", "document.querySelector('[role=menu]')");
   await waitFor(
-    `document.querySelector('.pinned-sessions [data-workspace-id="${second.workspaceId}"]')`,
+    `document.querySelector('.sidebar-section-pinned [data-workspace-id="${second.workspaceId}"]')`,
   );
   await pointerClick(`[data-workspace-id="${second.workspaceId}"] .session`, "right");
   await waitFor("document.querySelector('[role=menu]')");

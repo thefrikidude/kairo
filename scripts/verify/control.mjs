@@ -212,7 +212,7 @@ async function launch() {
   if (flags.empty) await waitUntil("!!document.querySelector('.sidebar')");
   else {
     // Kairo opens on a chat in "This computer"; move to the seeded project like a user would.
-    await waitUntil("!!document.querySelector('.chat-section .session-row.selected')");
+    await waitUntil("!!document.querySelector('.sidebar-section-chats .session-row.selected')");
     await call(instance, {
       cmd: "eval",
       code: `window.kairo.selectWorkspace(${JSON.stringify(instance.workspaces.shared)}).then(() => true)`,
