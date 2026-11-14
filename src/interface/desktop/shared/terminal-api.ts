@@ -14,6 +14,7 @@ import type {
   GitWorktree,
   WorkspaceSelection,
 } from "../../../domain/task-workspace.js";
+import type { ChatEvent, ChatThread } from "../../../domain/chat.js";
 import type {
   WorkspaceTerminal,
   TerminalSnapshot,
@@ -29,6 +30,7 @@ import type {
   WorkspaceEntry,
 } from "../../../infrastructure/tools/workspace-files.js";
 
+export type { ChatEvent, ChatThread };
 export type {
   TerminalAgentInfo,
   TerminalSession,
@@ -113,6 +115,14 @@ export interface TerminalDesktopApi {
   resizeTerminal(id: string, columns: number, rows: number): Promise<void>;
   closeTerminal(id: string): Promise<void>;
   renameTerminal(id: string, title: string): Promise<WorkspaceTerminal>;
+  chatThread(workspaceId: string): Promise<ChatThread>;
+  appendChat(
+    workspaceId: string,
+    events: Omit<ChatEvent, "id" | "createdAt">[],
+    agentId?: string,
+  ): Promise<ChatThread>;
+  /** Moves threads saved by older versions out of the renderer's local storage. */
+  importChats(threads: Record<string, ChatThread>): Promise<void>;
   onTerminalData(listener: (event: TerminalData) => void): () => void;
   onTerminalState(listener: (terminal: WorkspaceTerminal) => void): () => void;
   onTerminalClosed(listener: (event: { id: string; workspaceId: string }) => void): () => void;

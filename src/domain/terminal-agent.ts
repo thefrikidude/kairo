@@ -23,6 +23,10 @@ export type TerminalSession = {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** `pty` is a CLI in a terminal; `acp` is reserved for agents driven through the Agent Client Protocol. */
+  transport: "pty" | "acp";
+  /** The session that handed this one its work, once agents delegate to each other. */
+  delegatedFrom?: string;
   lastStartedAt?: number;
   archivedAt?: number;
   nativeSession?: NativeAgentSession;

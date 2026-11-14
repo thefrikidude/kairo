@@ -1,5 +1,7 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ChatEvent,
+  ChatThread,
   DesktopBootstrap,
   TaskWorkspace,
   ReviewScope,
@@ -218,12 +220,48 @@ export function DesktopApp(): React.JSX.Element {
     }
   };
   const apply = useCallback((value: DesktopBootstrap) => setState(value), []);
+  // Earlier versions kept each chat's history in local storage; move it into Kairo's database once.
+  useEffect(() => {
+    const threads: Record<string, ChatThread> = {};
+    const keys: string[] = [];
+    try {
+      for (let index = 0; index < localStorage.length; index++) {
+        const key = localStorage.key(index);
+        if (!key?.startsWith("kairo.chat:")) continue;
+        keys.push(key);
+        const value = JSON.parse(localStorage.getItem(key) ?? "null") as {
+          agentId?: string;
+          messages?: { role: ChatEvent["kind"]; text: string; agentId?: string }[];
+        } | null;
+        if (value && Array.isArray(value.messages))
+          threads[key.slice("kairo.chat:".length)] = {
+            agentId: value.agentId,
+            events: value.messages.map((message, position) => ({
+              id: String(position),
+              kind: message.role,
+              text: message.text,
+              agentId: message.agentId,
+              createdAt: 0,
+            })),
+          };
+      }
+    } catch {
+      return;
+    }
+    if (!keys.length) return;
+    void window.kairo
+      .importChats(threads)
+      .then(() => {
+        for (const key of keys) localStorage.removeItem(key);
+      })
+      .catch(() => {});
+  }, []);
   const onError = useCallback((value: string) => setError(value), []);
   const groups = useMemo(() => {
     const map = new Map<string, TaskWorkspace[]>();
     for (const path of state?.projects ?? []) map.set(path, []);
     for (const item of state?.workspaces ?? []) {
-      if (item.removedAt || item.archivedAt || item.repositoryPath === state?.chatsRoot) continue;
+      if (item.removedAt || item.archivedAt || item.chat) continue;
       map.set(item.repositoryPath, [...(map.get(item.repositoryPath) ?? []), item]);
     }
     for (const op of state?.operations ?? [])
@@ -231,24 +269,18 @@ export function DesktopApp(): React.JSX.Element {
         if (!map.has(op.repositoryPath)) map.set(op.repositoryPath, []);
       }
     return [...map].map(([path, workspaces]) => ({ path, workspaces }));
-  }, [state?.workspaces, state?.operations, state?.projects, state?.chatsRoot]);
+  }, [state?.workspaces, state?.operations, state?.projects]);
   const chats = useMemo(
     () =>
       (state?.workspaces ?? []).filter(
-        (item) =>
-          item.repositoryPath === state?.chatsRoot &&
-          !item.removedAt &&
-          !item.archivedAt &&
-          !item.pinned,
+        (item) => item.chat && !item.removedAt && !item.archivedAt && !item.pinned,
       ),
-    [state?.workspaces, state?.chatsRoot],
+    [state?.workspaces],
   );
   const archivedChats = useMemo(
     () =>
-      (state?.workspaces ?? []).filter(
-        (item) => item.repositoryPath === state?.chatsRoot && item.archivedAt && !item.removedAt,
-      ),
-    [state?.workspaces, state?.chatsRoot],
+      (state?.workspaces ?? []).filter((item) => item.chat && item.archivedAt && !item.removedAt),
+    [state?.workspaces],
   );
   const [settingsTab, setSettingsTab] = useState("general");
   const newChat = () => void action(() => window.kairo.createChat());
@@ -335,11 +367,7 @@ export function DesktopApp(): React.JSX.Element {
     if (!state || landed.current) return;
     landed.current = true;
     const newest = state.workspaces.find(
-      (item) =>
-        item.repositoryPath === state.chatsRoot &&
-        !item.removedAt &&
-        !item.archivedAt &&
-        !item.unavailable,
+      (item) => item.chat && !item.removedAt && !item.archivedAt && !item.unavailable,
     );
     if (newest && state.activeWorkspaceId === newest.id) return;
     void action(async () =>
@@ -464,7 +492,7 @@ export function DesktopApp(): React.JSX.Element {
         const key = event.key.toLowerCase();
         if (key === "b") setSidebarOpen((value) => !value);
         else if (key === "n") {
-          if (workspace && workspace.repositoryPath === state?.chatsRoot) newChat();
+          if (workspace?.chat) newChat();
           else setWorkspaceDialog(workspace?.repositoryPath ?? "");
         } else {
           setContextTab(key === "e" ? "files" : "changes");
@@ -576,12 +604,7 @@ export function DesktopApp(): React.JSX.Element {
       if (!options.project) {
         const value = await window.kairo.createChat();
         if (value.activeWorkspaceId)
-          seedThread(
-            `kairo.chat:${value.activeWorkspaceId}`,
-            options.agentId,
-            options.text,
-            agentName,
-          );
+          await seedThread(value.activeWorkspaceId, options.agentId, options.text, agentName);
         apply(value);
       } else {
         const known = state?.operations.map((op) => op.id) ?? [];
@@ -605,12 +628,7 @@ export function DesktopApp(): React.JSX.Element {
             agentName,
           };
         } else if (value.activeWorkspaceId)
-          seedThread(
-            `kairo.chat:${value.activeWorkspaceId}`,
-            options.agentId,
-            options.text,
-            agentName,
-          );
+          await seedThread(value.activeWorkspaceId, options.agentId, options.text, agentName);
       }
       setStarting(false);
     } catch (cause) {
@@ -627,11 +645,12 @@ export function DesktopApp(): React.JSX.Element {
   useEffect(() => {
     if (!readyWorkspaceId) return;
     const seed = pendingSeed.current;
-    if (seed && seed.operationId === operationId) {
-      seedThread(`kairo.chat:${readyWorkspaceId}`, seed.agentId, seed.text, seed.agentName);
-      pendingSeed.current = undefined;
-    }
-    void chooseWorkspace(readyWorkspaceId);
+    pendingSeed.current = seed && seed.operationId === operationId ? undefined : seed;
+    void (async () => {
+      if (seed && seed.operationId === operationId)
+        await seedThread(readyWorkspaceId, seed.agentId, seed.text, seed.agentName);
+      await chooseWorkspace(readyWorkspaceId);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readyWorkspaceId]);
   const menuHandlers = (label: string, actions: ContextAction[]) => ({
@@ -705,7 +724,7 @@ export function DesktopApp(): React.JSX.Element {
       },
     },
   ];
-  const isChat = (item: TaskWorkspace) => item.repositoryPath === state?.chatsRoot;
+  const isChat = (item: TaskWorkspace) => !!item.chat;
   const deleteWorkspace = (item: TaskWorkspace) =>
     setConfirm({
       title: isChat(item) ? "Delete chat?" : "Delete workspace?",
@@ -991,7 +1010,7 @@ export function DesktopApp(): React.JSX.Element {
               {!shown && owner && (
                 <HomeScreen
                   pending={pending}
-                  storageKey={`kairo.chat:${owner.id}`}
+                  chatId={owner.id}
                   location={isChat(owner) ? "This computer" : name(owner.repositoryPath)}
                   agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
                   recents={recentsFor(owner.id)}
@@ -1127,7 +1146,7 @@ export function DesktopApp(): React.JSX.Element {
             {kairoView && workspace && (
               <HomeScreen
                 pending={pending}
-                storageKey={`kairo.chat:${workspace.id}`}
+                chatId={workspace.id}
                 location={isChat(workspace) ? "This computer" : name(workspace.repositoryPath)}
                 agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
                 recents={recentsFor(workspace.id)}
@@ -1280,7 +1299,7 @@ export function DesktopApp(): React.JSX.Element {
               detail: workspace.name ?? workspace.branch ?? name(workspace.directory),
               run: command.run,
             })),
-          ...(workspace.repositoryPath === state?.chatsRoot
+          ...(workspace.chat
             ? []
             : [
                 {
@@ -1291,7 +1310,7 @@ export function DesktopApp(): React.JSX.Element {
               ]),
         ]
       : []),
-    workspace && workspace.repositoryPath === state?.chatsRoot
+    workspace?.chat
       ? { label: "New chat", run: newChat }
       : { label: "New workspace", run: () => setWorkspaceDialog(workspace?.repositoryPath ?? "") },
     { label: "Open project folder", run: () => void action(() => window.kairo.openWorkspace()) },
@@ -1530,7 +1549,7 @@ export function DesktopApp(): React.JSX.Element {
       {newOpen && (
         <NewSessionDialog
           workspace={workspace}
-          isChat={workspace?.repositoryPath === state?.chatsRoot}
+          isChat={!!workspace?.chat}
           runningAgents={runningAgents}
           picker={agentPicker()}
           error={error}

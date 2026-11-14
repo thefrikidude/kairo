@@ -15,6 +15,8 @@ export interface TaskWorkspace {
   archivedAt?: number;
   lastTab?: string;
   unavailable?: boolean;
+  /** A chat on this computer, outside any project. */
+  chat?: boolean;
 }
 
 export type WorkspaceSelection =

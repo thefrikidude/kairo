@@ -48,7 +48,7 @@ export function WorkspaceDialog({
   const projects = [
     ...new Set(
       state.workspaces
-        .filter((item) => !item.removedAt && item.repositoryPath !== state.chatsRoot)
+        .filter((item) => !item.removedAt && !item.chat)
         .map((item) => item.repositoryPath),
     ),
   ];

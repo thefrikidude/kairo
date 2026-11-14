@@ -3,6 +3,7 @@ import type { ProjectPreferences, WorkspaceOperation } from "../../domain/task-w
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import type { TaskWorkspace } from "../../domain/task-workspace.js";
+import type { ChatEvent, ChatThread } from "../../domain/chat.js";
 import type { NativeAgentSession, TerminalSession } from "../../domain/terminal-agent.js";
 import { agentDefinition, normalizeNativeSession } from "../agents/terminal-agent-catalog.js";
 import { databasePath, ensureStateDir } from "../filesystem/platform-paths.js";
@@ -83,6 +84,21 @@ export class SqliteTerminalSessionStore {
           );
         })();
       }
+      // Later changes are numbered; everything above is the idempotent baseline for older databases.
+      if ((db.pragma("user_version", { simple: true }) as number) < 2) {
+        db.transaction(() => {
+          db.exec(`ALTER TABLE terminal_sessions ADD COLUMN transport TEXT NOT NULL DEFAULT 'pty';
+            ALTER TABLE terminal_sessions ADD COLUMN delegated_from TEXT;
+            ALTER TABLE task_workspaces ADD COLUMN chat INTEGER NOT NULL DEFAULT 0;
+            CREATE TABLE chat_threads (workspace_id TEXT PRIMARY KEY, agent_id TEXT);
+            CREATE TABLE chat_events (
+              workspace_id TEXT NOT NULL, seq INTEGER NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL,
+              text TEXT NOT NULL, agent_id TEXT, created_at INTEGER NOT NULL,
+              PRIMARY KEY (workspace_id, seq)
+            );`);
+          db.pragma("user_version = 2");
+        })();
+      }
       db.pragma("foreign_keys=ON");
       return new SqliteTerminalSessionStore(db);
     } catch (error) {
@@ -127,8 +143,8 @@ export class SqliteTerminalSessionStore {
         workspace.createdAt,
       );
     this.db
-      .prepare("UPDATE task_workspaces SET name=? WHERE id=?")
-      .run(workspace.name, workspace.id);
+      .prepare("UPDATE task_workspaces SET name=?, chat=? WHERE id=?")
+      .run(workspace.name, workspace.chat ? 1 : 0, workspace.id);
     return workspace;
   }
   /** Canonicalize legacy aliases without changing physical ownership or native session identity. */
@@ -172,6 +188,7 @@ export class SqliteTerminalSessionStore {
       archivedAt: row.archived_at == null ? undefined : Number(row.archived_at),
       lastTab: row.last_tab == null ? undefined : String(row.last_tab),
       unavailable: Boolean(row.unavailable),
+      chat: Boolean(row.chat),
       id: String(row.id),
       repositoryPath: String(row.repository_path),
       directory: String(row.directory),
@@ -218,6 +235,80 @@ export class SqliteTerminalSessionStore {
             );
       }
     })();
+  }
+  /** Chats created before the `chat` flag existed live directly under the chats root. */
+  markChats(chatsRoot: string): void {
+    this.db
+      .prepare("UPDATE task_workspaces SET chat=1 WHERE repository_path=? AND chat=0")
+      .run(chatsRoot);
+  }
+  chatThread(workspaceId: string): ChatThread {
+    const agent = this.db
+      .prepare("SELECT agent_id FROM chat_threads WHERE workspace_id=?")
+      .get(workspaceId) as { agent_id: string | null } | undefined;
+    const rows = this.db
+      .prepare("SELECT * FROM chat_events WHERE workspace_id=? ORDER BY seq")
+      .all(workspaceId) as Record<string, unknown>[];
+    return {
+      agentId: agent?.agent_id ?? undefined,
+      events: rows.map((row) => ({
+        id: String(row.id),
+        kind: row.kind as ChatEvent["kind"],
+        text: String(row.text),
+        agentId: row.agent_id == null ? undefined : String(row.agent_id),
+        createdAt: Number(row.created_at),
+      })),
+    };
+  }
+  /** Adds events at the end of a chat and optionally records which agent is selected. */
+  appendChat(
+    workspaceId: string,
+    events: Omit<ChatEvent, "id" | "createdAt">[],
+    agentId?: string,
+  ): ChatThread {
+    if (!this.workspace(workspaceId)) throw new Error("Workspace not found.");
+    this.db.transaction(() => {
+      if (agentId !== undefined)
+        this.db
+          .prepare(
+            "INSERT INTO chat_threads(workspace_id, agent_id) VALUES (?, ?) ON CONFLICT(workspace_id) DO UPDATE SET agent_id=excluded.agent_id",
+          )
+          .run(workspaceId, agentId);
+      let seq =
+        (
+          this.db
+            .prepare("SELECT MAX(seq) AS seq FROM chat_events WHERE workspace_id=?")
+            .get(workspaceId) as { seq: number | null }
+        ).seq ?? 0;
+      for (const event of events)
+        this.db
+          .prepare(
+            "INSERT INTO chat_events(workspace_id, seq, id, kind, text, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          )
+          .run(
+            workspaceId,
+            ++seq,
+            randomUUID(),
+            event.kind,
+            event.text,
+            event.agentId ?? null,
+            Date.now(),
+          );
+    })();
+    return this.chatThread(workspaceId);
+  }
+  /** Brings in a thread saved by an older version in the renderer; a chat that has history is kept. */
+  importChat(workspaceId: string, thread: ChatThread): void {
+    if (!this.workspace(workspaceId) || this.chatThread(workspaceId).events.length) return;
+    this.appendChat(
+      workspaceId,
+      thread.events.map(({ kind, text, agentId }) => ({ kind, text, agentId })),
+      thread.agentId,
+    );
+  }
+  deleteChat(workspaceId: string): void {
+    this.db.prepare("DELETE FROM chat_events WHERE workspace_id=?").run(workspaceId);
+    this.db.prepare("DELETE FROM chat_threads WHERE workspace_id=?").run(workspaceId);
   }
   preferences(repositoryPath: string): ProjectPreferences {
     const row = this.db
@@ -280,6 +371,7 @@ export class SqliteTerminalSessionStore {
       workspaceId,
       agentId,
       title: this.title(title ?? agent.name),
+      transport: "pty",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -303,6 +395,8 @@ export class SqliteTerminalSessionStore {
       title: String(row.title),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
+      transport: row.transport === "acp" ? "acp" : "pty",
+      delegatedFrom: row.delegated_from == null ? undefined : String(row.delegated_from),
       lastStartedAt: row.last_started_at == null ? undefined : Number(row.last_started_at),
       archivedAt: row.archived_at == null ? undefined : Number(row.archived_at),
       nativeSession:

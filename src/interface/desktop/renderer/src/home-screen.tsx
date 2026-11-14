@@ -17,27 +17,18 @@ import {
   SelectValue,
 } from "./components/ui/select.js";
 import { cn } from "./lib/utils.js";
+import type { ChatEvent, ChatThread } from "../../shared/api.js";
 import type { StartOptions } from "./new-session.js";
 
 const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 
-type Message = {
-  id: string;
-  role: "user" | "notice" | "switch";
-  text: string;
-  agentId?: string;
-};
+type Message = { id: string; role: ChatEvent["kind"]; text: string };
 type Thread = { agentId?: string; messages: Message[] };
 
-function load(key: string): Thread {
-  try {
-    const value = JSON.parse(localStorage.getItem(key) ?? "null") as Thread | null;
-    if (value && Array.isArray(value.messages)) return value;
-  } catch {
-    /* an unreadable thread starts empty */
-  }
-  return { messages: [] };
-}
+const toThread = (value: ChatThread): Thread => ({
+  agentId: value.agentId,
+  messages: value.events.map((event) => ({ id: event.id, role: event.kind, text: event.text })),
+});
 
 /** What Kairo says when a message cannot reach an agent yet. */
 const undelivered = (agentName?: string) =>
@@ -46,22 +37,23 @@ const undelivered = (agentName?: string) =>
     : "Install an agent CLI to chat. Kairo will list it here once it is found.";
 
 /** Starts (or continues) a chat's saved history with a first message, as if it had been typed there. */
-export function seedThread(storageKey: string, agentId: string, text: string, agentName?: string) {
-  const thread = load(storageKey);
+export async function seedThread(
+  chatId: string,
+  agentId: string,
+  text: string,
+  agentName?: string,
+): Promise<void> {
   try {
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({
-        agentId,
-        messages: [
-          ...thread.messages,
-          { id: crypto.randomUUID(), role: "user", text },
-          { id: crypto.randomUUID(), role: "notice", text: undelivered(agentName) },
-        ],
-      }),
+    await window.kairo.appendChat(
+      chatId,
+      [
+        { kind: "user", text },
+        { kind: "notice", text: undelivered(agentName) },
+      ],
+      agentId,
     );
   } catch {
-    /* the chat opens empty without saved history */
+    /* the chat opens empty if its history cannot be saved */
   }
 }
 
@@ -74,7 +66,7 @@ export type Recent = { id: string; title: string; detail: string };
 
 export function HomeScreen({
   pending = false,
-  storageKey = "kairo.chat:home",
+  chatId,
   location,
   agents = [],
   recents = [],
@@ -85,8 +77,8 @@ export function HomeScreen({
   onStart,
 }: {
   pending?: boolean;
-  /** Threads are kept per workspace so each chat remembers its history and agent. */
-  storageKey?: string;
+  /** The workspace whose saved history this shows; without one the thread only lives on screen. */
+  chatId?: string;
   /** Where this chat lives, for example "This computer" or a project name. */
   location?: string;
   agents?: { id: string; name: string }[];
@@ -104,13 +96,22 @@ export function HomeScreen({
   const [picked, setPicked] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
   const known = [...picked.filter((path) => !projects.includes(path)), ...projects];
-  const [thread, setThread] = useState<Thread>(() => load(storageKey));
+  const [thread, setThread] = useState<Thread>({ messages: [] });
   const [text, setText] = useState("");
   const end = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setThread(load(storageKey));
-  }, [storageKey]);
+    let disposed = false;
+    setThread({ messages: [] });
+    if (chatId)
+      void window.kairo
+        .chatThread(chatId)
+        .then((value) => !disposed && setThread(toThread(value)))
+        .catch(() => {});
+    return () => {
+      disposed = true;
+    };
+  }, [chatId]);
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
   }, [thread.messages.length]);
@@ -120,22 +121,27 @@ export function HomeScreen({
     agents.find((item) => item.id === thread.agentId) ??
     agents.find((item) => item.id === last) ??
     agents[0];
-  const update = (next: Thread) => {
-    setThread(next);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(next));
-    } catch {
-      /* the chat still works without saved history */
+  /** Saves new messages (and the selected agent) with the backend, then shows what it stored. */
+  const append = (events: Omit<ChatEvent, "id" | "createdAt">[], agentId?: string) => {
+    if (!chatId) {
+      setThread((current) => ({
+        agentId: agentId ?? current.agentId,
+        messages: [
+          ...current.messages,
+          ...events.map((event) => ({
+            id: crypto.randomUUID(),
+            role: event.kind,
+            text: event.text,
+          })),
+        ],
+      }));
+      return;
     }
+    void window.kairo
+      .appendChat(chatId, events, agentId)
+      .then((value) => setThread(toThread(value)))
+      .catch(() => {});
   };
-  const add = (...messages: Omit<Message, "id">[]) =>
-    update({
-      agentId: agent?.id,
-      messages: [
-        ...thread.messages,
-        ...messages.map((message) => ({ ...message, id: crypto.randomUUID() })),
-      ],
-    });
 
   const choose = (id: string) => {
     const next = agents.find((item) => item.id === id);
@@ -145,15 +151,10 @@ export function HomeScreen({
     } catch {
       /* remembering the choice is optional */
     }
-    update({
-      agentId: next.id,
-      messages: thread.messages.length
-        ? [
-            ...thread.messages,
-            { id: crypto.randomUUID(), role: "switch", text: `Switched to ${next.name}` },
-          ]
-        : [],
-    });
+    append(
+      thread.messages.length ? [{ kind: "switch", text: `Switched to ${next.name}` }] : [],
+      next.id,
+    );
   };
   const chooseFolder = () =>
     void window.kairo.pickWorkspace().then((path) => {
@@ -183,7 +184,13 @@ export function HomeScreen({
         .finally(() => setStarting(false));
       return;
     }
-    add({ role: "user", text: body }, { role: "notice", text: undelivered(agent?.name) });
+    append(
+      [
+        { kind: "user", text: body },
+        { kind: "notice", text: undelivered(agent?.name) },
+      ],
+      agent?.id,
+    );
     setText("");
   };
 

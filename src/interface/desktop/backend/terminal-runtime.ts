@@ -34,6 +34,7 @@ import type {
   SessionStartMode,
 } from "../../../domain/terminal-agent.js";
 import type { WorkspaceSelection } from "../../../domain/task-workspace.js";
+import type { ChatEvent } from "../../../domain/chat.js";
 import type { TerminalDesktopBootstrap } from "../shared/terminal-api.js";
 
 export type TerminalDesktopRequest = { id: number; method: string; args: unknown[] };
@@ -46,6 +47,22 @@ const overlaps = (a: string, b: string) => {
   };
   return contains(a, b) || contains(b, a);
 };
+
+const chatKinds = ["user", "agent", "notice", "switch", "tool_call", "permission"] as const;
+/** Checks one message coming over IPC before it is stored. */
+function chatEvent(value: unknown): Omit<ChatEvent, "id" | "createdAt"> {
+  const event = (value ?? {}) as Record<string, unknown>;
+  if (!chatKinds.includes(event.kind as ChatEvent["kind"]) || typeof event.text !== "string")
+    throw new Error("A chat message needs a kind and text.");
+  if (event.text.length > 200_000) throw new Error("This message is too long.");
+  return {
+    kind: event.kind as ChatEvent["kind"],
+    text: event.text,
+    agentId: chatAgent(event.agentId),
+  };
+}
+const chatAgent = (value: unknown) =>
+  typeof value === "string" && value.length <= 200 ? value : undefined;
 
 /** CLI terminals replace task/chat protocols. Git/file ownership remains workspace scoped. */
 export async function createTerminalDesktopRuntime(
@@ -145,6 +162,9 @@ export async function createTerminalDesktopRuntime(
       return root;
     }
   };
+
+  // Chats made before workspaces carried a `chat` flag are recognised by their location.
+  store.markChats(chatsRoot());
 
   function snapshot(navigationOnly = false): TerminalDesktopBootstrap {
     const active = store.activeSessionId();
@@ -460,6 +480,7 @@ export async function createTerminalDesktopRuntime(
           directory,
           kind: "folder",
           managed: false,
+          chat: true,
           name: "New chat",
         });
         store.setActiveSession(undefined);
@@ -488,6 +509,7 @@ export async function createTerminalDesktopRuntime(
           (item) => item.workspaceId === target.id,
         ))
           store.delete(current.id);
+        store.deleteChat(target.id);
         return snapshot();
       }
       case "project:remove": {
@@ -713,7 +735,7 @@ export async function createTerminalDesktopRuntime(
         try {
           // A chat belongs to no project, so its shell opens in the home folder rather than the
           // chat's private scratch directory.
-          const directory = target.repositoryPath === chatsRoot() ? homedir() : target.directory;
+          const directory = target.chat ? homedir() : target.directory;
           return await terminals.create(target.id, directory, second === true);
         } finally {
           pendingTerminalCreates.set(target.id, (pendingTerminalCreates.get(target.id) ?? 1) - 1);
@@ -738,6 +760,30 @@ export async function createTerminalDesktopRuntime(
         if (typeof first !== "string") throw new Error("Choose a terminal.");
         terminals.resize(first, second, third);
         return;
+      case "chat:thread":
+        if (typeof first !== "string") throw new Error("Choose a chat.");
+        return store.chatThread(first);
+      case "chat:append": {
+        if (typeof first !== "string" || !Array.isArray(second))
+          throw new Error("Choose a chat and its messages.");
+        return store.appendChat(first, second.map(chatEvent), chatAgent(third));
+      }
+      case "chat:import": {
+        if (!first || typeof first !== "object") throw new Error("Choose chats to import.");
+        for (const [id, thread] of Object.entries(first as Record<string, unknown>)) {
+          const value = (thread ?? {}) as { agentId?: unknown; events?: unknown };
+          if (!Array.isArray(value.events)) continue;
+          store.importChat(id, {
+            agentId: chatAgent(value.agentId),
+            events: value.events.map((event) => ({
+              ...chatEvent(event),
+              id: "",
+              createdAt: 0,
+            })),
+          });
+        }
+        return;
+      }
       case "terminal:rename":
         if (typeof first !== "string" || typeof second !== "string")
           throw new Error("Choose a terminal and a name.");
