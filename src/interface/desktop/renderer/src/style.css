@@ -213,20 +213,6 @@ button svg {
 .open-project-button {
   color: var(--muted);
 }
-.section-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  color: var(--muted);
-  font-size: 11px;
-  padding: 22px 10px 7px;
-  flex: none;
-  text-align: left;
-}
-.section-label:hover {
-  color: var(--text);
-}
 .project-session-list {
   flex: 0 0 auto;
   width: 100%;
@@ -481,21 +467,6 @@ button svg {
   border-radius: 8px;
   padding: 9px 14px;
 }
-.settings-nav {
-  display: flex;
-  justify-content: space-between;
-  padding: 9px 10px;
-  text-align: left;
-  border-radius: 7px;
-  color: var(--muted);
-}
-.settings-nav.selected {
-  background: var(--hover);
-  color: var(--text);
-}
-.settings-nav small {
-  color: var(--muted);
-}
 .settings-content {
   min-width: 0;
   overflow: auto;
@@ -743,30 +714,6 @@ button svg {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.workspace-catalog-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--line);
-}
-.workspace-catalog-row > div {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.workspace-catalog-row small {
-  color: var(--muted);
-}
-.workspace-catalog-row code {
-  overflow-wrap: anywhere;
-  font-size: 11px;
-}
-.workspace-catalog-row button {
-  flex: none;
-}
 .review-panel {
   display: flex;
   flex-direction: column;
@@ -931,11 +878,6 @@ body.pane-resizing {
   background: var(--negative-bg);
   color: var(--negative);
 }
-.terminal-settings {
-  flex: 1;
-  padding: 24px;
-  overflow: auto;
-}
 .folder-picker {
   display: flex;
   gap: 8px;
@@ -1027,11 +969,6 @@ body.pane-resizing {
   color: var(--text);
   background: var(--surface);
   border-bottom-color: var(--text);
-}
-.pinned-sessions {
-  flex-shrink: 0;
-  max-height: 35%;
-  overflow-y: auto;
 }
 
 .workspace-heading {
@@ -1141,11 +1078,6 @@ body.pane-resizing {
     animation: none;
   }
 }
-.section-label .open-project-button {
-  width: auto;
-  padding: 4px 6px;
-  color: var(--muted);
-}
 .inline-check {
   display: flex;
   align-items: flex-start;
@@ -1160,8 +1092,7 @@ body.pane-resizing {
   border-top: 1px solid var(--line);
   padding-top: 10px;
 }
-.advanced-options > summary,
-.shortcut-list > summary {
+.advanced-options > summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 12px;
@@ -1171,24 +1102,6 @@ body.pane-resizing {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-.shortcut-list {
-  margin: 20px 0 12px;
-}
-.shortcut-list dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 16px;
-  margin: 0;
-  font-size: 12px;
-}
-.shortcut-list dt {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text);
-}
-.shortcut-list dd {
-  margin: 0;
-  color: var(--muted);
 }
 
 .shared-chip {
@@ -1304,28 +1217,8 @@ body.pane-resizing {
   height: 14px;
 }
 /* Multi-select in the sidebar */
-.bulk-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
 
 /* Settings screen navigation */
-.sidebar.settings-nav {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-content: flex-start;
-  gap: 2px;
-  padding: 12px 10px;
-}
-.settings-nav > * {
-  flex: none;
-  margin: 0;
-}
-.settings-content .shortcut-list {
-  max-width: 760px;
-}
 
 .settings-content .empty-small {
   text-align: left;
@@ -1353,9 +1246,6 @@ body.pane-resizing {
 .app-shell.sidebar-closed .topbar-first {
   padding-left: 116px;
 }
-.sidebar.settings-nav {
-  padding-top: 44px;
-}
 
 /* macOS: the window has no title bar, so the top bars double as the drag area and leave room for
    the traffic lights. */
@@ -1374,9 +1264,6 @@ body.pane-resizing {
 }
 .mac-inset .sidebar {
   padding-top: 0;
-}
-.mac-inset .sidebar.settings-nav {
-  padding-top: 44px;
 }
 .mac-inset .app-shell.sidebar-closed .topbar-first {
   padding-left: 186px;
@@ -1504,7 +1391,4 @@ body.pane-resizing {
 .section-toggle svg {
   width: 13px;
   height: 13px;
-}
-.terminal-view .xterm .scrollbar.horizontal {
-  display: none !important;
 }

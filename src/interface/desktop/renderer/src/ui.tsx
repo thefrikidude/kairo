@@ -34,7 +34,7 @@ import { WorkspaceTitle } from "./workspace-title.js";
 import { TerminalTabs } from "./terminal-tabs.js";
 import { activityClass, activityLabel } from "./activity.js";
 import { Sidebar } from "./sidebar.js";
-import { SettingsContent, SettingsNav } from "./settings-screen.js";
+import { SettingsDialog } from "./settings-screen.js";
 import { AgentPicker, ConfirmDialog, NewSessionDialog, RenameDialog } from "./session-dialogs.js";
 import { HomeScreen, seedThread } from "./home-screen.js";
 import { NewSession, type StartOptions } from "./new-session.js";
@@ -146,7 +146,6 @@ export function DesktopApp(): React.JSX.Element {
     );
   // A workspace with nothing running shows the Kairo chat view instead of a bare start prompt.
   const kairoView =
-    !settings &&
     !activeTerminalId &&
     !operationId &&
     !operation &&
@@ -851,13 +850,13 @@ export function DesktopApp(): React.JSX.Element {
   for (const item of paneLeaves) {
     const terminalId =
       item.id === primaryLeafId
-        ? settings || workspace?.archivedAt || operationId
+        ? workspace?.archivedAt || operationId
           ? undefined
           : activeTerminalId
         : paneTerminal(item)?.id;
     if (terminalId) placements[terminalId] = rects[item.id];
   }
-  const panelVisible = contextOpen && contextTab === "terminal" && !settings && !!workspace;
+  const panelVisible = contextOpen && contextTab === "terminal" && !!workspace;
   if (panelVisible && panelShell) placements[panelShell.id] = rects["terminal-panel"];
   const focusPane = (item: Leaf) => {
     if (item.id === primaryLeafId || pending) return;
@@ -1273,7 +1272,7 @@ export function DesktopApp(): React.JSX.Element {
   return (
     <div
       ref={paneArea}
-      className={`app-shell ${dragging ? "dragging" : ""} ${contextOpen && !settings && !starting && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
+      className={`app-shell ${dragging ? "dragging" : ""} ${contextOpen && !starting && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
       data-theme={theme}
       style={
         {
@@ -1282,12 +1281,6 @@ export function DesktopApp(): React.JSX.Element {
         } as React.CSSProperties
       }
     >
-      <SettingsNav
-        hidden={!sidebarOpen || !settings}
-        tab={settingsTab}
-        onTab={setSettingsTab}
-        onBack={() => setSettings(false)}
-      />
       <WindowControls
         sidebarOpen={sidebarOpen}
         canBack={historyTarget(-1) !== undefined}
@@ -1297,7 +1290,7 @@ export function DesktopApp(): React.JSX.Element {
         onForward={() => stepHistory(1)}
       />
       <Sidebar
-        hidden={!sidebarOpen || settings}
+        hidden={!sidebarOpen}
         pending={pending}
         state={state}
         groups={groups}
@@ -1319,17 +1312,9 @@ export function DesktopApp(): React.JSX.Element {
       />
       {sidebarOpen && resizeHandle("sidebar")}
       <main className="conversation">
-        {starting && !settings && (
+        {starting && (
           <header className="topbar topbar-first">
             <strong className="text-sm">New session</strong>
-          </header>
-        )}
-        {settings && (
-          <header className="topbar topbar-first">
-            <strong>Settings</strong>
-            <Button variant="ghost" size="sm" onClick={() => setSettings(false)}>
-              Back to workspace
-            </Button>
           </header>
         )}
         {error && (
@@ -1345,7 +1330,7 @@ export function DesktopApp(): React.JSX.Element {
             </Button>
           </div>
         )}
-        {starting && !settings && (
+        {starting && (
           <NewSession
             projects={groups.map((group) => group.path)}
             agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
@@ -1354,23 +1339,7 @@ export function DesktopApp(): React.JSX.Element {
             onStart={(options) => void startConversation(options)}
           />
         )}
-        <SettingsContent
-          hidden={!settings}
-          tab={settingsTab}
-          theme={themeChoice}
-          onTheme={setThemeChoice}
-          state={state}
-          archived={archived}
-          archivedChats={archivedChats}
-          pending={pending}
-          isChat={isChat}
-          run={action}
-          apply={apply}
-          confirm={setConfirm}
-          deleteWorkspace={deleteWorkspace}
-          closeSettings={() => setSettings(false)}
-        />
-        <div className="pane-area relative flex min-h-0 flex-1" hidden={!!settings || starting}>
+        <div className="pane-area relative flex min-h-0 flex-1" hidden={starting}>
           <div className="flex min-h-0 min-w-0 flex-1">
             <SplitLayout
               node={root}
@@ -1381,7 +1350,7 @@ export function DesktopApp(): React.JSX.Element {
         </div>
       </main>
 
-      {contextOpen && !settings && !starting && accessId && workspace && (
+      {contextOpen && !starting && accessId && workspace && (
         <aside className="workbench" id="workspace-panel" aria-label="Workspace files and review">
           {resizeHandle("context")}
           {contextTab === "terminal" && (
@@ -1440,6 +1409,23 @@ export function DesktopApp(): React.JSX.Element {
           </Suspense>
         </aside>
       )}
+      <SettingsDialog
+        open={settings}
+        onClose={() => setSettings(false)}
+        tab={settingsTab}
+        onTab={setSettingsTab}
+        theme={themeChoice}
+        onTheme={setThemeChoice}
+        state={state}
+        archived={archived}
+        archivedChats={archivedChats}
+        pending={pending}
+        isChat={isChat}
+        run={action}
+        apply={apply}
+        confirm={setConfirm}
+        deleteWorkspace={deleteWorkspace}
+      />
       {rowMenu && (
         <ContextMenu
           key={`${rowMenu.x}:${rowMenu.y}:${rowMenu.label}`}
