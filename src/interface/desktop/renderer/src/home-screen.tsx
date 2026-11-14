@@ -36,6 +36,32 @@ function load(key: string): Thread {
   return { messages: [] };
 }
 
+/** What Kairo says when a message cannot reach an agent yet. */
+const undelivered = (agentName?: string) =>
+  agentName
+    ? `${agentName} is selected, but Kairo is not connected to agents yet, so this message was not delivered.`
+    : "Install an agent CLI to chat. Kairo will list it here once it is found.";
+
+/** Starts (or continues) a chat's saved history with a first message, as if it had been typed there. */
+export function seedThread(storageKey: string, agentId: string, text: string, agentName?: string) {
+  const thread = load(storageKey);
+  try {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        agentId,
+        messages: [
+          ...thread.messages,
+          { id: crypto.randomUUID(), role: "user", text },
+          { id: crypto.randomUUID(), role: "notice", text: undelivered(agentName) },
+        ],
+      }),
+    );
+  } catch {
+    /* the chat opens empty without saved history */
+  }
+}
+
 /**
  * The Kairo chat view. The agent picker lists real agents; Kairo itself is the layer between
  * this UI and whichever agent is selected. Transport to agents (ACP) and hand-off between
@@ -116,9 +142,7 @@ export function HomeScreen({
       { role: "user", text: body },
       {
         role: "notice",
-        text: agent
-          ? `${agent.name} is selected, but Kairo is not connected to agents yet, so this message was not delivered.`
-          : "Install an agent CLI to chat. Kairo will list it here once it is found.",
+        text: undelivered(agent?.name),
       },
     );
     setText("");

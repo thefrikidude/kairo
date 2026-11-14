@@ -97,7 +97,7 @@ export function Sidebar({
   return (
     <aside className="sidebar" aria-label="Workspaces" hidden={hidden}>
       <div className="sidebar-header" />
-      <nav className="sidebar-nav" aria-label="Start">
+      <nav className="sidebar-nav" aria-label="Quick actions">
         <Button variant="ghost" className={row} disabled={pending} onClick={newChat}>
           <Plus /> New
         </Button>

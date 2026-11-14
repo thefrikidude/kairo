@@ -36,7 +36,8 @@ import { activityClass, activityLabel } from "./activity.js";
 import { Sidebar } from "./sidebar.js";
 import { SettingsContent, SettingsNav } from "./settings-screen.js";
 import { AgentPicker, ConfirmDialog, NewSessionDialog, RenameDialog } from "./session-dialogs.js";
-import { HomeScreen } from "./home-screen.js";
+import { HomeScreen, seedThread } from "./home-screen.js";
+import { NewSession, type StartOptions } from "./new-session.js";
 import { WorkspaceDialog, ProjectSettings } from "./workspace-dialog.js";
 import { WorkspacePalette, type PaletteCommand } from "./workspace-palette.js";
 import { ContextMenu, type ContextAction, type ContextMenuState } from "./context-menu.js";
@@ -100,6 +101,11 @@ export function DesktopApp(): React.JSX.Element {
     terminal?: boolean;
   }>();
   const [rowMenu, setRowMenu] = useState<ContextMenuState>();
+  // The start screen where a session's location and first message are chosen.
+  const [starting, setStarting] = useState(false);
+  const pendingSeed = useRef<
+    { operationId: string; agentId: string; text: string; agentName?: string } | undefined
+  >(undefined);
   const [layout, setLayout] = useState<PaneNode>();
   const [dragging, setDragging] = useState<string>();
   const [paneTabs, setPaneTabs] = useState<Record<string, string>>({});
@@ -470,6 +476,7 @@ export function DesktopApp(): React.JSX.Element {
         !(event.target instanceof Element && event.target.closest(".terminal-view"))
       ) {
         if (settings) setSettings(false);
+        else if (starting) setStarting(false);
         else if (contextOpen) setContextOpen(false);
       }
     };
@@ -478,6 +485,7 @@ export function DesktopApp(): React.JSX.Element {
   }, [
     beginSession,
     settings,
+    starting,
     contextOpen,
     contextTab,
     workspace?.id,
@@ -547,6 +555,7 @@ export function DesktopApp(): React.JSX.Element {
     selectionVersion.current++;
     setOperationId(undefined);
     setSettings(false);
+    setStarting(false);
     if (tab?.startsWith("terminal:")) {
       setPanelChoice((all) => ({ ...all, [id]: tab.slice(9) }));
       setContextTab("terminal");
@@ -559,13 +568,71 @@ export function DesktopApp(): React.JSX.Element {
       return tab ? window.kairo.bootstrap(true) : value;
     });
   };
+  /** Creates the chat or workspace chosen on the start screen and opens it with the first message. */
+  const startConversation = async (options: StartOptions) => {
+    const agentName = state?.agents.find((agent) => agent.id === options.agentId)?.name;
+    setPending(true);
+    setError("");
+    try {
+      if (!options.project) {
+        const value = await window.kairo.createChat();
+        if (value.activeWorkspaceId)
+          seedThread(
+            `kairo.chat:${value.activeWorkspaceId}`,
+            options.agentId,
+            options.text,
+            agentName,
+          );
+        apply(value);
+      } else {
+        const known = state?.operations.map((op) => op.id) ?? [];
+        const value = await window.kairo.createWorkspace({
+          project: options.project,
+          name: options.text.split(/\s+/).slice(0, 6).join(" ").slice(0, 60),
+          selection:
+            options.mode === "worktree"
+              ? { kind: "worktree", branch: "", baseRef: options.baseRef }
+              : { kind: "folder" },
+        });
+        const op = value.operations.find((item) => !known.includes(item.id));
+        apply(value);
+        if (op) {
+          // A worktree is prepared in the background; its first message is saved once it is ready.
+          setOperationId(op.id);
+          pendingSeed.current = {
+            operationId: op.id,
+            agentId: options.agentId,
+            text: options.text,
+            agentName,
+          };
+        } else if (value.activeWorkspaceId)
+          seedThread(
+            `kairo.chat:${value.activeWorkspaceId}`,
+            options.agentId,
+            options.text,
+            agentName,
+          );
+      }
+      setStarting(false);
+    } catch (cause) {
+      setError(message(cause));
+    } finally {
+      setPending(false);
+    }
+  };
   // Once a new workspace finishes preparing there is nothing left to confirm, so open it directly.
   const readyWorkspaceId =
     operation?.id === operationId && operation?.phase === "ready" && !operation?.error
       ? operation?.workspaceId
       : undefined;
   useEffect(() => {
-    if (readyWorkspaceId) void chooseWorkspace(readyWorkspaceId);
+    if (!readyWorkspaceId) return;
+    const seed = pendingSeed.current;
+    if (seed && seed.operationId === operationId) {
+      seedThread(`kairo.chat:${readyWorkspaceId}`, seed.agentId, seed.text, seed.agentName);
+      pendingSeed.current = undefined;
+    }
+    void chooseWorkspace(readyWorkspaceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readyWorkspaceId]);
   const menuHandlers = (label: string, actions: ContextAction[]) => ({
@@ -1206,7 +1273,7 @@ export function DesktopApp(): React.JSX.Element {
   return (
     <div
       ref={paneArea}
-      className={`app-shell ${dragging ? "dragging" : ""} ${contextOpen && !settings && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
+      className={`app-shell ${dragging ? "dragging" : ""} ${contextOpen && !settings && !starting && accessId && workspace ? "review-open" : ""} ${sidebarOpen ? "" : "sidebar-closed"}`}
       data-theme={theme}
       style={
         {
@@ -1241,7 +1308,10 @@ export function DesktopApp(): React.JSX.Element {
         menuHandlers={menuHandlers}
         projectActions={projectActions}
         action={action}
-        newChat={newChat}
+        newChat={() => {
+          setSettings(false);
+          setStarting(true);
+        }}
         onSearch={() => setPalette("jump")}
         setWorkspaceDialog={setWorkspaceDialog}
         setOperationId={setOperationId}
@@ -1249,6 +1319,11 @@ export function DesktopApp(): React.JSX.Element {
       />
       {sidebarOpen && resizeHandle("sidebar")}
       <main className="conversation">
+        {starting && !settings && (
+          <header className="topbar topbar-first">
+            <strong className="text-sm">New session</strong>
+          </header>
+        )}
         {settings && (
           <header className="topbar topbar-first">
             <strong>Settings</strong>
@@ -1270,6 +1345,15 @@ export function DesktopApp(): React.JSX.Element {
             </Button>
           </div>
         )}
+        {starting && !settings && (
+          <NewSession
+            projects={groups.map((group) => group.path)}
+            agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+            pending={pending}
+            error=""
+            onStart={(options) => void startConversation(options)}
+          />
+        )}
         <SettingsContent
           hidden={!settings}
           tab={settingsTab}
@@ -1286,7 +1370,7 @@ export function DesktopApp(): React.JSX.Element {
           deleteWorkspace={deleteWorkspace}
           closeSettings={() => setSettings(false)}
         />
-        <div className="pane-area relative flex min-h-0 flex-1" hidden={!!settings}>
+        <div className="pane-area relative flex min-h-0 flex-1" hidden={!!settings || starting}>
           <div className="flex min-h-0 min-w-0 flex-1">
             <SplitLayout
               node={root}
@@ -1297,7 +1381,7 @@ export function DesktopApp(): React.JSX.Element {
         </div>
       </main>
 
-      {contextOpen && !settings && accessId && workspace && (
+      {contextOpen && !settings && !starting && accessId && workspace && (
         <aside className="workbench" id="workspace-panel" aria-label="Workspace files and review">
           {resizeHandle("context")}
           {contextTab === "terminal" && (
