@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Check, ChevronDown, Folder, FolderOpen, Laptop } from "lucide-react";
+import { Check, ChevronDown, Folder, FolderOpen } from "lucide-react";
 import { Button } from "./components/ui/button.js";
 import {
   DropdownMenu,
@@ -77,7 +77,6 @@ export function NewSession({
   }, [project]);
 
   const agent = agents.find((item) => item.id === agentId);
-  const location = project ? name(project) : "This computer";
   const send = () => {
     const body = text.trim();
     if (!body || pending || !agent) return;
@@ -174,16 +173,14 @@ export function NewSession({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-sm font-normal">
-                  {project ? <Folder /> : <Laptop />}
-                  <span className="max-w-40 truncate">{location}</span>
+                  <Folder />
+                  <span className="max-w-40 truncate">
+                    {project ? name(project) : "Choose folder"}
+                  </span>
                   <ChevronDown className="text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="min-w-52">
-                <DropdownMenuItem onSelect={() => setProject(undefined)}>
-                  <Laptop className="mr-2 size-4 text-muted-foreground" />
-                  This computer
-                </DropdownMenuItem>
                 {known.map((path) => (
                   <DropdownMenuItem key={path} onSelect={() => setProject(path)}>
                     <Folder className="mr-2 size-4 text-muted-foreground" />

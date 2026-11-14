@@ -970,6 +970,10 @@ export function DesktopApp(): React.JSX.Element {
                   agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
                   recents={recentsFor(owner.id)}
                   onOpenRecent={(id) => void chooseWorkspace(id)}
+                  onOpenProject={() => void action(() => window.kairo.openWorkspace())}
+                  onNewChat={newChat}
+                  projects={groups.map((group) => group.path)}
+                  onStart={(options) => void startConversation(options)}
                 />
               )}
             </div>
@@ -1102,6 +1106,10 @@ export function DesktopApp(): React.JSX.Element {
                 agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
                 recents={recentsFor(workspace.id)}
                 onOpenRecent={(id) => void chooseWorkspace(id)}
+                onOpenProject={() => void action(() => window.kairo.openWorkspace())}
+                onNewChat={newChat}
+                projects={groups.map((group) => group.path)}
+                onStart={(options) => void startConversation(options)}
               />
             )}
             {!activeTerminalId && !operationId && !workspace && !groups.length && (
@@ -1110,6 +1118,8 @@ export function DesktopApp(): React.JSX.Element {
                 agents={installedAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
                 onOpenProject={() => void action(() => window.kairo.openWorkspace())}
                 onNewChat={newChat}
+                projects={groups.map((group) => group.path)}
+                onStart={(options) => void startConversation(options)}
               />
             )}
             {!activeTerminalId &&
@@ -1325,9 +1335,12 @@ export function DesktopApp(): React.JSX.Element {
         action={action}
         newChat={() => {
           setSettings(false);
-          setStarting(true);
+          setWorkspaceDialog("");
         }}
-        createChat={newChat}
+        createChat={() => {
+          setSettings(false);
+          setWorkspaceDialog("");
+        }}
         onSearch={() => setPalette("jump")}
         setWorkspaceDialog={setWorkspaceDialog}
         setOperationId={setOperationId}

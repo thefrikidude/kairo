@@ -119,7 +119,25 @@ export function Sidebar({
           {pinned.map(renderWorkspace)}
         </Section>
       )}
-      <Section id="projects" title="Projects" open={!closed.projects} onToggle={toggleSection}>
+      <Section
+        id="projects"
+        title="Projects"
+        open={!closed.projects}
+        onToggle={toggleSection}
+        action={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="icon-button size-[26px] rounded-md text-muted-foreground"
+            aria-label="Open project"
+            title="Open a project folder"
+            disabled={pending}
+            onClick={() => void action(() => window.kairo.openWorkspace())}
+          >
+            <Icon name="plus" />
+          </Button>
+        }
+      >
         <div className="project-session-list">
           {groups.map((group) => (
             <section className="project-session-group" key={group.path}>

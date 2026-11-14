@@ -6,9 +6,19 @@ import type {
   ProjectPreferences,
   WorkspaceSelection,
 } from "../../shared/api.js";
+import { Check, ChevronDown, Folder, FolderOpen } from "lucide-react";
 import { ModalFrame } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
+import { Dialog, DialogContent } from "./components/ui/dialog.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu.js";
 import { Input } from "./components/ui/input.js";
+import { cn } from "./lib/utils.js";
 import { NativeSelect } from "./components/ui/native-select.js";
 import { Textarea } from "./components/ui/textarea.js";
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -35,6 +45,13 @@ export function WorkspaceDialog({
   close(): void;
 }): React.JSX.Element {
   const [project, setProject] = useState(initialProject);
+  const projects = [
+    ...new Set(
+      state.workspaces
+        .filter((item) => !item.removedAt && item.repositoryPath !== state.chatsRoot)
+        .map((item) => item.repositoryPath),
+    ),
+  ];
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"worktree" | "folder" | "existing">("worktree");
   const [branch, setBranch] = useState("");
@@ -120,212 +137,223 @@ export function WorkspaceDialog({
       setPending(false);
     }
   };
+  const field = "flex flex-col gap-1.5 text-sm text-muted-foreground";
+  const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  const choices = project && !projects.includes(project) ? [project, ...projects] : projects;
   return (
-    <ModalFrame labelledBy="workspace-create-title" blocked={pending} onDismiss={close}>
-      <form
-        className="new-session-dialog max-h-[85vh] overflow-auto rounded-xl border border-border bg-background p-[22px]"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void create();
-        }}
+    <Dialog open onOpenChange={(open) => !open && !pending && close()}>
+      <DialogContent
+        className="w-[min(calc(100vw-48px),480px)] border border-border bg-background"
+        aria-labelledby="workspace-create-title"
+        aria-describedby={undefined}
       >
-        <h2 id="workspace-create-title" className="mb-4 text-[17px] font-semibold">
-          New workspace
-        </h2>
-        {initialProject ? (
-          <p className="empty-small" title={project}>
-            {project}
-          </p>
-        ) : (
-          <label className="settings-field">
-            Project folder
-            <div className="folder-picker">
-              <Input
-                aria-label="Workspace project"
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                type="button"
-                onClick={() =>
-                  void window.kairo.pickWorkspace().then((path) => {
-                    if (path) setProject(path);
-                  })
-                }
-              >
-                Browse…
-              </Button>
-            </div>
-          </label>
-        )}
-        <label className="settings-field">
-          Task name
-          <Input
-            autoFocus
-            aria-label="Workspace name"
-            maxLength={200}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-        </label>
-        <label className="settings-field">
-          Agent
-          <NativeSelect
-            aria-label="Workspace agent"
-            value={agent}
-            onChange={(e) => setAgent(e.target.value)}
-          >
-            <option value="">Chat (choose the agent in the chat)</option>
-            {state.agents
-              .filter((a) => a.installed)
-              .map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-          </NativeSelect>
-        </label>
-        {askEnv && (
-          <label className="inline-check">
-            <input
-              type="checkbox"
-              aria-label="Copy environment files"
-              checked={copyEnv}
-              onChange={(e) => setCopyEnv(e.target.checked)}
-            />
-            Copy {missingEnv.join(", ")} into the new worktree (git-ignored, so it would be missing)
-          </label>
-        )}
-        <details className="advanced-options">
-          <summary>Advanced</summary>
-          {initialProject && (
-            <label className="settings-field">
-              Project folder
-              <div className="folder-picker">
-                <Input
-                  aria-label="Workspace project"
-                  value={project}
-                  onChange={(e) => setProject(e.target.value)}
-                />
+        <form
+          className="flex flex-col gap-4 p-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void create();
+          }}
+        >
+          <h2 id="workspace-create-title" className="m-0 text-lg font-medium">
+            New workspace
+          </h2>
+          <div className={field}>
+            Project
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                 <Button
-                  variant="outline"
-                  size="sm"
                   type="button"
-                  onClick={() =>
+                  variant="outline"
+                  aria-label="Workspace project"
+                  className="h-10 w-full justify-between px-3 text-sm font-normal text-foreground"
+                  title={project || undefined}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Folder className="size-4 shrink-0 text-muted-foreground" />
+                    <span className={cn("truncate", !project && "text-muted-foreground")}>
+                      {project ? projectName(project) : "Choose a project"}
+                    </span>
+                  </span>
+                  <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="w-[var(--radix-dropdown-menu-trigger-width)]"
+              >
+                {choices.map((path) => (
+                  <DropdownMenuItem key={path} onSelect={() => setProject(path)} title={path}>
+                    <Folder className="mr-2 size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">{projectName(path)}</span>
+                    {path === project && <Check className="size-4 text-muted-foreground" />}
+                  </DropdownMenuItem>
+                ))}
+                {choices.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  onSelect={() =>
                     void window.kairo.pickWorkspace().then((path) => {
                       if (path) setProject(path);
                     })
                   }
                 >
-                  Browse…
-                </Button>
-              </div>
-            </label>
-          )}
-          <label className="settings-field">
-            Workspace
+                  <FolderOpen className="mr-2 size-4 text-muted-foreground" />
+                  Choose folder…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {project && (
+              <span className="truncate text-xs" title={project}>
+                {project}
+              </span>
+            )}
+          </div>
+          <label className={field}>
+            Task name
+            <Input
+              autoFocus={!!initialProject}
+              aria-label="Workspace name"
+              className="h-10"
+              maxLength={200}
+              placeholder="What are you working on?"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </label>
+          <label className={field}>
+            Agent
             <NativeSelect
-              aria-label="Workspace mode"
-              value={mode}
-              onChange={(e) => setMode(e.target.value as typeof mode)}
+              aria-label="Workspace agent"
+              className="h-10"
+              value={agent}
+              onChange={(e) => setAgent(e.target.value)}
             >
-              <option value="folder">Project folder (shared)</option>
-              {refs?.git && (
-                <>
-                  <option value="worktree">New isolated worktree</option>
-                  <option value="existing">Existing worktree</option>
-                </>
-              )}
+              <option value="">Chat (choose the agent in the chat)</option>
+              {state.agents
+                .filter((a) => a.installed)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
             </NativeSelect>
           </label>
-          {mode === "worktree" && (
-            <>
-              <label className="settings-field">
-                Starting branch or commit
-                <Input
-                  aria-label="Starting ref"
-                  list="workspace-refs"
-                  value={base}
-                  onChange={(e) => setBase(e.target.value)}
-                />
-                <datalist id="workspace-refs">
-                  {refs?.refs.map((ref) => (
-                    <option key={ref} value={ref} />
-                  ))}
-                </datalist>
-              </label>
-              <p className="empty-small">
-                Project default: {refs?.defaultRef || "unavailable"}. Uses committed files.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setLoading(true);
-                  void window.kairo
-                    .projectRefs(project, true)
-                    .then(setRefs)
-                    .catch((e) => setError(errorText(e)))
-                    .finally(() => setLoading(false));
-                }}
-              >
-                Fetch latest remote branches
-              </Button>
-              <label className="settings-field">
-                Branch name (optional)
-                <Input
-                  aria-label="Branch override"
-                  value={branch}
-                  placeholder={`kairo/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "task"}-…`}
-                  onChange={(e) => setBranch(e.target.value)}
-                />
-              </label>
-            </>
-          )}
-          {mode === "existing" && (
-            <label className="settings-field">
-              Existing worktree
-              <NativeSelect
-                aria-label="Existing worktree"
-                value={existing}
-                onChange={(e) => setExisting(e.target.value)}
-              >
-                {trees
-                  .filter((t) => !t.prunable)
-                  .map((t) => (
-                    <option key={t.directory} value={t.directory}>
-                      {t.branch ?? "Detached"} · {t.directory}
-                    </option>
-                  ))}
-              </NativeSelect>
+          {askEnv && (
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                aria-label="Copy environment files"
+                checked={copyEnv}
+                onChange={(e) => setCopyEnv(e.target.checked)}
+              />
+              Copy {missingEnv.join(", ")} into the new worktree (git-ignored, so it would be
+              missing)
             </label>
           )}
-        </details>
-        {error && (
-          <p className="file-error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="modal-actions">
-          <Button variant="outline" type="button" disabled={pending} onClick={close}>
-            Cancel
-          </Button>
-          <Button
-            className="primary"
-            disabled={
-              pending || loading || !refs || !name.trim() || (mode === "worktree" && !base.trim())
-            }
-          >
-            {pending ? "Creating…" : "Create workspace"}
-          </Button>
-        </div>
-      </form>
-    </ModalFrame>
+          <details className="advanced-options">
+            <summary>Advanced</summary>
+            <label className="settings-field">
+              Workspace
+              <NativeSelect
+                aria-label="Workspace mode"
+                value={mode}
+                onChange={(e) => setMode(e.target.value as typeof mode)}
+              >
+                <option value="folder">Project folder (shared)</option>
+                {refs?.git && (
+                  <>
+                    <option value="worktree">New isolated worktree</option>
+                    <option value="existing">Existing worktree</option>
+                  </>
+                )}
+              </NativeSelect>
+            </label>
+            {mode === "worktree" && (
+              <>
+                <label className="settings-field">
+                  Starting branch or commit
+                  <Input
+                    aria-label="Starting ref"
+                    list="workspace-refs"
+                    value={base}
+                    onChange={(e) => setBase(e.target.value)}
+                  />
+                  <datalist id="workspace-refs">
+                    {refs?.refs.map((ref) => (
+                      <option key={ref} value={ref} />
+                    ))}
+                  </datalist>
+                </label>
+                <p className="empty-small">
+                  Project default: {refs?.defaultRef || "unavailable"}. Uses committed files.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    setLoading(true);
+                    void window.kairo
+                      .projectRefs(project, true)
+                      .then(setRefs)
+                      .catch((e) => setError(errorText(e)))
+                      .finally(() => setLoading(false));
+                  }}
+                >
+                  Fetch latest remote branches
+                </Button>
+                <label className="settings-field">
+                  Branch name (optional)
+                  <Input
+                    aria-label="Branch override"
+                    value={branch}
+                    placeholder={`kairo/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "task"}-…`}
+                    onChange={(e) => setBranch(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+            {mode === "existing" && (
+              <label className="settings-field">
+                Existing worktree
+                <NativeSelect
+                  aria-label="Existing worktree"
+                  value={existing}
+                  onChange={(e) => setExisting(e.target.value)}
+                >
+                  {trees
+                    .filter((t) => !t.prunable)
+                    .map((t) => (
+                      <option key={t.directory} value={t.directory}>
+                        {t.branch ?? "Detached"} · {t.directory}
+                      </option>
+                    ))}
+                </NativeSelect>
+              </label>
+            )}
+          </details>
+          {error && (
+            <p className="file-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="modal-actions">
+            <Button variant="outline" type="button" disabled={pending} onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              className="primary"
+              disabled={
+                pending || loading || !refs || !name.trim() || (mode === "worktree" && !base.trim())
+              }
+            >
+              {pending ? "Creating…" : "Create workspace"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

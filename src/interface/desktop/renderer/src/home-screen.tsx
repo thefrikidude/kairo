@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Folder } from "lucide-react";
+import { ChevronDown, Folder, FolderOpen } from "lucide-react";
 import { Button } from "./components/ui/button.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu.js";
 import { Composer } from "./components/composer.js";
 import {
   Select,
@@ -10,6 +17,9 @@ import {
   SelectValue,
 } from "./components/ui/select.js";
 import { cn } from "./lib/utils.js";
+import type { StartOptions } from "./new-session.js";
+
+const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 
 type Message = {
   id: string;
@@ -71,6 +81,8 @@ export function HomeScreen({
   onOpenRecent,
   onOpenProject,
   onNewChat,
+  projects = [],
+  onStart,
 }: {
   pending?: boolean;
   /** Threads are kept per workspace so each chat remembers its history and agent. */
@@ -83,7 +95,15 @@ export function HomeScreen({
   onOpenRecent?(id: string): void;
   onOpenProject?(): void;
   onNewChat?(): void;
+  /** Projects offered in the folder menu. */
+  projects?: string[];
+  /** Starts a session inside the chosen project with the typed message. */
+  onStart?(options: StartOptions): void;
 }): React.JSX.Element {
+  const [project, setProject] = useState<string>();
+  const [picked, setPicked] = useState<string[]>([]);
+  const [starting, setStarting] = useState(false);
+  const known = [...picked.filter((path) => !projects.includes(path)), ...projects];
   const [thread, setThread] = useState<Thread>(() => load(storageKey));
   const [text, setText] = useState("");
   const end = useRef<HTMLDivElement>(null);
@@ -135,9 +155,34 @@ export function HomeScreen({
         : [],
     });
   };
+  const chooseFolder = () =>
+    void window.kairo.pickWorkspace().then((path) => {
+      if (!path) return;
+      setPicked((all) => (all.includes(path) ? all : [path, ...all]));
+      setProject(path);
+    });
   const submit = () => {
     const body = text.trim();
     if (!body) return;
+    if (project && onStart && agent) {
+      if (starting) return;
+      setStarting(true);
+      void window.kairo
+        .projectRefs(project)
+        .catch(() => undefined)
+        .then((refs) => {
+          onStart({
+            project,
+            mode: refs?.git ? "worktree" : "folder",
+            baseRef: refs?.defaultRef ?? "",
+            agentId: agent.id,
+            text: body,
+          });
+          setText("");
+        })
+        .finally(() => setStarting(false));
+      return;
+    }
     add({ role: "user", text: body }, { role: "notice", text: undelivered(agent?.name) });
     setText("");
   };
@@ -149,16 +194,43 @@ export function HomeScreen({
       onSubmit={submit}
       label="Message"
       placeholder={agent ? `Message ${agent.name}…` : "Install an agent to start chatting"}
-      canSend={!!text.trim()}
+      canSend={!!text.trim() && !starting}
       leading={
         location && (
-          <span
-            className="flex items-center gap-1.5 px-2 text-sm text-muted-foreground"
-            title={location}
-          >
-            <Folder className="size-4 shrink-0" />
-            <span className="max-w-48 truncate">{location}</span>
-          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 px-2 text-sm font-normal text-muted-foreground"
+                title="Choose folder"
+                aria-label="Location"
+              >
+                <Folder />
+                <span className="max-w-48 truncate">
+                  {project
+                    ? folderName(project)
+                    : location === "This computer"
+                      ? "Choose folder"
+                      : location}
+                </span>
+                <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-56">
+              {known.map((path) => (
+                <DropdownMenuItem key={path} onSelect={() => setProject(path)}>
+                  <Folder className="mr-2 size-4 text-muted-foreground" />
+                  <span className="truncate">{folderName(path)}</span>
+                </DropdownMenuItem>
+              ))}
+              {known.length > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuItem onSelect={chooseFolder}>
+                <FolderOpen className="mr-2 size-4 text-muted-foreground" />
+                Choose folder…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )
       }
       trailing={
@@ -213,7 +285,6 @@ export function HomeScreen({
           <h1 className="m-0 text-[28px] font-normal tracking-tight text-foreground">
             What should we work on?
           </h1>
-          {location && <p className="m-0 text-[15px] text-muted-foreground">in {location}</p>}
         </div>
         {composer}
         {recents.length > 0 && (
@@ -232,19 +303,21 @@ export function HomeScreen({
             ))}
           </div>
         )}
-        {(onNewChat || onOpenProject) && (
-          <div className="flex gap-2">
-            {onNewChat && (
-              <Button disabled={pending} onClick={onNewChat}>
-                New chat on this computer
-              </Button>
-            )}
-            {onOpenProject && (
-              <Button variant="outline" disabled={pending} onClick={onOpenProject}>
-                Open project folder
-              </Button>
-            )}
-          </div>
+        {onNewChat && !location && (
+          <Button disabled={pending} onClick={onNewChat} className="self-start">
+            New chat on this computer
+          </Button>
+        )}
+        {onOpenProject && !location && (
+          <button
+            type="button"
+            disabled={pending}
+            className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={onOpenProject}
+          >
+            <FolderOpen className="size-4" />
+            Open a folder
+          </button>
         )}
       </div>
     </div>
