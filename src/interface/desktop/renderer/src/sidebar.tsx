@@ -26,20 +26,26 @@ function Section({
   title,
   open,
   onToggle,
+  action,
   children,
 }: {
   id: SectionId;
   title: string;
   open: boolean;
   onToggle(id: SectionId): void;
+  /** A button shown at the right of the title, for example to add an item. */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
     <section className={`sidebar-section sidebar-section-${id}`} aria-label={title}>
-      <button className="section-toggle" aria-expanded={open} onClick={() => onToggle(id)}>
-        <span>{title}</span>
-        <Icon name="chevron" className={`transition-transform ${open ? "" : "-rotate-90"}`} />
-      </button>
+      <div className="section-header">
+        <button className="section-toggle" aria-expanded={open} onClick={() => onToggle(id)}>
+          <span>{title}</span>
+          <Icon name="chevron" className={`transition-transform ${open ? "" : "-rotate-90"}`} />
+        </button>
+        {action}
+      </div>
       <div hidden={!open}>{children}</div>
     </section>
   );
@@ -58,6 +64,7 @@ export function Sidebar({
   projectActions,
   action,
   newChat,
+  createChat,
   onSearch,
   setWorkspaceDialog,
   setOperationId,
@@ -75,6 +82,8 @@ export function Sidebar({
   projectActions(path: string): ContextAction[];
   action(operation: () => Promise<DesktopBootstrap | undefined>): Promise<void>;
   newChat(): void;
+  /** Starts a chat on this computer right away. */
+  createChat(): void;
   onSearch(): void;
   setWorkspaceDialog(path: string): void;
   setOperationId(id: string): void;
@@ -178,7 +187,25 @@ export function Sidebar({
           )}
         </div>
       </Section>
-      <Section id="chats" title="This computer" open={!closed.chats} onToggle={toggleSection}>
+      <Section
+        id="chats"
+        title="This computer"
+        open={!closed.chats}
+        onToggle={toggleSection}
+        action={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="icon-button size-[26px] rounded-md text-muted-foreground"
+            aria-label="New chat"
+            title="New chat on this computer"
+            disabled={pending}
+            onClick={createChat}
+          >
+            <Icon name="plus" />
+          </Button>
+        }
+      >
         {chats.map(renderWorkspace)}
         {!chats.length && <p className="empty-session-list">No chats yet</p>}
       </Section>

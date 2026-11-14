@@ -1392,3 +1392,12 @@ body.pane-resizing {
   width: 13px;
   height: 13px;
 }
+
+.section-header {
+  display: flex;
+  align-items: center;
+}
+.section-header .section-toggle {
+  flex: 1;
+  width: auto;
+}

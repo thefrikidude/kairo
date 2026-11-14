@@ -1305,6 +1305,7 @@ export function DesktopApp(): React.JSX.Element {
           setSettings(false);
           setStarting(true);
         }}
+        createChat={newChat}
         onSearch={() => setPalette("jump")}
         setWorkspaceDialog={setWorkspaceDialog}
         setOperationId={setOperationId}
