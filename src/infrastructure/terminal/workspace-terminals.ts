@@ -293,17 +293,9 @@ export class WorkspaceTerminals {
       }),
     );
     // Queue ordinary terminal input, just as a user types a command. The shell
-    // retains job control, its environment and cwd after the foreground CLI exits.
-    const shellName = basename(shell);
-    const prompt =
-      this.options.env?.PS1 || this.options.env?.PROMPT
-        ? ""
-        : shellName === "zsh"
-          ? "PROMPT='%/ %# '; "
-          : ["bash", "sh"].includes(shellName)
-            ? "PS1='\\w\\$ '; "
-            : "";
-    if (prompt || command) pty.write(`${prompt}${command ?? ""}\r`);
+    // retains job control, its environment and cwd after the foreground CLI exits. A plain shell
+    // gets no startup text at all, so it shows the user's own prompt and nothing else.
+    if (command) pty.write(`${command}\r`);
     this.emit("terminal:state", { ...record.info });
     return { ...record.info };
   }

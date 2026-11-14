@@ -1,3 +1,4 @@
+import { PanelClose } from "./panel-close.js";
 import { Input } from "./components/ui/input.js";
 import React, { memo, useEffect, useRef, useState } from "react";
 import type { WorkspaceEntry, FileSearch } from "../../shared/api.js";
@@ -11,11 +12,13 @@ export default memo(function FileBrowser({
   target,
   changes,
   revision,
+  onClose,
 }: {
   sessionId: string;
   target?: { path: string; nonce: number };
   changes: WorkspaceChange[];
   revision: number;
+  onClose(): void;
 }): React.JSX.Element {
   const [directories, setDirectories] = useState<Record<string, WorkspaceEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["."]));
@@ -153,6 +156,7 @@ export default memo(function FileBrowser({
             >
               Open in Cursor
             </button>
+            <PanelClose onClose={onClose} />
           </div>
           {reading && (
             <p className="empty-small" role="status">
@@ -174,6 +178,7 @@ export default memo(function FileBrowser({
         <>
           <div className="file-preview-toolbar">
             <strong>Project files</strong>
+            <PanelClose onClose={onClose} />
           </div>
           <Input
             className="file-search m-3 w-auto"

@@ -8,7 +8,6 @@ import type {
 } from "../../shared/api.js";
 import { Icon, KairoLogo } from "./chrome.js";
 import { Button } from "./components/ui/button.js";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs.js";
 import {
   closeLeaf,
   leaf,
@@ -1386,28 +1385,6 @@ export function DesktopApp(): React.JSX.Element {
       {contextOpen && !settings && accessId && workspace && (
         <aside className="workbench" id="workspace-panel" aria-label="Workspace files and review">
           {resizeHandle("context")}
-          <header className="workbench-header">
-            <Tabs
-              className="context-tab-list flex flex-1"
-              value={contextTab}
-              onValueChange={(tab) => setContextTab(tab as "files" | "changes" | "terminal")}
-            >
-              <TabsList aria-label="Workspace tabs">
-                <TabsTrigger value="files">Files</TabsTrigger>
-                <TabsTrigger value="changes">Review</TabsTrigger>
-                <TabsTrigger value="terminal">Terminal</TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="icon-button size-[30px] rounded-md text-muted-foreground"
-              aria-label="Close workspace panel"
-              onClick={() => setContextOpen(false)}
-            >
-              <Icon name="close" />
-            </Button>
-          </header>
           {contextTab === "terminal" && (
             <TerminalPanel
               shells={panelShells}
@@ -1434,6 +1411,7 @@ export function DesktopApp(): React.JSX.Element {
               }
               menuHandlers={menuHandlers}
               shellActions={(terminal) => shellActions(terminal)}
+              onClosePanel={() => setContextOpen(false)}
             />
           )}
           <Suspense fallback={<p className="empty-small">Loading workspace…</p>}>
@@ -1443,6 +1421,7 @@ export function DesktopApp(): React.JSX.Element {
                 sessionId={accessId}
                 changes={overview?.changes ?? []}
                 revision={revision}
+                onClose={() => setContextOpen(false)}
                 target={target?.workspaceId === workspace.id ? target : undefined}
               />
             ) : (
@@ -1456,6 +1435,7 @@ export function DesktopApp(): React.JSX.Element {
                 canReviewTask={!!workspace.baseCommit}
                 revision={revision}
                 onScope={setScope}
+                onClose={() => setContextOpen(false)}
               />
             )}
           </Suspense>

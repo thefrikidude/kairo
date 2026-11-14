@@ -2,6 +2,7 @@ import React from "react";
 import { Plus, X } from "lucide-react";
 import type { WorkspaceTerminal } from "../../shared/api.js";
 import { Button } from "./components/ui/button.js";
+import { PanelClose } from "./panel-close.js";
 import type { ContextAction } from "./context-menu.js";
 import { navigateTabs } from "./tab-navigation.js";
 import { cn } from "./lib/utils.js";
@@ -22,6 +23,7 @@ export function TerminalPanel({
   onClose,
   menuHandlers,
   shellActions,
+  onClosePanel,
 }: {
   shells: WorkspaceTerminal[];
   labels: Map<string, string>;
@@ -34,6 +36,7 @@ export function TerminalPanel({
   onClose(terminal: WorkspaceTerminal): void;
   menuHandlers(label: string, actions: ContextAction[]): React.HTMLAttributes<HTMLElement>;
   shellActions(terminal: WorkspaceTerminal): ContextAction[];
+  onClosePanel(): void;
 }): React.JSX.Element {
   return (
     <div className="terminal-panel flex min-h-0 flex-1 flex-col">
@@ -93,6 +96,7 @@ export function TerminalPanel({
         >
           <Plus />
         </Button>
+        <PanelClose onClose={onClosePanel} />
       </div>
       <div className="relative min-h-0 flex-1" ref={slotRef}>
         {!shells.length && (

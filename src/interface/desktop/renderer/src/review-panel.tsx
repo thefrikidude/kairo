@@ -1,3 +1,4 @@
+import { PanelClose } from "./panel-close.js";
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles, type CodeViewItem, type FileDiffMetadata } from "@pierre/diffs";
 import { Button } from "./components/ui/button.js";
@@ -69,6 +70,7 @@ export default memo(function ReviewPanel({
   canReviewTask,
   revision,
   onScope,
+  onClose,
 }: {
   sessionId: string;
   workspaceId: string;
@@ -78,6 +80,7 @@ export default memo(function ReviewPanel({
   canReviewTask: boolean;
   revision: number;
   onScope(scope: ReviewScope): void;
+  onClose(): void;
 }): React.JSX.Element {
   const changes = overview?.changes ?? [];
   const viewedKey = `kairo.review.viewed:${workspaceId}:${scope}`;
@@ -263,24 +266,27 @@ export default memo(function ReviewPanel({
   return (
     <section className="review-panel">
       <div className="review-scope">
-        <Select value={scope} onValueChange={(value) => onScope(value as ReviewScope)}>
-          <SelectTrigger
-            aria-label="Review scope"
-            className="h-9 w-full min-w-0 justify-between text-left text-[13px] [&>span]:truncate"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {canReviewTask && (
-              <SelectItem value="task" title="Everything changed since this task started">
-                Task changes
+        <div className="flex items-center gap-2">
+          <Select value={scope} onValueChange={(value) => onScope(value as ReviewScope)}>
+            <SelectTrigger
+              aria-label="Review scope"
+              className="h-9 w-full min-w-0 justify-between text-left text-[13px] [&>span]:truncate"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {canReviewTask && (
+                <SelectItem value="task" title="Everything changed since this task started">
+                  Task changes
+                </SelectItem>
+              )}
+              <SelectItem value="working" title="Staged and unstaged changes">
+                Working tree
               </SelectItem>
-            )}
-            <SelectItem value="working" title="Staged and unstaged changes">
-              Working tree
-            </SelectItem>
-          </SelectContent>
-        </Select>
+            </SelectContent>
+          </Select>
+          <PanelClose onClose={onClose} />
+        </div>
         <small>
           {overview?.branch ?? "Git changes"}
           {overview?.baseCommit ? ` · ${overview.baseCommit.slice(0, 8)}` : ""}
