@@ -833,7 +833,10 @@ export function DesktopApp(): React.JSX.Element {
   };
   // The Terminal tab shows this workspace's plain shells, one at a time.
   const panelShells =
-    state?.terminals.filter((t) => !t.sessionId && t.workspaceId === workspace?.id) ?? [];
+    // In number order, so a refilled "Terminal 2" sits between 1 and 3 rather than at the end.
+    (state?.terminals.filter((t) => !t.sessionId && t.workspaceId === workspace?.id) ?? []).sort(
+      (a, b) => (a.number ?? 0) - (b.number ?? 0),
+    );
   const panelShell =
     panelShells.find((t) => t.id === (workspace && panelChoice[workspace.id])) ?? panelShells[0];
   const toggleTerminal = () => {

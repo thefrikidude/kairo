@@ -91,6 +91,16 @@ async function foregroundCommand(shellPid: number): Promise<string | undefined> 
   return command ? command.slice(0, 300) : undefined;
 }
 
+/**
+ * The shell's environment. Kairo may itself have been started from Terminal.app, whose session
+ * variables make zsh print "Restored session: …" and write session files, so those are dropped.
+ */
+function terminalEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, TERM: "xterm-256color", SHELL_SESSIONS_DISABLE: "1" };
+  for (const key of ["TERM_SESSION_ID", "TERM_PROGRAM", "TERM_PROGRAM_VERSION"]) delete env[key];
+  return env;
+}
+
 /** Lazy native PTYs with bounded replay and renderer acknowledgements, independent of agent adapters. */
 export class WorkspaceTerminals {
   private records = new Map<string, Record>();
@@ -127,6 +137,23 @@ export class WorkspaceTerminals {
     record.info.named = true;
     this.emit("terminal:state", { ...record.info });
     return { ...record.info };
+  }
+  /** The lowest "Terminal N" number not taken by another unnamed shell, so gaps are refilled. */
+  private nextShellNumber(workspaceId: string): number {
+    const used = new Set(
+      [...this.records.values()]
+        .filter(
+          (record) =>
+            record.info.workspaceId === workspaceId &&
+            !record.info.sessionId &&
+            !record.info.named &&
+            record.info.number,
+        )
+        .map((record) => record.info.number),
+    );
+    let number = 1;
+    while (used.has(number)) number += 1;
+    return number;
   }
   /** Keeps `foreground` current while any terminal is open, so the UI can tell which agent runs. */
   private watchForeground(): void {
@@ -234,7 +261,7 @@ export class WorkspaceTerminals {
         cwd: directory,
         cols: 80,
         rows: 24,
-        env: { ...process.env, ...this.options.env, ...launch?.env, TERM: "xterm-256color" },
+        env: terminalEnvironment({ ...process.env, ...this.options.env, ...launch?.env }),
       },
     );
     let resolveExit!: () => void;
@@ -244,6 +271,7 @@ export class WorkspaceTerminals {
         workspaceId,
         directory,
         title: launch?.title ?? basename(shell),
+        number: launch?.sessionId ? undefined : this.nextShellNumber(workspaceId),
         sessionId: launch?.sessionId,
         pid: pty.pid,
         state: "running",

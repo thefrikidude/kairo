@@ -17,13 +17,13 @@ const shell = (id: string, workspaceId: string, extra: Partial<WorkspaceTerminal
     ...extra,
   }) as WorkspaceTerminal;
 
-test("shells are numbered per workspace and keep names the user chose", () => {
+test("shells show the number they opened with and keep the name the user chose", () => {
   const labels = shellLabels([
-    shell("a", "one"),
+    shell("a", "one", { number: 1 }),
     shell("agent", "one", { sessionId: "s" }),
-    shell("b", "one", { named: true, title: "Build server" }),
-    shell("c", "one"),
-    shell("d", "two"),
+    shell("b", "one", { number: 2, named: true, title: "Build server" }),
+    shell("c", "one", { number: 3 }),
+    shell("d", "two", { number: 1 }),
   ]);
   assert.equal(labels.get("a"), "Terminal 1");
   assert.equal(labels.has("agent"), false);

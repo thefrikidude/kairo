@@ -330,3 +330,60 @@ test("a terminal reports the command running in its foreground and clears it at 
   service.input(shell.id, "\x03");
   await waitUntil(() => service.list("one")[0].foreground === undefined);
 });
+
+test("shells keep their number when another closes and the next shell fills the gap", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-terminal-")));
+  const service = new WorkspaceTerminals(() => {}, {
+    shell: "/bin/zsh",
+    args: ["-f"],
+    env: { PS1: "KAIRO_READY> " },
+  });
+  t.after(async () => {
+    await service.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const shells = [];
+  for (let i = 0; i < 4; i += 1) shells.push(await service.create("one", root));
+  assert.deepEqual(
+    shells.map((shell) => shell.number),
+    [1, 2, 3, 4],
+  );
+  await service.closeTerminal(shells[1].id);
+  assert.deepEqual(
+    service.list("one").map((shell) => shell.number),
+    [1, 3, 4],
+  );
+  const refill = await service.create("one", root);
+  assert.equal(refill.number, 2);
+  // A renamed shell no longer holds its number; another workspace counts on its own.
+  service.rename(shells[2].id, "Build");
+  assert.equal((await service.create("one", root)).number, 3);
+  assert.equal((await service.create("two", root)).number, 1);
+});
+
+test("shells do not inherit Terminal.app session variables", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-terminal-")));
+  const saved = { id: process.env.TERM_SESSION_ID, program: process.env.TERM_PROGRAM };
+  process.env.TERM_SESSION_ID = "ABC";
+  process.env.TERM_PROGRAM = "Apple_Terminal";
+  const service = new WorkspaceTerminals(() => {}, {
+    shell: "/bin/zsh",
+    args: ["-f"],
+    env: { PS1: "KAIRO_READY> " },
+  });
+  t.after(async () => {
+    await service.close();
+    await rm(root, { recursive: true, force: true });
+    for (const [key, value] of [
+      ["TERM_SESSION_ID", saved.id],
+      ["TERM_PROGRAM", saved.program],
+    ] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const shell = await service.create("one", root);
+  await waitUntil(() => service.attach(shell.id).buffer.includes("KAIRO_READY>"));
+  service.input(shell.id, 'echo "<${TERM_SESSION_ID:-none}><${SHELL_SESSIONS_DISABLE}>"\r');
+  await waitUntil(() => service.attach(shell.id).buffer.includes("<none><1>"));
+});

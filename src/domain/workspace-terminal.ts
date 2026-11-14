@@ -12,6 +12,8 @@ export type WorkspaceTerminal = {
   title: string;
   /** True once the user has chosen the title, so it replaces the numbered default. */
   named?: boolean;
+  /** The N in "Terminal N": the lowest number not used by another unnamed shell in the workspace. */
+  number?: number;
   /** Command line of whatever runs in the foreground (for example an agent CLI); unset at an idle prompt. */
   foreground?: string;
   pid: number;
