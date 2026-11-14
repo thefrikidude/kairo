@@ -167,6 +167,13 @@ function registerIpc(): void {
     assertTrusted(event);
     return setZoom(zoomFactor + (typeof delta === "number" ? delta : 0));
   });
+  ipcMain.handle("app:open-external", async (event, link: unknown) => {
+    assertTrusted(event);
+    const url = new URL(String(link));
+    if (url.protocol !== "https:" && url.protocol !== "http:")
+      throw new Error("Only web links can be opened.");
+    await shell.openExternal(url.href);
+  });
   ipcMain.handle("zoom:reset", (event) => {
     assertTrusted(event);
     return setZoom(1);

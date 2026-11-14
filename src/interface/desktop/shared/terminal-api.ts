@@ -121,6 +121,8 @@ export interface TerminalDesktopApi {
   /** Page zoom is owned by the main process so menu shortcuts and the indicator agree. */
   onZoom(listener: (percent: number) => void): () => void;
   adjustZoom(delta: number): Promise<number>;
+  /** Opens an http(s) link from terminal output in the user's browser. */
+  openExternal(url: string): Promise<void>;
   resetZoom(): Promise<number>;
   directory(id: string, path?: string): Promise<WorkspaceEntry[]>;
   fileSnapshot(id: string, path: string): Promise<FileSnapshot>;

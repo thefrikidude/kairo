@@ -69,6 +69,7 @@ const api: DesktopApi = {
   onZoom: (listener) => subscribe("zoom:changed", listener),
   adjustZoom: (delta) => ipcRenderer.invoke("zoom:adjust", delta),
   resetZoom: () => ipcRenderer.invoke("zoom:reset"),
+  openExternal: (url) => ipcRenderer.invoke("app:open-external", url),
 };
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {

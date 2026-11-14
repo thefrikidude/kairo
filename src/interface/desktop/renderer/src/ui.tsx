@@ -70,7 +70,7 @@ export function DesktopApp(): React.JSX.Element {
     storedNumber("kairo-sidebar-width", 224, 176, 420),
   );
   const [contextWidth, setContextWidth] = useState(() =>
-    storedNumber("kairo-context-width", 420, 300, 800),
+    storedNumber("kairo-context-width", 420, 180, 1000),
   );
   const [contextOpen, setContextOpen] = useState(false);
   const [contextTab, setContextTab] = useState<"files" | "changes" | "terminal">("changes");
@@ -520,7 +520,7 @@ export function DesktopApp(): React.JSX.Element {
     const update = (value: number) =>
       kind === "sidebar"
         ? setSidebarWidth(Math.max(176, Math.min(420, value)))
-        : setContextWidth(Math.max(300, Math.min(800, value)));
+        : setContextWidth(Math.max(180, Math.min(1000, value)));
     return (
       <div
         className={`${kind === "sidebar" ? "sidebar-resize-handle" : "context-resize-handle"}`}
@@ -528,8 +528,8 @@ export function DesktopApp(): React.JSX.Element {
         tabIndex={0}
         aria-label={`Resize ${kind === "sidebar" ? "sidebar" : "workspace panel"}`}
         aria-orientation="vertical"
-        aria-valuemin={kind === "sidebar" ? 176 : 300}
-        aria-valuemax={kind === "sidebar" ? 420 : 800}
+        aria-valuemin={kind === "sidebar" ? 176 : 180}
+        aria-valuemax={kind === "sidebar" ? 420 : 1000}
         aria-valuenow={value}
         onKeyDown={(event) => {
           if (["ArrowLeft", "ArrowRight"].includes(event.key)) {

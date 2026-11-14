@@ -41,3 +41,14 @@ export function subscribeTerminalOutput(
     }
   };
 }
+
+/** What other parts of the UI may ask of a live terminal, keyed by terminal id. */
+export type TerminalControls = { clear(): void; focus(): void; find(): void };
+const controls = new Map<string, TerminalControls>();
+export function registerTerminalControls(id: string, value: TerminalControls): () => void {
+  controls.set(id, value);
+  return () => {
+    if (controls.get(id) === value) controls.delete(id);
+  };
+}
+export const terminalControls = (id: string): TerminalControls | undefined => controls.get(id);

@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import {
   NativeSessionReader,
   freshNativeCandidates,
@@ -710,7 +711,10 @@ export async function createTerminalDesktopRuntime(
           throw new Error("Restore an available workspace before opening a terminal.");
         pendingTerminalCreates.set(target.id, (pendingTerminalCreates.get(target.id) ?? 0) + 1);
         try {
-          return await terminals.create(target.id, target.directory, second === true);
+          // A chat belongs to no project, so its shell opens in the home folder rather than the
+          // chat's private scratch directory.
+          const directory = target.repositoryPath === chatsRoot() ? homedir() : target.directory;
+          return await terminals.create(target.id, directory, second === true);
         } finally {
           pendingTerminalCreates.set(target.id, (pendingTerminalCreates.get(target.id) ?? 1) - 1);
         }
