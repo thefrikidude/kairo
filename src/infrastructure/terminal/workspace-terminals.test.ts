@@ -304,3 +304,24 @@ test("renaming a terminal keeps the name, announces it and rejects blanks", asyn
   assert.throws(() => service.rename(shell.id, "   "), /Enter a name/);
   assert.throws(() => service.rename("missing", "x"), /no longer open/);
 });
+
+test("a terminal reports the command running in its foreground and clears it at the prompt", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kairo-terminal-")));
+  const service = new WorkspaceTerminals(() => {}, {
+    shell: "/bin/zsh",
+    args: ["-f"],
+    env: { PS1: "KAIRO_READY> " },
+    foregroundPollMs: 100,
+  });
+  t.after(async () => {
+    await service.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const shell = await service.create("one", root);
+  await waitUntil(() => service.attach(shell.id).buffer.includes("KAIRO_READY>"));
+  assert.equal(service.list("one")[0].foreground, undefined);
+  service.input(shell.id, "sleep 30\r");
+  await waitUntil(() => /\bsleep 30\b/.test(service.list("one")[0].foreground ?? ""));
+  service.input(shell.id, "\x03");
+  await waitUntil(() => service.list("one")[0].foreground === undefined);
+});

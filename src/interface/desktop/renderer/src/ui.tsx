@@ -27,6 +27,7 @@ import { DropZones, type DropZone } from "./drop-zones.js";
 import { X } from "lucide-react";
 import { ZoomIndicator } from "./zoom-indicator.js";
 import { WindowControls } from "./window-controls.js";
+import { detectAgent } from "./agent-detect.js";
 import { shellLabels } from "./terminal-label.js";
 import { TopbarActions } from "./topbar-actions.js";
 import { WorkspaceTitle } from "./workspace-title.js";
@@ -1181,17 +1182,23 @@ export function DesktopApp(): React.JSX.Element {
     const op = state?.operations.find((op) => op.workspaceId === item.id);
     const label = item.name ?? item.branch ?? name(item.directory);
     const activity = workspaceActivity(item.id);
-    const agents = [
+    const used = (state?.sessions ?? [])
+      .filter((session) => session.workspaceId === item.id)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((session) => session.agentId);
+    // What is running now wins: an agent started by hand in any terminal counts, and an agent that
+    // was quit no longer does. Before anything runs, fall back to the agents the sessions used.
+    const running = [
       ...new Set(
-        (state?.sessions ?? [])
-          .filter((session) => session.workspaceId === item.id)
-          .sort((a, b) => b.updatedAt - a.updatedAt)
-          .map(
-            (session) =>
-              state?.agents.find((agent) => agent.id === session.agentId)?.name ?? session.agentId,
-          ),
+        (state?.terminals ?? [])
+          .filter((t) => t.workspaceId === item.id && t.state === "running")
+          .map((t) => detectAgent(t.foreground, state?.agents ?? [], used)?.name)
+          .filter((agentName): agentName is string => !!agentName),
       ),
     ];
+    const agents = running.length
+      ? running
+      : [...new Set(used.map((id) => state?.agents.find((agent) => agent.id === id)?.name ?? id))];
     // Opening a workspace from the sidebar shows its agent, not whichever shell was last open.
     const lastSession = (state?.sessions ?? [])
       .filter((session) => session.workspaceId === item.id)

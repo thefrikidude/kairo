@@ -1,4 +1,5 @@
 import type { TerminalLaunch } from "../../domain/terminal-agent.js";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename } from "node:path";
@@ -72,12 +73,32 @@ function startupCommand(launch: TerminalLaunch): string {
   return command;
 }
 
+/**
+ * The command line of the terminal's foreground job, or undefined while its shell is idle. Asks `ps`
+ * for the shell's terminal foreground process group, since agents run as jobs of the shell.
+ */
+async function foregroundCommand(shellPid: number): Promise<string | undefined> {
+  if (process.platform === "win32") return undefined;
+  const ps = (args: string[]) =>
+    new Promise<string>((resolve) =>
+      execFile("ps", args, { timeout: 1_500 }, (error, stdout) =>
+        resolve(error ? "" : stdout.trim()),
+      ),
+    );
+  const group = Number(await ps(["-o", "tpgid=", "-p", String(shellPid)]));
+  if (!Number.isInteger(group) || group <= 0 || group === shellPid) return undefined;
+  const command = await ps(["-o", "args=", "-p", String(group)]);
+  return command ? command.slice(0, 300) : undefined;
+}
+
 /** Lazy native PTYs with bounded replay and renderer acknowledgements, independent of agent adapters. */
 export class WorkspaceTerminals {
   private records = new Map<string, Record>();
   private closed = false;
   private creating = new Map<string, Promise<WorkspaceTerminal>>();
   private pendingCreates = new Set<Promise<WorkspaceTerminal>>();
+  private foregroundTimer?: ReturnType<typeof setInterval>;
+  private polling = false;
   constructor(
     private readonly emit: (event: string, payload: unknown) => void,
     private readonly options: {
@@ -85,6 +106,8 @@ export class WorkspaceTerminals {
       args?: string[];
       env?: NodeJS.ProcessEnv;
       quietMs?: number;
+      /** How often to look at each terminal's foreground command. */
+      foregroundPollMs?: number;
     } = {},
   ) {}
   beginClose(): void {
@@ -104,6 +127,34 @@ export class WorkspaceTerminals {
     record.info.named = true;
     this.emit("terminal:state", { ...record.info });
     return { ...record.info };
+  }
+  /** Keeps `foreground` current while any terminal is open, so the UI can tell which agent runs. */
+  private watchForeground(): void {
+    if (this.foregroundTimer || this.closed) return;
+    this.foregroundTimer = setInterval(
+      () => void this.pollForeground(),
+      this.options.foregroundPollMs ?? 2_000,
+    );
+    this.foregroundTimer.unref();
+  }
+  private async pollForeground(): Promise<void> {
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      for (const record of [...this.records.values()]) {
+        if (record.info.state !== "running" || record.closing) continue;
+        const command = await foregroundCommand(record.pty.pid);
+        if (command === record.info.foreground || !this.records.has(record.info.id)) continue;
+        record.info.foreground = command;
+        this.emit("terminal:state", { ...record.info });
+      }
+      if (!this.records.size && this.foregroundTimer) {
+        clearInterval(this.foregroundTimer);
+        this.foregroundTimer = undefined;
+      }
+    } finally {
+      this.polling = false;
+    }
   }
   hasProcesses(directory: string, overlaps: (a: string, b: string) => boolean): boolean {
     return [...this.records.values()].some(
@@ -219,6 +270,7 @@ export class WorkspaceTerminals {
       remainingProcesses: [],
     };
     this.records.set(record.info.id, record);
+    this.watchForeground();
     record.disposers.push(
       pty.onData((data) => {
         record.buffer = (record.buffer + data).slice(-scrollbackLimit);
@@ -438,6 +490,8 @@ export class WorkspaceTerminals {
   }
   async close(): Promise<void> {
     this.beginClose();
+    if (this.foregroundTimer) clearInterval(this.foregroundTimer);
+    this.foregroundTimer = undefined;
     await Promise.allSettled([...this.pendingCreates]);
     const results = await Promise.allSettled(
       [...this.records.keys()].map((id) => this.closeTerminal(id)),
