@@ -27,7 +27,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm run build && node --test \"dist/**/*.test.js\"",
-    "desktop:dev": "node node_modules/electron/install.js && ELECTRON_ENTRY=out/main/index.js electron-vite dev",
+    "desktop:dev": "node node_modules/electron/install.js && ELECTRON_ENTRY=out/main/index.js electron-vite dev --watch",
     "desktop:build": "electron-vite build",
     "desktop:preview": "node node_modules/electron/install.js && ELECTRON_ENTRY=out/main/index.js electron-vite preview",
     "postinstall": "node scripts/prepare-terminal.cjs"
