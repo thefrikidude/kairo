@@ -72,7 +72,7 @@ function SplitView({
               role="separator"
               aria-orientation={horizontal ? "vertical" : "horizontal"}
               className={cn(
-                "pane-divider relative z-10 shrink-0 bg-border hover:bg-ring",
+                "pane-divider relative z-10 shrink-0 bg-border transition-colors duration-150 hover:bg-ring hover:delay-300",
                 horizontal ? "w-px cursor-col-resize" : "h-px cursor-row-resize",
               )}
               onPointerDown={drag(index)}

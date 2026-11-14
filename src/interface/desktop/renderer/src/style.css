@@ -180,13 +180,6 @@ button svg {
   width: 6px;
   cursor: col-resize;
   touch-action: none;
-  background: transparent;
-}
-.sidebar-resize-handle:hover,
-.sidebar-resize-handle:focus-visible,
-.sidebar-resize-handle.active {
-  background: color-mix(in srgb, var(--muted) 28%, transparent);
-  outline: 0;
 }
 .app-shell.sidebar-resizing,
 .app-shell.sidebar-resizing * {
@@ -588,10 +581,6 @@ button svg {
   z-index: 8;
   cursor: col-resize;
   touch-action: none;
-}
-.context-resize-handle:hover,
-.context-resize-handle:focus-visible {
-  background: var(--focus);
 }
 .session {
   gap: 8px;
@@ -1507,4 +1496,37 @@ body.pane-resizing {
   left: 2px !important;
   width: 6px !important;
   border-radius: 6px;
+}
+
+/* A wide, invisible grab area with a thin line that lights up once the pointer has rested on it. */
+.sidebar-resize-handle::before,
+.context-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.sidebar-resize-handle::before {
+  left: 2px;
+}
+.context-resize-handle::before {
+  left: 0;
+}
+.sidebar-resize-handle:hover::before,
+.context-resize-handle:hover::before {
+  background: var(--focus);
+  transition-delay: 350ms;
+}
+.sidebar-resize-handle:focus-visible,
+.context-resize-handle:focus-visible {
+  outline: 0;
+}
+.sidebar-resize-handle:focus-visible::before,
+.context-resize-handle:focus-visible::before,
+.sidebar-resize-handle.active::before {
+  background: var(--focus);
+  transition-delay: 0s;
 }
