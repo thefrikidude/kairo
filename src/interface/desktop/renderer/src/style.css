@@ -1056,6 +1056,9 @@ body.pane-resizing {
 }
 
 /* Terminal activity: pulsing = working, amber = waiting for you, ring = open and idle. */
+.session-status.status-none {
+  opacity: 0;
+}
 .session-status.status-open {
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--positive);
@@ -1219,10 +1222,6 @@ body.pane-resizing {
   width: 14px;
   height: 14px;
 }
-/* Multi-select in the sidebar */
-
-/* Settings screen navigation */
-
 .settings-content .empty-small {
   text-align: left;
   max-width: 640px;
@@ -1310,7 +1309,17 @@ body.pane-resizing {
 .terminal-host {
   height: 100%;
 }
-/* The terminal blends into the app: no black viewport behind it and a thin matching scrollbar. */
+/* xterm creates these elements itself, so they are styled here and not found by searching the source:
+   no black viewport behind the terminal and a thin matching scrollbar. */
+.terminal-host .xterm-viewport {
+  background-color: transparent !important;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.terminal-host .xterm-scrollable-element > .scrollbar.horizontal {
+  display: none;
+}
 .terminal-find {
   position: absolute;
   z-index: 6;
@@ -1399,6 +1408,13 @@ body.pane-resizing {
 .section-header {
   display: flex;
   align-items: center;
+}
+.section-header .section-action {
+  opacity: 0;
+}
+.section-header:hover .section-action,
+.section-header .section-action:focus-visible {
+  opacity: 1;
 }
 .section-header .section-toggle {
   flex: 1;

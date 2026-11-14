@@ -128,7 +128,7 @@ export function Sidebar({
           <Button
             variant="ghost"
             size="icon"
-            className="icon-button size-[26px] rounded-md text-muted-foreground"
+            className="icon-button section-action size-[26px] rounded-md text-muted-foreground"
             aria-label="Open project"
             title="Open a project folder"
             disabled={pending}
@@ -214,7 +214,7 @@ export function Sidebar({
           <Button
             variant="ghost"
             size="icon"
-            className="icon-button size-[26px] rounded-md text-muted-foreground"
+            className="icon-button section-action size-[26px] rounded-md text-muted-foreground"
             aria-label="New chat"
             title="New chat on this computer"
             disabled={pending}

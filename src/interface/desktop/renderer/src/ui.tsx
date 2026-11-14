@@ -652,12 +652,38 @@ export function DesktopApp(): React.JSX.Element {
       setRowMenu({ x: bounds.left, y: bounds.bottom, trigger, label, actions });
     },
   });
+  // Work that finished or failed while the workspace was not open stays marked until it is opened.
+  const [unseen, setUnseen] = useState<Record<string, "done" | "error">>({});
+  const seenTerminals = useRef(new Map<string, string>());
+  useEffect(() => {
+    const previous = seenTerminals.current;
+    const next = new Map<string, string>();
+    const marks: Record<string, "done" | "error"> = {};
+    for (const t of state?.terminals ?? []) {
+      const now = t.state === "exited" ? "exited" : t.activity;
+      next.set(t.id, now);
+      const before = previous.get(t.id);
+      if (!before || before === now || t.workspaceId === workspace?.id) continue;
+      if (now === "exited") marks[t.workspaceId] = t.exitCode ? "error" : "done";
+      else if (before === "working" && now === "idle") marks[t.workspaceId] ??= "done";
+    }
+    seenTerminals.current = next;
+    setUnseen((all) => {
+      const merged = { ...all };
+      for (const [id, mark] of Object.entries(marks)) if (merged[id] !== "error") merged[id] = mark;
+      if (workspace?.id && merged[workspace.id]) delete merged[workspace.id];
+      return Object.keys(merged).length === Object.keys(all).length &&
+        Object.entries(merged).every(([id, mark]) => all[id] === mark)
+        ? all
+        : merged;
+    });
+  }, [state?.terminals, workspace?.id]);
   const workspaceActivity = (id: string): keyof typeof activityLabel => {
     const open = state?.terminals.filter((t) => t.workspaceId === id && t.state === "running");
-    if (!open?.length) return "none";
-    if (open.some((t) => t.activity === "waiting")) return "waiting";
-    if (open.some((t) => t.activity === "working")) return "working";
-    return "idle";
+    if (open?.some((t) => t.activity === "waiting")) return "waiting";
+    if (open?.some((t) => t.activity === "working")) return "working";
+    if (unseen[id]) return unseen[id];
+    return open?.length ? "idle" : "none";
   };
   const projectActions = (path: string): ContextAction[] => [
     { label: "New workspace", disabled: pending, run: () => setWorkspaceDialog(path) },
