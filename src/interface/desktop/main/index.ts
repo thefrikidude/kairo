@@ -13,6 +13,7 @@ import {
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
+import { readSavedZoom, writeSavedZoom, ZOOM_MAX, ZOOM_MIN } from "./zoom-state.js";
 import { pathToFileURL } from "node:url";
 import { backendReadiness } from "./backend-readiness.js";
 
@@ -29,11 +30,11 @@ function send(channel: string, payload: unknown): void {
 }
 
 /** Zoom steps of 10%, within a range where the layout stays usable. */
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 2;
 let zoomFactor = 1;
 
-function setZoom(next: number): number {
+const zoomFile = () => join(app.getPath("userData"), "window-state.json");
+/** `announce` is false when restoring the saved zoom at launch, which should not pop the pill. */
+function setZoom(next: number, announce = true): number {
   zoomFactor = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)) * 10) / 10;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.setZoomFactor(zoomFactor);
@@ -44,7 +45,8 @@ function setZoom(next: number): number {
         y: Math.round(22 * zoomFactor - 7),
       });
   }
-  send("zoom:changed", Math.round(zoomFactor * 100));
+  if (announce) writeSavedZoom(zoomFile(), zoomFactor);
+  send("zoom:changed", { percent: Math.round(zoomFactor * 100), announce });
   return Math.round(zoomFactor * 100);
 }
 
@@ -297,8 +299,8 @@ function createWindow(): void {
     webPreferences,
   });
   loadRenderer(mainWindow);
-  // Chromium can remember a page's zoom; start from 100% so the renderer's idea of it is right.
-  mainWindow.webContents.once("did-finish-load", () => mainWindow?.webContents.setZoomFactor(1));
+  // Reopen at the zoom the app was quit at; this also tells the renderer which zoom it is at.
+  mainWindow.webContents.once("did-finish-load", () => setZoom(readSavedZoom(zoomFile()), false));
   mainWindow.on("closed", () => {
     mainWindow = undefined;
   });

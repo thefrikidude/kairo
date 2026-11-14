@@ -8,7 +8,7 @@ if (/Mac/.test(navigator.platform)) document.documentElement.classList.add("mac-
 
 // Electron places drag regions wrongly while the page is zoomed, which would swallow clicks on the
 // top bar's buttons, so the top bar stops acting as a drag area then.
-window.kairo.onZoom((percent) =>
+window.kairo.onZoom(({ percent }) =>
   document.documentElement.classList.toggle("page-zoomed", percent !== 100),
 );
 

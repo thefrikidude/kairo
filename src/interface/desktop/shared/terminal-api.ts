@@ -119,7 +119,7 @@ export interface TerminalDesktopApi {
   onRuntimeError(listener: (event: { error: string }) => void): () => void;
   onSessionsChanged(listener: () => void): () => void;
   /** Page zoom is owned by the main process so menu shortcuts and the indicator agree. */
-  onZoom(listener: (percent: number) => void): () => void;
+  onZoom(listener: (event: { percent: number; announce: boolean }) => void): () => void;
   adjustZoom(delta: number): Promise<number>;
   /** Opens an http(s) link from terminal output in the user's browser. */
   openExternal(url: string): Promise<void>;

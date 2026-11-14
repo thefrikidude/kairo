@@ -17,8 +17,10 @@ export function ZoomIndicator(): React.JSX.Element | null {
     }, 2500);
   };
   useEffect(() => {
-    const stop = window.kairo.onZoom((next) => {
+    const stop = window.kairo.onZoom(({ percent: next, announce }) => {
       setPercent(next);
+      // Restoring the saved zoom at launch updates the value without showing the pill.
+      if (!announce) return;
       setShown(true);
       schedule();
     });
